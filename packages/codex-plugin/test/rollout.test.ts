@@ -11,7 +11,7 @@ import {
   readRollout,
   usageFraction,
 } from "../src/rollout.ts";
-import { SUMMARY_PREFIX } from "../src/snapshot.ts";
+import { SUMMARY_PREFIX, snapshot } from "../src/snapshot.ts";
 import {
   assistantMessage,
   makeLab,
@@ -268,6 +268,31 @@ test("patchPaths names what an apply_patch body writes, and not what it deletes"
   );
   assert.deepEqual(paths, ["a.ts", "src/b.ts", "src/c.ts"]);
   assert.deepEqual(patchPaths("not a patch"), []);
+});
+
+test("an apply_patch move stops listing the source as a saved artifact", () => {
+  const rollout = mapRecords([
+    toolCall(
+      "apply_patch",
+      ["*** Begin Patch", "*** Update File: old.ts", "*** Move to: new.ts", "*** End Patch"].join(
+        "\n",
+      ),
+    ),
+    toolOutput("Applied."),
+  ]);
+  assert.deepEqual(rollout.messages[0]?.toolUses[0]?.paths, ["new.ts"]);
+  assert.deepEqual(rollout.messages[0]?.toolUses[0]?.removedPaths, ["old.ts"]);
+  assert.deepEqual(snapshot(rollout.messages).state.savedArtifacts, ["new.ts"]);
+});
+
+test("an apply_patch delete removes a previously saved artifact", () => {
+  const rollout = mapRecords([
+    toolCall("apply_patch", "*** Begin Patch\n*** Add File: gone.ts\n*** End Patch", "call_1"),
+    toolOutput("Applied.", "call_1"),
+    toolCall("apply_patch", "*** Begin Patch\n*** Delete File: gone.ts\n*** End Patch", "call_2"),
+    toolOutput("Applied.", "call_2"),
+  ]);
+  assert.deepEqual(snapshot(rollout.messages).state.savedArtifacts, []);
 });
 
 test("readRollout reads a file, and answers empty for one it cannot read", () => {

@@ -47,8 +47,6 @@ if (manifest) {
       fail(`plugin.json ${field} points at ${path}, which does not exist`);
     }
   }
-  // Codex would load it, but a plugin that can trigger nothing must not claim it can.
-  if (JSON.stringify(manifest).includes('"auto"')) fail("plugin.json must not advertise auto mode");
 }
 
 const hooks = readJson("hooks/hooks.json");

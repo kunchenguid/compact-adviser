@@ -19,6 +19,18 @@ const ENTRY = join(PACKAGE, "src", "hook.ts");
 /** A PATH with no Node on it at all, as Codex's rebuilt hook PATH can be. */
 const NO_NODE_PATH = "/nonexistent-bin";
 
+function fakeNode(picked: string, version = "22.18.0"): string {
+  return [
+    "#!/bin/sh",
+    'if [ "$1" = "-p" ]; then',
+    `  echo ${JSON.stringify(version)}`,
+    "  exit 0",
+    "fi",
+    `echo ${JSON.stringify(JSON.stringify({ picked }))}`,
+    "",
+  ].join("\n");
+}
+
 function launch(env: NodeJS.ProcessEnv) {
   return spawnSync("/bin/sh", [LAUNCHER, ENTRY], {
     input: JSON.stringify({ hook_event_name: "Stop" }),
@@ -75,7 +87,7 @@ test("an nvm Node whose path contains a space is still found", () => {
     const home = join(lab.home, "user home");
     const managed = join(home, ".nvm", "versions", "node", "v24.0.0", "bin");
     mkdirSync(managed, { recursive: true });
-    writeFileSync(join(managed, "node"), "#!/bin/sh\necho '{\"picked\":\"nvm-space\"}'\n");
+    writeFileSync(join(managed, "node"), fakeNode("nvm-space"));
     chmodSync(join(managed, "node"), 0o755);
     const result = launch({ PATH: NO_NODE_PATH, HOME: home, CODEX_HOME: lab.home });
     assert.equal(result.status, 0, result.stderr);
@@ -91,11 +103,30 @@ test("a Node on PATH is preferred over the fallback search", () => {
     const bin = join(lab.home, "bin");
     mkdirSync(bin, { recursive: true });
     // Not a real Node: it only has to prove which binary the launcher chose.
-    writeFileSync(join(bin, "node"), '#!/bin/sh\necho "{\\"picked\\":\\"path\\"}"\n');
+    writeFileSync(join(bin, "node"), fakeNode("path"));
     chmodSync(join(bin, "node"), 0o755);
     const result = launch({ PATH: bin, HOME: lab.home, CODEX_HOME: lab.home });
     assert.equal(result.status, 0, result.stderr);
     assert.equal(result.stdout.trim(), '{"picked":"path"}');
+  } finally {
+    lab.cleanup();
+  }
+});
+
+test("an under-minimum Node is skipped for one that can run the entry point", () => {
+  const lab = makeLab();
+  try {
+    const bin = join(lab.home, "bin");
+    mkdirSync(bin, { recursive: true });
+    writeFileSync(join(bin, "node"), fakeNode("old", "20.11.0"));
+    chmodSync(join(bin, "node"), 0o755);
+    const managed = join(lab.home, ".nvm", "versions", "node", "v24.0.0", "bin");
+    mkdirSync(managed, { recursive: true });
+    writeFileSync(join(managed, "node"), fakeNode("nvm", "24.0.0"));
+    chmodSync(join(managed, "node"), 0o755);
+    const result = launch({ PATH: bin, HOME: lab.home, CODEX_HOME: lab.home });
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.stdout.trim(), '{"picked":"nvm"}');
   } finally {
     lab.cleanup();
   }

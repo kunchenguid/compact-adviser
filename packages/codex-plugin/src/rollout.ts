@@ -104,14 +104,47 @@ function textOf(content: unknown): string {
     .join("\n");
 }
 
+/** Written and removed paths in an `apply_patch` body, including move sources as removed. */
+export function patchChanges(input: string): { written: string[]; removed: string[] } {
+  const written: string[] = [];
+  const removed: string[] = [];
+  let pending: string | undefined;
+  for (const line of input.split(/\r?\n/)) {
+    const add = /^\*\*\* Add File:\s*(.+?)\s*$/.exec(line);
+    const update = /^\*\*\* Update File:\s*(.+?)\s*$/.exec(line);
+    const del = /^\*\*\* Delete File:\s*(.+?)\s*$/.exec(line);
+    const move = /^\*\*\* Move to:\s*(.+?)\s*$/.exec(line);
+    if (add?.[1]) {
+      pending = add[1];
+      written.push(add[1]);
+      continue;
+    }
+    if (update?.[1]) {
+      pending = update[1];
+      written.push(update[1]);
+      continue;
+    }
+    if (del?.[1]) {
+      pending = undefined;
+      removed.push(del[1]);
+      continue;
+    }
+    if (move?.[1]) {
+      if (pending !== undefined) {
+        const idx = written.lastIndexOf(pending);
+        if (idx !== -1) written.splice(idx, 1);
+        removed.push(pending);
+        pending = undefined;
+      }
+      written.push(move[1]);
+    }
+  }
+  return { written, removed };
+}
+
 /** The file paths an `apply_patch` body writes: added, updated, and move destinations. */
 export function patchPaths(input: string): string[] {
-  const paths: string[] = [];
-  for (const line of input.split(/\r?\n/)) {
-    const match = /^\*\*\* (Add File|Update File|Move to):\s*(.+?)\s*$/.exec(line);
-    if (match?.[2]) paths.push(match[2]);
-  }
-  return paths;
+  return patchChanges(input).written;
 }
 
 /** The file paths a JSON tool-argument object names, for the tools that write one file. */
@@ -128,8 +161,8 @@ function argumentPaths(argumentsJson: string): string[] {
   return typeof candidate === "string" && candidate !== "" ? [candidate] : [];
 }
 
-function toolPaths(name: string, input: string): string[] {
-  return name === "apply_patch" ? patchPaths(input) : argumentPaths(input);
+function toolPaths(name: string, input: string): { written: string[]; removed: string[] } {
+  return name === "apply_patch" ? patchChanges(input) : { written: argumentPaths(input), removed: [] };
 }
 
 function processExitCode(value: unknown): number | undefined {
@@ -218,7 +251,12 @@ function consumeResponseItem(
     const name = typeof payload.name === "string" ? payload.name : "tool";
     const raw = payload.type === "custom_tool_call" ? payload.input : payload.arguments;
     const input = typeof raw === "string" ? raw : "";
-    const use: ToolUseLike = { tool: name, paths: toolPaths(name, input) };
+    const changes = toolPaths(name, input);
+    const use: ToolUseLike = {
+      tool: name,
+      paths: changes.written,
+      ...(changes.removed.length > 0 ? { removedPaths: changes.removed } : {}),
+    };
     messages.push({ role: "assistant", text: "", toolUses: [use] });
     if (typeof payload.call_id === "string") pending.set(payload.call_id, use);
     return;

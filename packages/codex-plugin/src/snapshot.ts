@@ -12,6 +12,8 @@ export interface ToolUseLike {
   tool: string;
   /** Workspace paths this call wrote, already extracted from the host's tool input. */
   paths?: readonly string[];
+  /** Workspace paths this call deleted or moved away from. */
+  removedPaths?: readonly string[];
   text?: string;
   isError?: true;
 }
@@ -213,6 +215,10 @@ export function snapshot(
   for (const m of messages) {
     for (const use of m.toolUses) {
       if (use.isError || !WRITE_TOOLS.has(use.tool)) continue;
+      for (const path of use.removedPaths ?? []) {
+        if (sensitivePath.test(path)) continue;
+        artifacts.delete(path);
+      }
       for (const path of toolPaths(use)) {
         if (sensitivePath.test(path)) continue;
         artifacts.delete(path);

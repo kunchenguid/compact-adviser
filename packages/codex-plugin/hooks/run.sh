@@ -12,27 +12,46 @@ set -u
 
 entry=$1
 
+node_is_usable() {
+  candidate=$1
+  [ -x "${candidate}" ] || return 1
+  raw=$("${candidate}" -p "process.versions.node" 2>/dev/null) || return 1
+  ver=${raw#v}
+  major=${ver%%.*}
+  rest=${ver#*.}
+  minor=${rest%%.*}
+  case ${major} in *[!0-9]* | "") return 1 ;; esac
+  case ${minor} in *[!0-9]* | "") minor=0 ;; esac
+  if [ "${major}" -gt 22 ]; then return 0; fi
+  if [ "${major}" -eq 22 ] && [ "${minor}" -ge 18 ]; then return 0; fi
+  return 1
+}
+
+accept_node() {
+  node_is_usable "$1" || return 1
+  printf '%s' "$1"
+  return 0
+}
+
 find_node() {
-  if [ -n "${COMPACT_ADVISER_NODE:-}" ] && [ -x "${COMPACT_ADVISER_NODE}" ]; then
-    printf '%s' "${COMPACT_ADVISER_NODE}"
-    return 0
+  if [ -n "${COMPACT_ADVISER_NODE:-}" ]; then
+    accept_node "${COMPACT_ADVISER_NODE}" && return 0
   fi
   if resolved=$(command -v node 2>/dev/null); then
-    printf '%s' "${resolved}"
-    return 0
+    accept_node "${resolved}" && return 0
   fi
   # The usual places a version manager or package manager puts it, newest nvm release first.
   for candidate in \
     "${HOME:-}"/.volta/bin/node \
     "${HOME:-}"/.local/bin/node; do
-    [ -x "${candidate}" ] && printf '%s' "${candidate}" && return 0
+    accept_node "${candidate}" && return 0
   done
   newest=
   newest_major=-1
   newest_minor=-1
   newest_patch=-1
   for candidate in "${HOME:-}/.nvm/versions/node/"*/bin/node; do
-    [ -x "${candidate}" ] || continue
+    node_is_usable "${candidate}" || continue
     version=${candidate%/bin/node}
     version=${version##*/}
     version=${version#v}
@@ -70,7 +89,7 @@ find_node() {
     /opt/homebrew/bin/node \
     /usr/local/bin/node \
     /usr/bin/node; do
-    [ -x "${candidate}" ] && printf '%s' "${candidate}" && return 0
+    accept_node "${candidate}" && return 0
   done
   return 1
 }
