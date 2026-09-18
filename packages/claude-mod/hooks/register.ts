@@ -44,7 +44,13 @@ import {
   qualifies,
   requestBody,
 } from "../lib/judge.ts";
-import { requestLogLine, requestLogPath } from "../lib/log.ts";
+import {
+  errorLogLine,
+  loggedJudgeErrorKind,
+  requestLogLine,
+  requestLogPath,
+  responseLogLine,
+} from "../lib/log.ts";
 import { snapshot } from "../lib/snapshot.ts";
 import {
   backoff,
@@ -148,6 +154,17 @@ async function logHome($: EngineInterface): Promise<string> {
   return ((await $.env.get("HOME")) ?? (await $.session.cwd())).replace(/[\\/]+$/, "");
 }
 
+async function appendTypeSafeLog($: EngineInterface, line: string): Promise<void> {
+  const path = requestLogPath(await logHome($));
+  let existing = "";
+  try {
+    existing = await $.fs.read(path);
+  } catch {
+    existing = "";
+  }
+  await $.fs.write(path, `${existing}${line}`);
+}
+
 function notice($: EngineInterface, message: string): void {
   if (diagnostic === message) return;
   diagnostic = message;
@@ -212,16 +229,11 @@ async function judgeCheckpoint($: EngineInterface, epoch: number): Promise<void>
     if (view.conversationTokens <= 20000) return;
     const fingerprint = await checkpointKey(view.checkpointText);
     if ((await loadState($)).state.lastHintKey === fingerprint) return;
+    let loggedBody: string | undefined;
     if (initial.logRequests) {
       try {
-        const path = requestLogPath(await logHome($));
-        let existing = "";
-        try {
-          existing = await $.fs.read(path);
-        } catch {
-          existing = "";
-        }
-        await $.fs.write(path, `${existing}${requestLogLine(requestBody(view.state))}`);
+        loggedBody = requestBody(view.state);
+        await appendTypeSafeLog($, requestLogLine(loggedBody));
       } catch {
         // Request logging must not replace or delay the judgment.
       }
@@ -236,6 +248,13 @@ async function judgeCheckpoint($: EngineInterface, epoch: number): Promise<void>
       });
     } catch (error) {
       if (epoch !== generation) return;
+      if (initial.logRequests) {
+        try {
+          await appendTypeSafeLog($, errorLogLine(loggedJudgeErrorKind(error), loggedBody));
+        } catch {
+          // Error logging must not replace backoff.
+        }
+      }
       const { key, state } = await loadState($);
       await $.store.set(key, backoff(state, await $.clock.now()));
       notice($, judgeFailureMessage(error));
@@ -246,6 +265,16 @@ async function judgeCheckpoint($: EngineInterface, epoch: number): Promise<void>
     const { key, state: current } = await loadState($);
     const now = await $.clock.now();
     const { context } = await $.session.usage();
+    if (initial.logRequests) {
+      try {
+        await appendTypeSafeLog(
+          $,
+          responseLogLine(loggedBody ?? requestBody(view.state), result, usageFraction(context)),
+        );
+      } catch {
+        // Response logging must not replace the gate decision.
+      }
+    }
     if (
       JSON.stringify(latest) !== JSON.stringify(initial) ||
       !(await eligible($, latest, current, context.tokens, now))

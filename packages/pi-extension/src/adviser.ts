@@ -22,7 +22,7 @@ import {
   requestBody,
 } from "./judge.ts";
 import { promptSecret } from "./key-input.ts";
-import { appendRequestLog, requestLogPath } from "./log.ts";
+import { appendErrorLog, appendRequestLog, appendResponseLog, requestLogPath } from "./log.ts";
 import { promptMinimum } from "./minimum-input.ts";
 import {
   cooldownReason,
@@ -169,9 +169,11 @@ export function installAdviser(pi: ExtensionAPI, options: Options): void {
     if (request || eligible(ctx, config, state) === undefined) return;
     const view = snapshot(ctx, [key(), savedApiKey(store)]);
     if (view.conversationTokens <= 20000 || view.checkpointKey === state.lastHintKey) return;
+    let loggedBody: string | undefined;
     if (config.logRequests) {
       try {
-        appendRequestLog(options.agentDir, requestBody(view.state));
+        loggedBody = requestBody(view.state);
+        appendRequestLog(options.agentDir, loggedBody);
       } catch {
         // Request logging must not replace or delay the judgment.
       }
@@ -186,6 +188,18 @@ export function installAdviser(pi: ExtensionAPI, options: Options): void {
     try {
       const result = await evaluate(view.state, key()?.trim() ?? "", controller.signal);
       if (!current()) return;
+      if (config.logRequests) {
+        try {
+          appendResponseLog(
+            options.agentDir,
+            loggedBody ?? requestBody(view.state),
+            result,
+            usageFraction(ctx),
+          );
+        } catch {
+          // Response logging must not replace the gate decision.
+        }
+      }
       // No await between this final cross-session configuration/state check and compact().
       const latest = store.read();
       if (JSON.stringify(latest) !== configIdentity || eligible(ctx, latest, state) === undefined)
@@ -236,6 +250,13 @@ export function installAdviser(pi: ExtensionAPI, options: Options): void {
       }
     } catch (error) {
       if (!current()) return;
+      if (config.logRequests) {
+        try {
+          appendErrorLog(options.agentDir, error, loggedBody);
+        } catch {
+          // Error logging must not replace backoff.
+        }
+      }
       const failures = Math.min(state.failures + 1, 6);
       persist({ ...state, failures, retryAfter: now() + Math.min(300000, 5000 * 2 ** failures) });
       notice(

@@ -176,7 +176,7 @@ System prompts, hidden reasoning, images, environment variables, and complete tr
 The saved-key guarantee is defined in the repository [security policy](../../SECURITY.md). Filtering of other known key patterns and obvious sensitive-file results (`.env`, `*.pem`, `id_rsa`, ...) is **best-effort**, not comprehensive secret detection.
 Installing this package is consent to send eligible checkpoint context to TypeSafe; uninstall it or set mode Off if that is not acceptable.
 
-Optional request logging is off by default. Enable **Log TypeSafe requests** from `/compact-adviser` (or `/config`) to append each judgment body to `~/.claude/compact-adviser-requests.jsonl`. The log is the redacted request body plus questions; it never includes the API key.
+Optional request logging is off by default. Enable **Log TypeSafe requests** from `/compact-adviser` (or `/config`) to append each judgment request and its Jev response (answers, score, usage, floor, qualifies) to `~/.claude/compact-adviser-requests.jsonl`. The log never includes the API key or other raw secrets.
 
 Requests are capped at 32,000 serialized UTF-8 bytes, about an 8k-token budget; oversized requests are refused locally.
 Published Jev pricing during development was $0.042 per million input tokens with free output, so an 8k-token request is about $0.0003.

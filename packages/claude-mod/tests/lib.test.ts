@@ -27,6 +27,13 @@ import {
   USAGE_LOOSE_AT,
   USAGE_STRICT_UNTIL,
 } from "../lib/judge.ts";
+import {
+  errorLogLine,
+  loggedJudgeErrorKind,
+  requestLogId,
+  requestLogLine,
+  responseLogLine,
+} from "../lib/log.ts";
 import { RECENT_TAIL_MESSAGES, SUMMARY_PREFIX, snapshot } from "../lib/snapshot.ts";
 import {
   backoff,
@@ -555,5 +562,50 @@ describe("jev client", () => {
     expect(qualifies(j({ completed: 1, handsOn: 0 }), 0.89)).toBe(false);
     expect(qualifies(j({ completed: 1, handsOn: 0 }), 0.9)).toBe(true);
     expect(qualifies(j({ completed: 0.2, handsOn: 1 }), 1)).toBe(false);
+  });
+
+  test("TypeSafe log lines record the gate decision without secrets", () => {
+    const secret = "tsk-fixture-must-not-leave";
+    const body = requestBody({ note: "ok" });
+    const judgment = parseJudgment(jevAnswer({ completed: 0.93, handsOn: 0.97 }));
+    const at = "2026-09-18T00:00:00.000Z";
+    const usage = 0.2;
+    const request = JSON.parse(requestLogLine(body, at));
+    const response = JSON.parse(responseLogLine(body, judgment, usage, at));
+    const failure = JSON.parse(errorLogLine("timeout", body, at));
+    expect(request.kind).toBe("request");
+    expect(request.id).toBe(requestLogId(body));
+    expect(request.body.model).toBe("jev-latest");
+    expect(response.kind).toBe("response");
+    expect(response.id).toBe(request.id);
+    expect(response.answers.done.choice).toBe("finished");
+    expect(response.answers.done.probabilities).toEqual(judgment.done.probabilities);
+    expect(response.answers.shape.choice).toBe("hands_on");
+    expect(response.answers.shape.probabilities).toEqual(judgment.shape.probabilities);
+    expect(response.score).toBe(score(judgment));
+    expect(response.usage).toBe(usage);
+    expect(response.floor).toBe(floorFor(usage));
+    expect(response.qualifies).toBe(qualifies(judgment, usage));
+    expect(failure.kind).toBe("error");
+    expect(failure.id).toBe(request.id);
+    expect(failure.error).toEqual({ kind: "timeout" });
+    const unknownUsage = JSON.parse(responseLogLine(body, judgment, Number.NaN, at));
+    expect(unknownUsage.usage).toBe(null);
+    expect(unknownUsage.floor).toBe(FLOOR_MAX);
+    expect(unknownUsage.qualifies).toBe(qualifies(judgment, Number.NaN));
+    const auth = new JudgeError("authentication");
+    expect(loggedJudgeErrorKind(auth)).toBe("authentication");
+    expect(loggedJudgeErrorKind(new Error(`boom ${secret}`))).toBe("unavailable");
+    for (const line of [
+      requestLogLine(body, at),
+      responseLogLine(body, judgment, usage, at),
+      errorLogLine(loggedJudgeErrorKind(auth), body, at),
+      errorLogLine(loggedJudgeErrorKind(new Error(`boom ${secret}`)), body, at),
+    ]) {
+      expect(line.includes(secret)).toBe(false);
+      expect(line.includes("Authorization")).toBe(false);
+      expect(line.includes("Bearer")).toBe(false);
+      expect(line.includes(auth.message)).toBe(false);
+    }
   });
 });

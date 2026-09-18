@@ -1,7 +1,13 @@
 import assert from "node:assert/strict";
 import { existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import test from "node:test";
-import { JUDGE_UNAVAILABLE_MESSAGE, parseJudgment, requestBody } from "../src/judge.ts";
+import {
+  JUDGE_UNAVAILABLE_MESSAGE,
+  JudgeError,
+  parseJudgment,
+  requestBody,
+  score,
+} from "../src/judge.ts";
 import { requestLogPath } from "../src/log.ts";
 import { restoreState } from "../src/state.ts";
 import { apiResponse, assistant, flush, harness, success, toolResult } from "./helpers.ts";
@@ -381,9 +387,80 @@ test("TypeSafe request logging is off by default and writes a redacted body with
   await on.fire("agent_settled");
   assert.equal(on.calls, 1);
   const logged = readFileSync(requestLogPath(on.dir), "utf8");
-  assert.ok(logged.includes("jev-latest"));
+  const lines = logged
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line));
+  assert.equal(lines.length, 2);
+  assert.equal(lines[0].kind, "request");
+  assert.equal(lines[0].body.model, "jev-latest");
+  assert.equal(lines[1].kind, "response");
+  assert.equal(lines[1].id, lines[0].id);
+  assert.equal(lines[1].answers.done.choice, "finished");
+  assert.equal(typeof lines[1].answers.done.probabilities.finished, "number");
+  assert.equal(typeof lines[1].answers.shape.probabilities.hands_on, "number");
+  assert.equal(lines[1].score, score(success()));
+  assert.equal(typeof lines[1].usage, "number");
+  assert.equal(typeof lines[1].floor, "number");
+  assert.equal(lines[1].qualifies, true);
   assert.ok(logged.includes("Finish and save the report"));
   assert.ok(!logged.includes("test-key"));
+});
+
+test("a silent no-qualify turn still logs the Jev response", async (t) => {
+  const judgment = parseJudgment(apiResponse(0.99, 0.01));
+  const h = harness(t, async () => judgment);
+  h.enable();
+  h.store.update({ logRequests: true });
+  h.tokens = 45000;
+  await h.fire("agent_settled");
+  assert.equal(h.calls, 1);
+  assert.ok(!h.notifications.some((x) => x.endsWith("Run /compact to save tokens.")));
+  const lines = readFileSync(requestLogPath(h.dir), "utf8")
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line));
+  assert.equal(lines[1].kind, "response");
+  assert.equal(lines[1].qualifies, false);
+  assert.equal(lines[1].score, score(judgment));
+  assert.ok(!JSON.stringify(lines).includes("test-key"));
+});
+
+test("a judgment failure logs the error kind without the key", async (t) => {
+  const secret = "tsk-error-must-not-leave";
+  const h = harness(t, async () => {
+    throw new Error(`TypeSafe exploded ${secret}`);
+  });
+  h.install("0.82.0", secret);
+  h.enable();
+  h.store.update({ logRequests: true });
+  await h.fire("agent_settled");
+  assert.equal(h.calls, 1);
+  const lines = readFileSync(requestLogPath(h.dir), "utf8")
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line));
+  assert.equal(lines[0].kind, "request");
+  assert.equal(lines[1].kind, "error");
+  assert.equal(lines[1].id, lines[0].id);
+  assert.deepEqual(lines[1].error, { kind: "unavailable" });
+  const logged = readFileSync(requestLogPath(h.dir), "utf8");
+  assert.ok(!logged.includes(secret));
+});
+
+test("a JudgeError logs its kind and not its message", async (t) => {
+  const h = harness(t, async () => {
+    throw new JudgeError("timeout");
+  });
+  h.enable();
+  h.store.update({ logRequests: true });
+  await h.fire("agent_settled");
+  const lines = readFileSync(requestLogPath(h.dir), "utf8")
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line));
+  assert.deepEqual(lines[1].error, { kind: "timeout" });
+  assert.equal(JSON.stringify(lines[1]).includes("timed out"), false);
 });
 
 test("a saved key in a compact-adviser.json read is absent from the request body and log", async (t) => {

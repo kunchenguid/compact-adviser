@@ -9,8 +9,8 @@ const expected = [
   "hooks: session.start, turn.start, turn.complete, session.compact, command.run{command=compact-adviser}, config.describe{key=compact-adviser.typesafeApiKey}, ui.render{component=Pane}",
   "env reads: CLAUDE_CODE_ENABLE_FUNCTION_HOOKS, COMPACT_ADVISER_TEST_ENDPOINT, HOME, TYPESAFE_API_KEY",
   "env writes: nothing",
-  "$.fs.read (via judgeCheckpoint, resolvedKey)",
-  "$.fs.write (via judgeCheckpoint)",
+  "$.fs.read (via appendTypeSafeLog, resolvedKey)",
+  "$.fs.write (via appendTypeSafeLog)",
   "Validation passed",
 ];
 const forbidden = ["process.run", "env.set", "prompt.submit", "prompt.fill", "tool.call", "model."];

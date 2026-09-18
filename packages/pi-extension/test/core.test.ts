@@ -23,6 +23,13 @@ import {
   USAGE_LOOSE_AT,
   USAGE_STRICT_UNTIL,
 } from "../src/judge.ts";
+import {
+  errorLogLine,
+  loggedJudgeErrorKind,
+  requestLogId,
+  requestLogLine,
+  responseLogLine,
+} from "../src/log.ts";
 import { apiResponse, assistant, harness, temp, toolResult } from "./helpers.ts";
 
 test("config defaults, atomic persistence, field merging, contention and invalid files", (t) => {
@@ -439,4 +446,50 @@ test("the request deadline aborts work instead of delaying the next turn", async
     (error: unknown) => error instanceof JudgeError && error.kind === "timeout",
   );
   assert.equal(aborted, true);
+});
+
+test("TypeSafe log lines record the gate decision without secrets", () => {
+  const secret = "tsk-fixture-must-not-leave";
+  const body = requestBody({ note: "ok" });
+  const judgment = parseJudgment(apiResponse(0.93, 0.97));
+  const at = "2026-09-18T00:00:00.000Z";
+  const usage = 0.2;
+  const request = JSON.parse(requestLogLine(body, at));
+  const response = JSON.parse(responseLogLine(body, judgment, usage, at));
+  const failure = JSON.parse(errorLogLine("timeout", body, at));
+  assert.equal(request.kind, "request");
+  assert.equal(request.id, requestLogId(body));
+  assert.equal(request.at, at);
+  assert.equal(request.body.model, "jev-latest");
+  assert.equal(response.kind, "response");
+  assert.equal(response.id, request.id);
+  assert.equal(response.answers.done.choice, "finished");
+  assert.deepEqual(response.answers.done.probabilities, judgment.done.probabilities);
+  assert.equal(response.answers.shape.choice, "hands_on");
+  assert.deepEqual(response.answers.shape.probabilities, judgment.shape.probabilities);
+  assert.equal(response.score, score(judgment));
+  assert.equal(response.usage, usage);
+  assert.equal(response.floor, floorFor(usage));
+  assert.equal(response.qualifies, qualifies(judgment, usage));
+  assert.equal(failure.kind, "error");
+  assert.equal(failure.id, request.id);
+  assert.deepEqual(failure.error, { kind: "timeout" });
+  const unknownUsage = JSON.parse(responseLogLine(body, judgment, Number.NaN, at));
+  assert.equal(unknownUsage.usage, null);
+  assert.equal(unknownUsage.floor, FLOOR_MAX);
+  assert.equal(unknownUsage.qualifies, qualifies(judgment, Number.NaN));
+  const auth = new JudgeError("authentication");
+  assert.equal(loggedJudgeErrorKind(auth), "authentication");
+  assert.equal(loggedJudgeErrorKind(new Error(`boom ${secret}`)), "unavailable");
+  for (const line of [
+    requestLogLine(body, at),
+    responseLogLine(body, judgment, usage, at),
+    errorLogLine(loggedJudgeErrorKind(auth), body, at),
+    errorLogLine(loggedJudgeErrorKind(new Error(`boom ${secret}`)), body, at),
+  ]) {
+    assert.equal(line.includes(secret), false);
+    assert.equal(line.includes("Authorization"), false);
+    assert.equal(line.includes("Bearer"), false);
+    assert.equal(line.includes(auth.message), false);
+  }
 });
