@@ -10,7 +10,7 @@ No other host's runtime, service, or configuration is required; this package nev
 
 ## Requirements and status
 
-- Claude Code **2.1.274**, the verified target.
+- Claude Code **2.1.275**, the verified target (2.1.274 or newer).
 The mods (function-hooks) plugin API is **early access**: Claude Code says it "may change between releases without notice", and it is not in the public documentation.
 Re-run `npm run check` and the live regression after every Claude Code update.
 - `CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1` in Claude Code's launch environment.
@@ -26,20 +26,23 @@ No build step or runtime dependency is needed: Claude Code runs the TypeScript h
 
 Point Claude Code at this directory, not the monorepo root or the Pi package.
 
-For one session:
+From the monorepo root, install through the same-repo marketplace (the verified every-session path):
+
+```sh
+claude plugin marketplace add "$PWD"
+claude plugin install compact-adviser@compact-adviser
+```
+
+and set `CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1` wherever you launch Claude Code.
+The GitHub form is `claude plugin marketplace add kunchenguid/compact-adviser`.
+
+For one session without installing:
 
 ```sh
 CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1 claude --plugin-dir "$PWD/packages/claude-mod"
 ```
 
-For every session, link it into your user skills directory, which Claude Code adopts as the plugin `compact-adviser@skills-dir`:
-
-```sh
-ln -s "$PWD/packages/claude-mod" ~/.claude/skills/compact-adviser
-```
-
-and set `CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1` wherever you launch Claude Code.
-The live regression exercises the `--plugin-dir` path; the skills-directory adoption is Claude Code's documented `claude plugin init` convention and was not separately exercised.
+The live regression exercises the `--plugin-dir` path; marketplace install was verified separately against Claude Code 2.1.275.
 
 ## First-run setup
 
@@ -128,7 +131,7 @@ A new turn, any compaction, or a settings save invalidates an outstanding judgme
 
 ## The judgment and its limits
 
-One HTTPS request to `https://api.typesafe.ai/v1/systemone`, through Claude Code's host fetch, uses `jev-latest` and the Pi extension's two independent typed factors:
+One HTTPS request to `https://api.typesafe.ai/v1/systemone`, through Claude Code's host fetch, uses `jev-latest` and the Pi extension's one typed factor:
 
 1. Completed checkpoint, still in progress, or unclear.
 

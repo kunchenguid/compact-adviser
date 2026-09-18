@@ -405,9 +405,7 @@ describe("automatic mode", () => {
     ]);
     expect(w.journal.statuses).toContain("compacting at a checkpoint (experimental auto)…");
     expect(w.journal.toasts).toContain("compaction completed: 60,000 to 3,300 tokens.");
-    expect(w.journal.logs).toEqual([
-      "compact-adviser: automatic compaction completed: 60,000 to 3,300 tokens.",
-    ]);
+    expect(w.journal.logs).toEqual(["automatic compaction completed: 60,000 to 3,300 tokens."]);
     expect(w.journal.statuses.at(-1)).toBeUndefined();
     expect(stored(w).compacted).toBe(true);
     expect(stored(w).completed).toBe(0);
@@ -582,7 +580,7 @@ describe("commands", () => {
     await $.command.run(commandRun("status"));
     const line = w.journal.logs.at(-1) ?? "";
     expect(line).toBe(
-      "compact-adviser: Mode: hint. Minimum: 40,000 tokens. Context: 60,000. Key: present. No cooldown; semantic checks still apply. Claude Code auto-compacts at 167,000 tokens. Request log: off. Settings: /config (compact-adviser rows) and /compact-adviser.",
+      "Mode: hint. Minimum: 40,000 tokens. Context: 60,000. Key: present. No cooldown; semantic checks still apply. Claude Code auto-compacts at 167,000 tokens. Request log: off. Settings: /config (compact-adviser rows) and /compact-adviser.",
     );
     expect(line.includes(KEY)).toBe(false);
   });

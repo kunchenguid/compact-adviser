@@ -267,8 +267,8 @@ async function judgeCheckpoint($: EngineInterface, epoch: number): Promise<void>
         ? `compaction completed: ${formatTokens(tokens.before)} to ${formatTokens(tokens.after)} tokens.`
         : "compaction completed.";
     // The dim transcript line (never sent to the model) records the automatic action even
-    // when the host throttles the toast.
-    $.ui.log(`compact-adviser: automatic ${completed}`);
+    // when the host throttles the toast. Claude Code prefixes $.ui.log with the plugin name.
+    $.ui.log(`automatic ${completed}`);
     $.ui.toast(completed);
     clearStatus($);
   } finally {
@@ -543,7 +543,8 @@ export const register: Register = (on, options) => {
       } else if (command === "threshold" && value) {
         await changeMinimum($, value);
       } else if (command === "status" && !value) {
-        $.ui.log(`compact-adviser: ${await statusText($)}`);
+        // Claude Code prefixes $.ui.log with the plugin name; do not repeat it.
+        $.ui.log(await statusText($));
       } else if ((command === "snooze" || command === "dismiss") && !value) {
         await snoozeOrDismiss($, command);
       } else {
