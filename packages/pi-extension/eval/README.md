@@ -9,7 +9,8 @@ minimal fake `ExtensionContext`, and production `judge()` / `qualifies()` from
 
 **This directory ships the harness and the rubric, not a dataset.** Session
 transcripts, checkpoints, worksheets, gold notes, results, and ablation output
-stay in gitignored `eval/local/`. Do not commit them.
+stay in gitignored `eval/local/`. Do not commit them. Aggregate per-stratum
+metrics for the shipped judge are in [`measured-results.md`](measured-results.md).
 
 ## Setup
 
@@ -61,7 +62,7 @@ API key.
 | `eval/build.ts` | Spread-sample checkpoints and write worksheets |
 | `eval/build-targeted.ts` | Add minority-class rows marked `sampling=targeted-hard` |
 | `eval/score.ts` | Live Jev through shipped `judge()` / `qualifies()` |
-| `eval/metrics.py` | Per-class precision/recall vs gold |
+| `eval/metrics.py` | Per-class precision/recall vs gold, both gold definitions per stratum, task-boundary recall |
 | `eval/compare.py` | Side-by-side two result files |
 | `eval/fidelity.ts` | Replay vs a compact-adviser request log |
 | `eval/verify-tokens.ts` | Fast usage total vs replayed context tokens |
@@ -85,6 +86,7 @@ One JSON object per checkpoint in `labels.jsonl`:
 | `safe_to_compact` | boolean | Hindsight product truth: would compacting *exactly here* have cost the work that actually followed |
 | `pivot` | boolean | The next user turn introduced work unforeseeable at checkpoint time |
 | `note` | string | Evidence. Describe structure; do not paste transcript quotes into anything that might be published |
+| `task_boundary` | boolean | The checkpoint sits where one task ends and the next begins. Reported on its own because a judge can look healthy overall and still miss exactly these |
 | `sampling` | `spread` / `targeted-hard` | On the checkpoint row. Targeted-hard is enriched: per-class recall is unbiased, precision is not |
 
 Worksheets in `eval/local/worksheet/` show, per row, the judge's view (user
@@ -99,15 +101,19 @@ transcript *after* the checkpoint.
 **`phase_gold`**
 
 - `completed_checkpoint` when the assistant's own latest unit of work is
-  finished and reported. A question or choice the assistant has fully presented
-  and handed to the user does not by itself make the phase unfinished. Work the
-  assistant merely *reports on* (another agent's task, an open pull request, a
-  queued job, a decision that belongs to the user) is not the assistant's own
-  work: a status answer that fully answers what was asked is complete even when
-  everything it describes is still open.
-- `still_in_progress` when the assistant itself still owes the next step:
-  validation it launched is running, it promised a follow-up, it parked with
-  work remaining, or a question is blocking *its own* next action.
+  finished and reported. Completeness follows who must act next: a question,
+  choice, or blocker the assistant has fully stated and handed over is
+  complete, even when the assistant says it will act once the answer arrives.
+  Work the assistant merely *reports on* (another agent's task, an open pull
+  request, a queued job, a decision that belongs to the user) is not the
+  assistant's own work, and naming that work as open, running, parked, or
+  awaited never makes the assistant's own phase unfinished. A status answer
+  that fully answers what was asked is complete even when everything it
+  describes is still open.
+- `still_in_progress` when the assistant itself can take a next step now: its
+  own verification, build, submission, or job is running right now, it promised
+  to continue on its own, it is retrying, or it failed and left the failure
+  unhandled.
 - `unclear` when the transcript does not establish either. On long real
   sessions this class is often empty: the assistant either reports a finished
   unit or visibly owes work.
@@ -137,6 +143,25 @@ their own instructions every turn, those two answers can come apart. Report
 both. Native `[COMPACTION]` events that land soon after a checkpoint and after
 which the work continues are strong hindsight evidence for `safe_to_compact`.
 
+## The two gold definitions
+
+`metrics.py` reports both, per stratum, because they disagree and the
+disagreement is the finding:
+
+- **Product truth** - gold is `safe_to_compact`. A hint at a harmless moment
+  counts as a hit even if the assistant was mid-task. This is the hindsight
+  question: would compacting here have cost the user anything?
+- **Contract** - should-hint is `completed_checkpoint` + safe; should-NOT-hint
+  is `still_in_progress`. This is the judge's own stated question, and it is
+  the only definition with a real negative class on the coding strata.
+
+A stratum of mid-round checkpoints can score well under product truth purely
+because a harness re-injects its instructions every turn, so nothing is lost by
+compacting there. Read the contract table beside it before claiming the judge
+recognises finished work. **Task-boundary recall is reported separately under
+both definitions** and is the metric to watch: it measures the moments the
+product exists to catch.
+
 **`pivot`**
 
 Mark true when the next user turn starts work that could not have been
@@ -148,7 +173,7 @@ and again with pivots excluded.
 ## Gitignore boundary
 
 Tracked: the runner, `eval/tools/` (miners and probes), `corpus.example.json` /
-`corpus.example.ts`, this README, and `eval/local/.gitignore`.
+`corpus.example.ts`, this README, `measured-results.md`, and `eval/local/.gitignore`.
 
 Never commit: `eval/local/**` (except that gitignore file), `checkpoints*.jsonl`,
 `results*.jsonl`, `ablation*.jsonl`, `worksheet/`, or any other session-derived
