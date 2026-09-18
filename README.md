@@ -24,9 +24,9 @@
   /></a>
 </p>
 
-<h3 align="center">An agent plugin that answers a single question: should I /compact now?</h3>
+**compact-adviser** is an agent plugin that answers a single question: should I /compact now?
 
-**compact-adviser** uses [Jev](https://typesafe.ai) to instantly judge whether the current session is likely at a boundary that's safe to compact.
+It uses [Jev](https://typesafe.ai) to instantly judge whether the current session is likely at a boundary that's safe to compact.
 
 It can give you a hint to run `/compact` - or, if you opt in, it can run it for you at the right time automatically.
 
