@@ -24,10 +24,12 @@ import {
   USAGE_STRICT_UNTIL,
 } from "../src/judge.ts";
 import {
+  appendRequestLog,
   errorLogLine,
   loggedJudgeErrorKind,
   requestLogId,
   requestLogLine,
+  requestLogPath,
   responseLogLine,
 } from "../src/log.ts";
 import { apiResponse, assistant, harness, temp, toolResult } from "./helpers.ts";
@@ -492,4 +494,21 @@ test("TypeSafe log lines record the gate decision without secrets", () => {
     assert.equal(line.includes("Bearer"), false);
     assert.equal(line.includes(auth.message), false);
   }
+});
+
+test("TypeSafe log append keeps prior lines", (t) => {
+  const dir = temp(t);
+  const prior = requestBody({ note: "prior-session" });
+  const body = requestBody({ note: "ok" });
+  appendRequestLog(dir, prior);
+  appendRequestLog(dir, body);
+  const text = readFileSync(requestLogPath(dir), "utf8");
+  const lines = text
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line));
+  assert.equal(lines.length, 2);
+  assert.equal(lines[0].body.state.note, "prior-session");
+  assert.equal(lines[1].id, requestLogId(body));
+  assert.notEqual(lines[0].id, lines[1].id);
 });

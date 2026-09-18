@@ -1,10 +1,15 @@
 import { floorFor, JudgeError, type Judgment, qualifies, score } from "./judge.ts";
 
-export const REQUEST_LOG_NAME = "compact-adviser-requests.jsonl";
+export const REQUEST_LOG_PREFIX = "compact-adviser-requests";
 
-export function requestLogPath(home: string): string {
+export function requestLogName(sessionId: string): string {
+  const safe = sessionId.replace(/[^A-Za-z0-9._-]+/g, "_").replace(/^\.+/, "") || "session";
+  return `${REQUEST_LOG_PREFIX}-${safe}.jsonl`;
+}
+
+export function requestLogPath(home: string, sessionId: string): string {
   const root = home.replace(/[\\/]+$/, "");
-  return `${root}/.claude/${REQUEST_LOG_NAME}`;
+  return `${root}/.claude/${requestLogName(sessionId)}`;
 }
 
 /** Stable correlation id for a request body. FNV-1a 64 so Claude Code hooks need no Node crypto. */

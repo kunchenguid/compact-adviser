@@ -32,6 +32,8 @@ import {
   loggedJudgeErrorKind,
   requestLogId,
   requestLogLine,
+  requestLogName,
+  requestLogPath,
   responseLogLine,
 } from "../lib/log.ts";
 import { RECENT_TAIL_MESSAGES, SUMMARY_PREFIX, snapshot } from "../lib/snapshot.ts";
@@ -607,5 +609,16 @@ describe("jev client", () => {
       expect(line.includes("Bearer")).toBe(false);
       expect(line.includes(auth.message)).toBe(false);
     }
+  });
+
+  test("TypeSafe request logs are per session and stay under ~/.claude", () => {
+    expect(requestLogName("session-1")).toBe("compact-adviser-requests-session-1.jsonl");
+    expect(requestLogPath("/home/fixture", "session-1")).toBe(
+      "/home/fixture/.claude/compact-adviser-requests-session-1.jsonl",
+    );
+    expect(requestLogPath("/home/fixture/", "../secret")).toBe(
+      "/home/fixture/.claude/compact-adviser-requests-_secret.jsonl",
+    );
+    expect(requestLogName("")).toBe("compact-adviser-requests-session.jsonl");
   });
 });
