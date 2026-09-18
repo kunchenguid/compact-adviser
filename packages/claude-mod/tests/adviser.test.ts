@@ -29,7 +29,7 @@ import {
 } from "./support.ts";
 
 const MESSAGES = [{ role: "user" as const, text: "hello", toolUses: [] }];
-const HINT = "Compact adviser: work appears completed or recorded. Run /compact to save tokens.";
+const HINT = "work appears completed or recorded. Run /compact to save tokens.";
 
 function lastJsonl(write: { text: string } | undefined) {
   const lines = (write?.text ?? "").trim().split("\n").filter(Boolean);

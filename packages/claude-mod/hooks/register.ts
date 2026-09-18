@@ -70,7 +70,7 @@ import {
 
 const COMMAND = "compact-adviser";
 const PANE_ID = "compact-adviser";
-const HINT = "Compact adviser: work appears completed or recorded. Run /compact to save tokens.";
+const HINT = "work appears completed or recorded. Run /compact to save tokens.";
 const COMPACT_INSTRUCTIONS =
   "The session reached a natural boundary; keep the current work, pending tasks, referenced files, and the next step exact.";
 const PENDING_NOTICE_KEY = "pendingNotice";
@@ -311,6 +311,7 @@ async function judgeCheckpoint($: EngineInterface, epoch: number): Promise<void>
       await $.store.set(key, state);
       if (epoch !== generation) return;
       hintVisible = true;
+      // Claude Code prefixes $.ui.status with the plugin name; do not repeat it.
       $.ui.status(HINT);
       return;
     }
