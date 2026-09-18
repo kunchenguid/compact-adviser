@@ -33,9 +33,8 @@
     "typesafeApiKey": {
       "type": "string",
       "title": "TypeSafe API key",
-      "description": "Saved from /compact-adviser. Held in secure storage and hidden in /config so the value is never shown. A non-empty TYPESAFE_API_KEY in the launch environment wins. Do not commit this value.",
-      "default": "",
-      "sensitive": true
+      "description": "Saved from /compact-adviser. Hidden in /config so the value is never shown. A non-empty TYPESAFE_API_KEY in the launch environment wins. Do not commit this value.",
+      "default": ""
     }
   }
 }
