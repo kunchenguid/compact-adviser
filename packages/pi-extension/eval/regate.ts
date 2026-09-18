@@ -24,8 +24,8 @@ for (const r of rows) {
     inputTokens: r.inputTokens,
     outputTokens: r.outputTokens,
   } as Judgment;
-  const hint = qualifies(j, false),
-    auto = qualifies(j, true);
+  const hint = qualifies(j),
+    auto = qualifies(j);
   if (hint !== r.hint) flips++;
   r.hint = hint;
   r.auto = auto;

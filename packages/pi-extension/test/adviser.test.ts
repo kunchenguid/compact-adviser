@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import test from "node:test";
+import { JUDGE_UNAVAILABLE_MESSAGE } from "../src/judge.ts";
 import { requestLogPath } from "../src/log.ts";
 import { restoreState } from "../src/state.ts";
 import { flush, harness, success } from "./helpers.ts";
@@ -275,6 +276,7 @@ test("malformed settings and transient judge failures leave context intact", asy
   assert.equal(h.calls, 1);
   assert.equal(h.compactions.length, 0);
   assert.ok(h.notifications.every((n) => !n.includes("secret not for display")));
+  assert.ok(h.notifications.includes(JUDGE_UNAVAILABLE_MESSAGE));
   assert.ok(restoreState(h.sm.getBranch()).retryAfter > 100000);
   writeFileSync(h.store.path, "broken");
   h.next("After malformed config");

@@ -32,7 +32,14 @@ import {
   readConfig,
 } from "../lib/config.ts";
 import { parseDotenvKey } from "../lib/env.ts";
-import { JudgeError, judge, qualifies, requestBody } from "../lib/judge.ts";
+import {
+  JUDGE_DISABLED_NETWORK_MESSAGE,
+  JUDGE_UNAVAILABLE_MESSAGE,
+  JudgeError,
+  judge,
+  qualifies,
+  requestBody,
+} from "../lib/judge.ts";
 import { requestLogLine, requestLogPath } from "../lib/log.ts";
 import { snapshot } from "../lib/snapshot.ts";
 import {
@@ -117,11 +124,9 @@ function judgeFailureMessage(error: unknown): string {
   // Claude Code refuses plugin network access outright under
   // CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC; say so instead of a generic network error.
   if (String((error as { cause?: unknown })?.cause).includes("nonessential network traffic")) {
-    return "TypeSafe requests are refused: Claude Code has nonessential network traffic disabled. Context left unchanged.";
+    return JUDGE_DISABLED_NETWORK_MESSAGE;
   }
-  return error instanceof JudgeError
-    ? error.message
-    : "TypeSafe judgment unavailable; context left unchanged.";
+  return error instanceof JudgeError ? error.message : JUDGE_UNAVAILABLE_MESSAGE;
 }
 
 async function logHome($: EngineInterface): Promise<string> {

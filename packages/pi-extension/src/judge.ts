@@ -25,18 +25,57 @@ export interface Judgment {
   inputTokens: number;
   outputTokens: number;
 }
+export type JudgeErrorKind =
+  | "timeout"
+  | "network"
+  | "authentication"
+  | "rate-limit"
+  | "server"
+  | "response"
+  | "input";
+
+const TRANSIENT_JUDGE_KINDS: ReadonlySet<JudgeErrorKind> = new Set([
+  "timeout",
+  "network",
+  "rate-limit",
+  "server",
+  "response",
+]);
+
+const JUDGE_KIND_CAUSE: Record<JudgeErrorKind, string> = {
+  timeout: "the request timed out",
+  network: "the request could not reach TypeSafe",
+  authentication: "TypeSafe rejected the API key",
+  "rate-limit": "TypeSafe rate-limited the request",
+  server: "TypeSafe returned a server error",
+  response: "TypeSafe's reply was not a usable judgment",
+  input: "this checkpoint is too large to send",
+};
+
+export function judgeErrorMessage(kind: JudgeErrorKind): string {
+  const core =
+    `The compact adviser asked TypeSafe (Jev) but did not get a usable judgment (${JUDGE_KIND_CAUSE[kind]}). ` +
+    "Context was left unchanged on purpose so a compact or hint cannot come from a bad answer.";
+  if (kind === "authentication") {
+    return `${core} Check the TypeSafe key configuration; this is not a temporary glitch.`;
+  }
+  if (kind === "input") {
+    return `${core} This is a size limit, not a temporary glitch.`;
+  }
+  if (TRANSIENT_JUDGE_KINDS.has(kind)) {
+    return `${core} This can be temporary; the adviser will try again later. No action needed unless it keeps repeating.`;
+  }
+  return core;
+}
+
+export const JUDGE_UNAVAILABLE_MESSAGE =
+  "The compact adviser asked TypeSafe (Jev) but did not get a usable judgment. " +
+  "Context was left unchanged on purpose so a compact or hint cannot come from a bad answer. " +
+  "This can be temporary; the adviser will try again later. No action needed unless it keeps repeating.";
+
 export class JudgeError extends Error {
-  constructor(
-    readonly kind:
-      | "timeout"
-      | "network"
-      | "authentication"
-      | "rate-limit"
-      | "server"
-      | "response"
-      | "input",
-  ) {
-    super(`TypeSafe ${kind}; context left unchanged.`);
+  constructor(readonly kind: JudgeErrorKind) {
+    super(judgeErrorMessage(kind));
     this.name = "JudgeError";
   }
 }

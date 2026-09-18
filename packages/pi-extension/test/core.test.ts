@@ -8,7 +8,10 @@ import { RECENT_TAIL_MESSAGES, snapshot } from "../src/context.ts";
 import { parseDotenvKey, resolveTypesafeApiKey } from "../src/env.ts";
 import {
   ENDPOINT,
+  JUDGE_UNAVAILABLE_MESSAGE,
+  JudgeError,
   judge,
+  judgeErrorMessage,
   MAX_REQUEST_BYTES,
   parseJudgment,
   QUALIFY_FLOOR,
@@ -204,7 +207,10 @@ test("HTTP contract, output bound, status classification, and cancellation", asy
         new AbortController().signal,
         (async () => new Response("error", { status })) as typeof fetch,
       ),
-      new RegExp(kind),
+      (error: unknown) =>
+        error instanceof JudgeError &&
+        error.kind === kind &&
+        error.message === judgeErrorMessage(kind),
     );
   }
   await assert.rejects(
@@ -214,7 +220,10 @@ test("HTTP contract, output bound, status classification, and cancellation", asy
       new AbortController().signal,
       (async () => new Response("x".repeat(40000))) as typeof fetch,
     ),
-    /response/,
+    (error: unknown) =>
+      error instanceof JudgeError &&
+      error.kind === "response" &&
+      error.message === judgeErrorMessage("response"),
   );
   const aborted = new AbortController();
   aborted.abort();
@@ -223,8 +232,34 @@ test("HTTP contract, output bound, status classification, and cancellation", asy
       init?.signal?.throwIfAborted();
       throw new Error("unexpected");
     }) as typeof fetch),
-    /network/,
+    (error: unknown) =>
+      error instanceof JudgeError &&
+      error.kind === "network" &&
+      error.message === judgeErrorMessage("network"),
   );
+});
+
+test("judgment-failure notices explain the skip and which kinds can be temporary", () => {
+  for (const kind of ["timeout", "network", "rate-limit", "server", "response"] as const) {
+    const message = judgeErrorMessage(kind);
+    assert.match(message, /asked TypeSafe \(Jev\)/);
+    assert.match(message, /left unchanged on purpose/);
+    assert.match(message, /compact or hint cannot come from a bad answer/);
+    assert.match(message, /can be temporary/);
+    assert.match(message, /try again later/);
+    assert.match(message, /unless it keeps repeating/);
+  }
+  for (const kind of ["authentication", "input"] as const) {
+    const message = judgeErrorMessage(kind);
+    assert.match(message, /asked TypeSafe \(Jev\)/);
+    assert.match(message, /left unchanged on purpose/);
+    assert.doesNotMatch(message, /can be temporary/);
+    assert.doesNotMatch(message, /try again later/);
+    assert.match(message, /not a temporary glitch/);
+  }
+  assert.match(judgeErrorMessage("authentication"), /TypeSafe key configuration/);
+  assert.match(judgeErrorMessage("input"), /size limit/);
+  assert.match(JUDGE_UNAVAILABLE_MESSAGE, /can be temporary/);
 });
 
 test("cwd .env supplies TYPESAFE_API_KEY when process env is empty and is ignored when env is set", (t) => {
@@ -280,7 +315,7 @@ test("the request deadline aborts work instead of delaying the next turn", async
     })) as typeof fetch;
   await assert.rejects(
     judge({}, "fixture", new AbortController().signal, transport, 20),
-    /timeout/,
+    (error: unknown) => error instanceof JudgeError && error.kind === "timeout",
   );
   assert.equal(aborted, true);
 });

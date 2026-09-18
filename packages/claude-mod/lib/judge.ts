@@ -43,12 +43,56 @@ export type JudgeErrorKind =
   | "response"
   | "input";
 
+const TRANSIENT_JUDGE_KINDS: ReadonlySet<JudgeErrorKind> = new Set([
+  "timeout",
+  "network",
+  "rate-limit",
+  "server",
+  "response",
+]);
+
+const JUDGE_KIND_CAUSE: Record<JudgeErrorKind, string> = {
+  timeout: "the request timed out",
+  network: "the request could not reach TypeSafe",
+  authentication: "TypeSafe rejected the API key",
+  "rate-limit": "TypeSafe rate-limited the request",
+  server: "TypeSafe returned a server error",
+  response: "TypeSafe's reply was not a usable judgment",
+  input: "this checkpoint is too large to send",
+};
+
+export function judgeErrorMessage(kind: JudgeErrorKind): string {
+  const core =
+    `The compact adviser asked TypeSafe (Jev) but did not get a usable judgment (${JUDGE_KIND_CAUSE[kind]}). ` +
+    "Context was left unchanged on purpose so a compact or hint cannot come from a bad answer.";
+  if (kind === "authentication") {
+    return `${core} Check the TypeSafe key configuration; this is not a temporary glitch.`;
+  }
+  if (kind === "input") {
+    return `${core} This is a size limit, not a temporary glitch.`;
+  }
+  if (TRANSIENT_JUDGE_KINDS.has(kind)) {
+    return `${core} This can be temporary; the adviser will try again later. No action needed unless it keeps repeating.`;
+  }
+  return core;
+}
+
+export const JUDGE_UNAVAILABLE_MESSAGE =
+  "The compact adviser asked TypeSafe (Jev) but did not get a usable judgment. " +
+  "Context was left unchanged on purpose so a compact or hint cannot come from a bad answer. " +
+  "This can be temporary; the adviser will try again later. No action needed unless it keeps repeating.";
+
+export const JUDGE_DISABLED_NETWORK_MESSAGE =
+  "The compact adviser could not ask TypeSafe (Jev): Claude Code has nonessential network traffic disabled. " +
+  "Context was left unchanged on purpose so a compact or hint cannot run without a judgment. " +
+  "Enable nonessential network traffic if TypeSafe should run; this is a configuration setting, not a temporary glitch.";
+
 export class JudgeError extends Error {
   constructor(
     readonly kind: JudgeErrorKind,
     options?: { cause?: unknown },
   ) {
-    super(`TypeSafe ${kind}; context left unchanged.`, options);
+    super(judgeErrorMessage(kind), options);
     this.name = "JudgeError";
   }
 }

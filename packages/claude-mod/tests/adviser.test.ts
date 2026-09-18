@@ -2,6 +2,7 @@
 // gates, hint and automatic outcomes, cooldowns across compactions, the commands, and
 // the settings pane. The world beneath the plugin is mocked in ./support.ts.
 import { describe, type Engine, expect, test } from "claude-code/testing";
+import { JUDGE_DISABLED_NETWORK_MESSAGE, judgeErrorMessage } from "../lib/judge.ts";
 import { RECENT_TAIL_MESSAGES } from "../lib/snapshot.ts";
 import {
   answered,
@@ -25,7 +26,7 @@ const HINT = "Potential session boundary detected. Run /compact to save tokens."
 
 /** Drain `$.clock.after(0, …)` plus the async judgment it starts. */
 async function drain(w: World) {
-  for (let i = 0; i < 10; i++) {
+  for (let i = 0; i < 25; i++) {
     await w.clock.settle();
     await Promise.resolve();
   }
@@ -267,20 +268,12 @@ describe("turn-end gates", () => {
   });
 
   for (const [name, respond, message] of [
-    [
-      "rate limit",
-      async () => ({ status: 429, text: "" }),
-      "TypeSafe rate-limit; context left unchanged.",
-    ],
-    [
-      "malformed",
-      async () => ({ status: 200, text: "{}" }),
-      "TypeSafe response; context left unchanged.",
-    ],
+    ["rate limit", async () => ({ status: 429, text: "" }), judgeErrorMessage("rate-limit")],
+    ["malformed", async () => ({ status: 200, text: "{}" }), judgeErrorMessage("response")],
     [
       "authentication",
       async () => ({ status: 401, text: "" }),
-      "TypeSafe authentication; context left unchanged.",
+      judgeErrorMessage("authentication"),
     ],
   ] as const) {
     test(`a ${name} failure backs off and reports once`, async ($, on) => {
@@ -308,9 +301,7 @@ describe("turn-end gates", () => {
     });
     await $.session.start(interactiveStart);
     await turnEnd($, w);
-    expect(w.journal.toasts).toContain(
-      "TypeSafe requests are refused: Claude Code has nonessential network traffic disabled. Context left unchanged.",
-    );
+    expect(w.journal.toasts).toContain(JUDGE_DISABLED_NETWORK_MESSAGE);
     expect(w.journal.statuses.includes(HINT)).toBe(false);
   });
 
@@ -320,7 +311,7 @@ describe("turn-end gates", () => {
     await $.session.start(interactiveStart);
     await turnEnd($, w);
     await w.clock.advance(2000);
-    expect(w.journal.toasts).toContain("TypeSafe timeout; context left unchanged.");
+    expect(w.journal.toasts).toContain(judgeErrorMessage("timeout"));
     expect(w.journal.statuses.includes(HINT)).toBe(false);
   });
 

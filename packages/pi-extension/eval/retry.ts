@@ -28,7 +28,7 @@ for (let a = 0; a < 3; a++) {
     const j = await judge(r.state, key, new AbortController().signal, fetch, 60000);
     const cont = continuationOf(j);
     console.error(
-      `attempt ${a}: OK ${j.phase.choice}${cont ? `/${cont.choice}` : ""} hint=${qualifies(j, false)} pP=${JSON.stringify(j.phase.probabilities)}`,
+      `attempt ${a}: OK ${j.phase.choice}${cont ? `/${cont.choice}` : ""} hint=${qualifies(j)} pP=${JSON.stringify(j.phase.probabilities)}`,
     );
     const rows = readFileSync(join(dir, "results.jsonl"), "utf8")
       .split("\n")
@@ -53,8 +53,8 @@ for (let a = 0; a < 3; a++) {
             continuationConf: cont.confidence,
           }
         : {}),
-      hint: qualifies(j, false),
-      auto: qualifies(j, true),
+      hint: qualifies(j),
+      auto: qualifies(j),
       retried: true,
     };
     if (i >= 0) rows[i] = row;

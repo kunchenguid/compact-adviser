@@ -5,8 +5,11 @@ import { DEFAULT_MINIMUM, parseConsent, parseMinimum, readConfig } from "../lib/
 import { parseDotenvKey } from "../lib/env.ts";
 import {
   ENDPOINT,
+  JUDGE_DISABLED_NETWORK_MESSAGE,
+  JUDGE_UNAVAILABLE_MESSAGE,
   JudgeError,
   judge,
+  judgeErrorMessage,
   MAX_REQUEST_BYTES,
   parseJudgment,
   QUALIFY_FLOOR,
@@ -403,6 +406,32 @@ describe("jev client", () => {
         (a as { model: unknown }).model = 7;
       }),
     ).toThrow(JudgeError);
+  });
+
+  test("judgment-failure notices explain the skip and which kinds can be temporary", () => {
+    for (const kind of ["timeout", "network", "rate-limit", "server", "response"] as const) {
+      const message = judgeErrorMessage(kind);
+      expect(message).toContain("asked TypeSafe (Jev)");
+      expect(message).toContain("left unchanged on purpose");
+      expect(message).toContain("compact or hint cannot come from a bad answer");
+      expect(message).toContain("can be temporary");
+      expect(message).toContain("try again later");
+      expect(message).toContain("unless it keeps repeating");
+    }
+    for (const kind of ["authentication", "input"] as const) {
+      const message = judgeErrorMessage(kind);
+      expect(message).toContain("asked TypeSafe (Jev)");
+      expect(message).toContain("left unchanged on purpose");
+      expect(message.includes("can be temporary")).toBe(false);
+      expect(message.includes("try again later")).toBe(false);
+      expect(message).toContain("not a temporary glitch");
+    }
+    expect(judgeErrorMessage("authentication")).toContain("TypeSafe key configuration");
+    expect(judgeErrorMessage("input")).toContain("size limit");
+    expect(JUDGE_UNAVAILABLE_MESSAGE).toContain("can be temporary");
+    expect(JUDGE_DISABLED_NETWORK_MESSAGE).toContain("nonessential network traffic disabled");
+    expect(JUDGE_DISABLED_NETWORK_MESSAGE.includes("can be temporary")).toBe(false);
+    expect(JUDGE_DISABLED_NETWORK_MESSAGE).toContain("configuration setting");
   });
 
   test("the shared phase floor decides hint and auto the same way", () => {

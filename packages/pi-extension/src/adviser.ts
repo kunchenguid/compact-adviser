@@ -6,7 +6,13 @@ import type {
 import { type Config, ConfigStore, DEFAULT_CONFIG, type Mode, parseMinimum } from "./config.ts";
 import { snapshot } from "./context.ts";
 import { resolveTypesafeApiKey } from "./env.ts";
-import { type Judgment, judge, qualifies, requestBody } from "./judge.ts";
+import {
+  JUDGE_UNAVAILABLE_MESSAGE,
+  type Judgment,
+  judge,
+  qualifies,
+  requestBody,
+} from "./judge.ts";
 import { appendRequestLog, requestLogPath } from "./log.ts";
 import { promptMinimum } from "./minimum-input.ts";
 import {
@@ -198,7 +204,7 @@ export function installAdviser(pi: ExtensionAPI, options: Options): void {
         ctx,
         error instanceof Error && error.name === "JudgeError"
           ? error.message
-          : "TypeSafe judgment unavailable; context left unchanged.",
+          : JUDGE_UNAVAILABLE_MESSAGE,
       );
     } finally {
       if (request === controller) request = undefined;
