@@ -29,7 +29,8 @@ function repoSlug() {
     readFileSync(path.join(REPO_ROOT, "packages/pi-extension/package.json"), "utf8"),
   );
   const match = /github\.com[/:]([^/]+\/[^/.]+)(?:\.git)?$/.exec(pkg.repository?.url ?? "");
-  if (!match) throw new Error("packages/pi-extension/package.json repository.url is not a github.com URL");
+  if (!match)
+    throw new Error("packages/pi-extension/package.json repository.url is not a github.com URL");
   return match[1];
 }
 

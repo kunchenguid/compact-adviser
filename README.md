@@ -61,8 +61,6 @@ CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1 claude
 
 Then `/compact-adviser`.
 
-See the [Pi guide](packages/pi-extension/README.md) and the [Claude Code guide](packages/claude-mod/README.md) for settings, commands, privacy, and tests.
-
 ## If it does nothing
 
 | Symptom | Cause |
