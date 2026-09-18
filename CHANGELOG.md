@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.3](https://github.com/kunchenguid/compact-adviser/compare/compact-adviser-v0.1.2...compact-adviser-v0.1.3) (2026-09-18)
+
+
+### Features
+
+* disable compact-adviser in unattended sessions ([#31](https://github.com/kunchenguid/compact-adviser/issues/31)) ([f4689fc](https://github.com/kunchenguid/compact-adviser/commit/f4689fc2045d55fb877521cc271c99399d77166b))
+
 ## [0.1.2](https://github.com/kunchenguid/compact-adviser/compare/compact-adviser-v0.1.1...compact-adviser-v0.1.2) (2026-09-18)
 
 
