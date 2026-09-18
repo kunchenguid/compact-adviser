@@ -4,17 +4,23 @@ import { createAssistantMessageEventStream } from "@earendil-works/pi-ai";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 export default function fixture(pi: ExtensionAPI) {
   const log=(value:unknown)=>appendFileSync(process.env.COMPACT_TEST_LOG!,JSON.stringify(value)+"\n");
+  const coordinating = process.env.COMPACT_TEST_COORDINATING === "1";
+  const inputTokens = Number(process.env.COMPACT_TEST_INPUT_TOKENS ?? 45000);
   globalThis.fetch=async(input,init)=>{
     if(String(input)!=="https://api.typesafe.ai/v1/systemone")throw new Error("Unexpected network request in isolated smoke test");
     log({event:"jev",body:JSON.parse(String(init?.body))});
     return new Response(JSON.stringify({model:"jev-fixture",usage:{input_tokens:2000,output_tokens:60},answers:{
-      done:{type:"choice",choice:"finished",probabilities:{finished:0.995,not_finished:0.004,unclear:0.001},confidence:0.99},
-      shape:{type:"choice",choice:"hands_on",probabilities:{hands_on:0.99,coordinating:0.008,unclear:0.002},confidence:0.98},
+      done:coordinating
+        ? {type:"choice",choice:"finished",probabilities:{finished:1,not_finished:0,unclear:0},confidence:1}
+        : {type:"choice",choice:"finished",probabilities:{finished:0.995,not_finished:0.004,unclear:0.001},confidence:0.99},
+      shape:coordinating
+        ? {type:"choice",choice:"coordinating",probabilities:{hands_on:0,coordinating:1,unclear:0},confidence:1}
+        : {type:"choice",choice:"hands_on",probabilities:{hands_on:0.99,coordinating:0.008,unclear:0.002},confidence:0.98},
     }}));
   };
   pi.registerProvider("compact-fixture",{baseUrl:"http://127.0.0.1:1",apiKey:"fixture-not-a-secret",api:"compact-fixture",models:[{id:"local",name:"Local test provider",reasoning:false,input:["text"],cost:{input:0,output:0,cacheRead:0,cacheWrite:0},contextWindow:272000,maxTokens:1000}],streamSimple:(model)=>{
     const stream=createAssistantMessageEventStream();
-    const message={role:"assistant" as const,api:model.api,provider:model.provider,model:model.id,timestamp:Date.now(),stopReason:"stop" as const,content:[{type:"text" as const,text:"The report is saved. This phase is complete; next work can read the artifact."}],usage:{input:45000,output:20,cacheRead:0,cacheWrite:0,totalTokens:45020,cost:{input:0,output:0,cacheRead:0,cacheWrite:0,total:0}}};
+    const message={role:"assistant" as const,api:model.api,provider:model.provider,model:model.id,timestamp:Date.now(),stopReason:"stop" as const,content:[{type:"text" as const,text:"The report is saved. This phase is complete; next work can read the artifact."}],usage:{input:inputTokens,output:20,cacheRead:0,cacheWrite:0,totalTokens:inputTokens+20,cost:{input:0,output:0,cacheRead:0,cacheWrite:0,total:0}}};
     queueMicrotask(()=>{stream.push({type:"start",partial:message});stream.push({type:"text_start",contentIndex:0,partial:message});stream.push({type:"text_delta",contentIndex:0,delta:message.content[0].text,partial:message});stream.push({type:"text_end",contentIndex:0,content:message.content[0].text,partial:message});stream.push({type:"done",reason:"stop",message});stream.end();});
     return stream;
   }});
