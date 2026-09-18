@@ -1,0 +1,86 @@
+name: Bug report
+description: Something went wrong with compact-adviser
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug.
+        The most useful details are which host you were using, `/compact-adviser status`, and (if you have request logging on) a redacted excerpt of the request log.
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: What happened?
+      description: A short description of what you expected and what actually happened.
+      placeholder: I finished a settled coding turn past 40,000 tokens and never saw the compact hint.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: How to reproduce
+      description: Include the install path, the prompt or turn that should have triggered advice, and any relevant steps.
+      placeholder: |
+        1. Install with `pi install npm:compact-adviser` (or the Claude marketplace path).
+        2. Set TYPESAFE_API_KEY and start the host.
+        3. Run `/compact-adviser status`.
+        4. Continue until context is above 40,000 tokens and the session is idle.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: host
+    attributes:
+      label: Host
+      options:
+        - Pi
+        - Claude Code
+        - other / not sure
+    validations:
+      required: true
+
+  - type: input
+    id: host-version
+    attributes:
+      label: Host version
+      description: Output of `pi --version` or `claude --version`.
+      placeholder: Pi 0.85.1 or Claude Code 2.1.275
+    validations:
+      required: true
+
+  - type: textarea
+    id: status
+    attributes:
+      label: /compact-adviser status
+      description: Paste the full status line (mode, minimum, context, key present/missing). Do not paste the API key.
+      render: text
+    validations:
+      required: true
+
+  - type: input
+    id: platform
+    attributes:
+      label: OS and Node version
+      description: From `node --version` and your OS.
+      placeholder: macOS 15 / Node v24.14.1
+    validations:
+      required: true
+
+  - type: textarea
+    id: request-log
+    attributes:
+      label: Redacted request log (optional)
+      description: |
+        If **Log TypeSafe requests** is on, paste a redacted excerpt from the log.
+        Pi writes `~/.pi/agent/compact-adviser-requests.jsonl`.
+        Claude Code writes `~/.claude/compact-adviser-requests.jsonl`.
+        The log is the redacted request body plus questions and never includes the API key; still strip anything you do not want in a public issue.
+      render: text
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else
+      description: Screenshots, hunches, related issues, whatever seems relevant.

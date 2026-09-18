@@ -26,8 +26,9 @@ const HINT = "Potential session boundary detected. Run /compact to save tokens."
 
 /** Drain `$.clock.after(0, …)` plus the async judgment it starts. */
 async function drain(w: World) {
-  for (let i = 0; i < 25; i++) {
+  for (let i = 0; i < 50; i++) {
     await w.clock.settle();
+    await Promise.resolve();
     await Promise.resolve();
   }
 }

@@ -4,6 +4,9 @@ This file is the project's committed home for project-intrinsic agent knowledge:
 
 - Add durable project-specific notes here as they are discovered through real work.
 - Judgment eval harness: `packages/pi-extension/eval/`. Session transcripts, labels, worksheets, and results stay in gitignored `eval/local/`. See that README for the corpus contract and label rubric.
+- CI: `.github/workflows/ci.yml` runs `check-pi`, `check-claude-mod`, `e2e-pi`, and `e2e-claude-mod` on push/PR. Pin Pi and Claude Code in `.github/host-versions.env`.
+- Release: release-please at repo root with extra-files version bumps; `npm publish --access public --provenance` from `packages/pi-extension` via GitHub OIDC. No `NPM_TOKEN`. See `CONTRIBUTING.md`.
+- PRs targeting `main` go through `no-mistakes`; do not hand-edit `CHANGELOG.md` or `.release-please-manifest.json`.
 
 ## Maintaining this file
 

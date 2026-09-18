@@ -1,0 +1,149 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+    # release-please opens its release PR with GITHUB_TOKEN, which creates a
+    # pull_request run that can only sit in action_required. Its output set is
+    # exactly these files, so excluding them means no run is ever created.
+    paths-ignore:
+      - .release-please-manifest.json
+      - CHANGELOG.md
+      - package.json
+      - packages/pi-extension/package.json
+      - packages/claude-mod/package.json
+      - packages/claude-mod/.claude-plugin/plugin.json
+      - .claude-plugin/marketplace.json
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  check-pi:
+    name: check-pi
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Load pinned host versions
+        run: grep -E '^[A-Za-z_][A-Za-z0-9_]*=' .github/host-versions.env >> "$GITHUB_ENV"
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION || '24' }}
+          cache: npm
+          cache-dependency-path: packages/pi-extension/package-lock.json
+
+      - name: Install Pi package
+        run: npm --prefix packages/pi-extension ci --ignore-scripts
+
+      - name: check-pi
+        run: npm run check
+
+  check-claude-mod:
+    name: check-claude-mod
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      DISABLE_AUTOUPDATER: "1"
+      ANTHROPIC_API_KEY: sk-ant-fixture-not-a-real-key-0000000000
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Load pinned host versions
+        run: grep -E '^[A-Za-z_][A-Za-z0-9_]*=' .github/host-versions.env >> "$GITHUB_ENV"
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION || '24' }}
+          cache: npm
+          cache-dependency-path: packages/claude-mod/package-lock.json
+
+      - name: Install pinned Claude Code
+        run: npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}"
+
+      - name: Install Claude mod
+        run: npm --prefix packages/claude-mod ci --ignore-scripts
+
+      - name: check-claude-mod
+        run: npm run check:claude-mod
+
+  e2e-pi:
+    name: e2e-pi
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Load pinned host versions
+        run: grep -E '^[A-Za-z_][A-Za-z0-9_]*=' .github/host-versions.env >> "$GITHUB_ENV"
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION || '24' }}
+          cache: npm
+          cache-dependency-path: packages/pi-extension/package-lock.json
+
+      - name: Install pinned Pi
+        run: npm install -g "@earendil-works/pi-coding-agent@${PI_VERSION}"
+
+      - name: Resolve Pi binary before npm ci
+        run: |
+          set -eu
+          PI_BIN="$(command -v pi)"
+          echo "COMPACT_TEST_PI_BIN=${PI_BIN}" >> "$GITHUB_ENV"
+          echo "Using Pi $(pi --version) at ${PI_BIN}"
+
+      - name: Install Pi package
+        run: npm --prefix packages/pi-extension ci --ignore-scripts
+
+      - name: e2e-pi
+        run: npm run test:e2e
+
+  e2e-claude-mod:
+    name: e2e-claude-mod
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      DISABLE_AUTOUPDATER: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Load pinned host versions
+        run: grep -E '^[A-Za-z_][A-Za-z0-9_]*=' .github/host-versions.env >> "$GITHUB_ENV"
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION || '24' }}
+          cache: npm
+          cache-dependency-path: packages/claude-mod/package-lock.json
+
+      - name: Install tmux
+        run: sudo apt-get update && sudo apt-get install -y tmux
+
+      - name: Install pinned Claude Code
+        run: npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}"
+
+      - name: Resolve Claude binary before npm ci
+        run: |
+          set -eu
+          CLAUDE_BIN="$(command -v claude)"
+          echo "COMPACT_TEST_CLAUDE_BIN=${CLAUDE_BIN}" >> "$GITHUB_ENV"
+          echo "Using Claude Code $(claude --version) at ${CLAUDE_BIN}"
+
+      - name: Install Claude mod
+        run: npm --prefix packages/claude-mod ci --ignore-scripts
+
+      - name: e2e-claude-mod
+        run: npm run test:e2e:claude-mod

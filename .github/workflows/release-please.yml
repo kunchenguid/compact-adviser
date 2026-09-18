@@ -1,0 +1,43 @@
+name: release-please
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: write
+  id-token: write
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: googleapis/release-please-action@v4
+        id: release
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/checkout@v4
+        if: ${{ steps.release.outputs.release_created }}
+
+      - name: Load pinned host versions
+        if: ${{ steps.release.outputs.release_created }}
+        run: grep -E '^[A-Za-z_][A-Za-z0-9_]*=' .github/host-versions.env >> "$GITHUB_ENV"
+
+      - uses: actions/setup-node@v6
+        if: ${{ steps.release.outputs.release_created }}
+        with:
+          node-version: ${{ env.NODE_VERSION || '24' }}
+          registry-url: "https://registry.npmjs.org"
+
+      # Trusted publishing (GitHub OIDC) needs npm 11.5.1+. Do not set NPM_TOKEN
+      # or NODE_AUTH_TOKEN; provenance is attested from this workflow identity.
+      - name: Ensure npm supports trusted publishing
+        if: ${{ steps.release.outputs.release_created }}
+        run: npm install -g npm@^11.5.1
+
+      - name: Publish compact-adviser to npm
+        if: ${{ steps.release.outputs.release_created }}
+        working-directory: packages/pi-extension
+        run: npm publish --access public --provenance
