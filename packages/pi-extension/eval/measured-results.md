@@ -21,6 +21,22 @@ from 0.85 up. Product-truth precision moves 98% to 94% because those five rows
 are gold `completed_checkpoint`; nine of the ten unsafe rows in the set are
 phase complete.
 
+## Stopping evidence
+
+A threshold sweep found no precision-safe knee. Raising the floor enough to
+restore the shipped product-truth precision reduced recall below the shipped
+baseline, so `QUALIFY_FLOOR` remains 0.90.
+
+Five attempts to add caution rather than discrimination were measured and
+reverted: weighing all work still owed, prioritising handoff versus running
+work, requiring an affirmative completion cue, adding a hedging nudge, and
+leading with the decisive test. Each lost more valid checkpoints than it
+recovered. The remaining product-truth errors cannot be separated by this
+phase-only judge: all five winner false positives are phase-complete checkpoints,
+and nine of the set's ten unsafe rows require older conversational detail.
+Further phase-wording iterations therefore stopped moving the precision-recall
+frontier and were not worth shipping.
+
 ## claude-supervision
 
 v3 set, n=9 (6 rows gold `completed_checkpoint` + safe, 3 rows gold
