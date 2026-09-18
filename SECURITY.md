@@ -5,7 +5,7 @@
 The Pi extension and the Claude Code mod send selected conversation text to TypeSafe when the package is installed, a key is available from the launch environment, a menu-saved setting, or `TYPESAFE_API_KEY` in a `.env` file in the working directory, and the other product gates pass (mode, minimum context, idle session).
 Installing the package is that consent; there is no separate sharing toggle.
 A menu-saved key is stored in the same settings file as mode and threshold, with file permissions as restrictive as the host allows.
-It is never shown after save, and never written to logs, status lines, or error messages.
+It is never shown after save, and never written to logs, status lines, error messages, or TypeSafe request bodies, including when the agent reads the settings file.
 
 | Sent to `https://api.typesafe.ai/v1/systemone` | Not sent |
 | --- | --- |

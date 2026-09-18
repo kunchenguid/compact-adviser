@@ -104,6 +104,42 @@ describe("turn-end gates", () => {
     expect(w.journal.fsWrites[0]?.path.endsWith("compact-adviser-requests.jsonl")).toBe(true);
   });
 
+  test("a saved key in a settings.json read is absent from the TypeSafe body and request log", async ($, on) => {
+    const secret = "tsk-saved-key-must-not-leave";
+    const w = world(on, { key: undefined, savedKey: secret, logRequests: true });
+    w.messages = [
+      ...w.messages,
+      {
+        role: "assistant",
+        text: "Read the plugin settings.",
+        toolUses: [
+          {
+            tool_use_id: "settings",
+            tool: "Read",
+            input: { file_path: "/home/fixture/.claude/settings.json" },
+            text: JSON.stringify({
+              pluginConfigs: {
+                "compact-adviser@0.1.0": {
+                  options: { mode: "hint", typesafeApiKey: secret },
+                },
+              },
+            }),
+          },
+        ],
+      },
+    ];
+    await $.session.start(interactiveStart);
+    await turnEnd($, w);
+    expect(w.journal.requests).toHaveLength(1);
+    const request = w.journal.requests[0] ?? { url: "", headers: {}, body: "" };
+    expect(request.headers.Authorization).toBe(`Bearer ${secret}`);
+    expect(request.body.includes(secret)).toBe(false);
+    expect(request.body).toContain("hint");
+    const logged = w.journal.fsWrites[0]?.text ?? "";
+    expect(logged.includes(secret)).toBe(false);
+    expect(logged.includes("jev-latest")).toBe(true);
+  });
+
   test("the next turn clears the hint without restoring a status strip", async ($, on) => {
     const w = world(on);
     await $.session.start(interactiveStart);

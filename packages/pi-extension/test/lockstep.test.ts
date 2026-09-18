@@ -9,6 +9,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import * as claude from "../../claude-mod/lib/judge.ts";
+import * as claudeSnapshot from "../../claude-mod/lib/snapshot.ts";
+import * as piContext from "../src/context.ts";
 import * as pi from "../src/judge.ts";
 
 /** Shaped like a real `snapshot()`, small enough to stay well under the cap. */
@@ -98,4 +100,21 @@ test("both packages parse the same wire response into the same judgment", () => 
     claude.qualifies(pi.parseJudgment(response), 0.2),
     pi.qualifies(pi.parseJudgment(response), 0.2),
   );
+});
+
+test("both packages scrub owned settings fields and known key values the same way", () => {
+  const secret = "tsk-saved-key-must-not-leave";
+  const dump = JSON.stringify({
+    mode: "hint",
+    typesafeApiKey: secret,
+    "compact-adviser.typesafeApiKey": secret,
+  });
+  assert.deepEqual(claudeSnapshot.redact(dump), piContext.redact(dump));
+  assert.deepEqual(claudeSnapshot.redactOwnedSettings(dump), piContext.redactOwnedSettings(dump));
+  assert.deepEqual(
+    claudeSnapshot.scrubKnownSecrets(`keep ${secret} nearby`, [secret]),
+    piContext.scrubKnownSecrets(`keep ${secret} nearby`, [secret]),
+  );
+  assert.ok(!claudeSnapshot.redact(dump).text.includes(secret));
+  assert.ok(claudeSnapshot.redact(dump).text.includes("hint"));
 });
