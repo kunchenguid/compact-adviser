@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.2](https://github.com/kunchenguid/compact-adviser/compare/compact-adviser-v0.1.1...compact-adviser-v0.1.2) (2026-09-18)
+
+
+### Bug Fixes
+
+* **claude-mod:** avoid duplicate plugin name in completion hint ([#27](https://github.com/kunchenguid/compact-adviser/issues/27)) ([2496d6b](https://github.com/kunchenguid/compact-adviser/commit/2496d6b7b34f6f239c026b8419b9f7f7f41bb65f))
+
 ## [0.1.1](https://github.com/kunchenguid/compact-adviser/compare/compact-adviser-v0.1.0...compact-adviser-v0.1.1) (2026-09-18)
 
 
