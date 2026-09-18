@@ -100,8 +100,12 @@ export const JUDGE_UNAVAILABLE_MESSAGE =
   "This can be temporary; the adviser will try again later. No action needed unless it keeps repeating.";
 
 export class JudgeError extends Error {
-  constructor(readonly kind: JudgeErrorKind) {
+  // A plain field assignment, not a constructor parameter property: the Codex adapter runs
+  // this module through Node's own type stripping, which only erases, never transforms.
+  readonly kind: JudgeErrorKind;
+  constructor(kind: JudgeErrorKind) {
     super(judgeErrorMessage(kind));
+    this.kind = kind;
     this.name = "JudgeError";
   }
 }

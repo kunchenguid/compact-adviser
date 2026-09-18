@@ -1,0 +1,26 @@
+{
+  "name": "compact-adviser-codex-plugin",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "description": "A standalone Codex CLI plugin that suggests semantic checkpoints for context compaction.",
+  "type": "module",
+  "engines": {
+    "node": ">=22.18"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "lint": "biome check .",
+    "format": "biome check --write .",
+    "validate": "node scripts/validate.mjs",
+    "check-readme": "node scripts/check-readme.mjs",
+    "test": "node --test test/*.test.ts",
+    "check": "npm run typecheck && npm run lint && npm run validate && npm run check-readme && npm test",
+    "test:e2e": "node scripts/live-e2e.mjs"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.4.0",
+    "@types/node": "^24.13.5",
+    "typescript": "^5.9.0"
+  }
+}

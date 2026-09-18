@@ -15,6 +15,8 @@ on:
       - packages/pi-extension/package.json
       - packages/claude-mod/package.json
       - packages/claude-mod/.claude-plugin/plugin.json
+      - packages/codex-plugin/package.json
+      - packages/codex-plugin/.codex-plugin/plugin.json
       - .claude-plugin/marketplace.json
 
 concurrency:
@@ -78,6 +80,28 @@ jobs:
 
       - name: check-claude-mod
         run: npm run check:claude-mod
+
+  check-codex-plugin:
+    name: check-codex-plugin
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Load pinned host versions
+        run: grep -E '^[A-Za-z_][A-Za-z0-9_]*=' .github/host-versions.env >> "$GITHUB_ENV"
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION || '24' }}
+          cache: npm
+          cache-dependency-path: packages/codex-plugin/package-lock.json
+
+      - name: Install Codex plugin package
+        run: npm --prefix packages/codex-plugin ci --ignore-scripts
+
+      - name: check-codex-plugin
+        run: npm run check:codex-plugin
 
   e2e-pi:
     name: e2e-pi
@@ -147,3 +171,38 @@ jobs:
 
       - name: e2e-claude-mod
         run: npm run test:e2e:claude-mod
+
+  e2e-codex-plugin:
+    name: e2e-codex-plugin
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Load pinned host versions
+        run: grep -E '^[A-Za-z_][A-Za-z0-9_]*=' .github/host-versions.env >> "$GITHUB_ENV"
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION || '24' }}
+          cache: npm
+          cache-dependency-path: packages/codex-plugin/package-lock.json
+
+      - name: Install tmux
+        run: sudo apt-get update && sudo apt-get install -y tmux
+
+      - name: Install pinned Codex
+        run: npm install -g "@openai/codex@${CODEX_VERSION}"
+
+      - name: Resolve Codex binary before npm ci
+        run: |
+          set -eu
+          CODEX_BIN="$(command -v codex)"
+          echo "COMPACT_TEST_CODEX_BIN=${CODEX_BIN}" >> "$GITHUB_ENV"
+          echo "Using Codex $(codex --version) at ${CODEX_BIN}"
+
+      - name: Install Codex plugin package
+        run: npm --prefix packages/codex-plugin ci --ignore-scripts
+
+      - name: e2e-codex-plugin
+        run: npm run test:e2e:codex-plugin

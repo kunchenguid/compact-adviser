@@ -37,10 +37,11 @@ See the [no-mistakes quick start](https://kunchenguid.github.io/no-mistakes/star
   ```sh
   npm --prefix packages/pi-extension ci --ignore-scripts
   npm --prefix packages/claude-mod ci --ignore-scripts
+  npm --prefix packages/codex-plugin ci --ignore-scripts
   ```
 
-- Before pushing, run `npm run check` and `npm run check:claude-mod`.
-  The live suites are `COMPACT_TEST_PI_BIN="$(command -v pi)" npm run test:e2e` and `npm run test:e2e:claude-mod` (needs `tmux`).
+- Before pushing, run `npm run check`, `npm run check:claude-mod` and `npm run check:codex-plugin`.
+  The live suites are `COMPACT_TEST_PI_BIN="$(command -v pi)" npm run test:e2e`, `npm run test:e2e:claude-mod` and `npm run test:e2e:codex-plugin` (the last two need `tmux`).
   Resolve the Pi binary **before** npm modifies PATH.
 - CI host pins live in [`.github/host-versions.env`](.github/host-versions.env). Bump Pi and Claude Code together after both live E2E suites pass on the new versions.
 - Do not hand-edit `CHANGELOG.md` or `.release-please-manifest.json`.
@@ -49,10 +50,10 @@ See the [no-mistakes quick start](https://kunchenguid.github.io/no-mistakes/star
 
 ## Package READMEs
 
-`packages/pi-extension/README.md` and `packages/claude-mod/README.md` are both generated from the root `README.md` by [`scripts/generate-package-readme.mjs`](scripts/generate-package-readme.mjs), which rewrites root-relative links and images (including sibling-package docs, `SECURITY.md`, and assets under `docs/`) into absolute `github.com`/`raw.githubusercontent.com` URLs so they still resolve from npm and the plugin marketplace. Do not hand-edit either package README; edit the root `README.md` and run `npm run sync-readmes`.
+`packages/pi-extension/README.md`, `packages/claude-mod/README.md` and `packages/codex-plugin/README.md` are generated from the root `README.md` by [`scripts/generate-package-readme.mjs`](scripts/generate-package-readme.mjs), which rewrites root-relative links and images (including sibling-package docs, `SECURITY.md`, and assets under `docs/`) into absolute `github.com`/`raw.githubusercontent.com` URLs so they still resolve from npm and the plugin marketplaces. Do not hand-edit package READMEs; edit the root `README.md` and run `npm run sync-readmes`.
 
 - `packages/pi-extension`'s `prepack` script regenerates its `README.md` on every `npm pack`/`npm publish` (CI trusted-publish or manual), so the published tarball always carries current root-README content regardless of what's committed.
-- Both committed copies are still checked in CI so a stale copy fails a PR instead of only being masked at publish time: `packages/pi-extension/test/readme.test.ts` diffs the committed file against the generator before packing, then diffs the tarball's README; `packages/claude-mod`'s `check-readme` script (part of `npm run check:claude-mod`) diffs the committed file, since that package has no pack/publish step and the marketplace reads the committed file directly.
+- Every committed copy is still checked in CI so a stale copy fails a PR instead of only being masked at publish time: `packages/pi-extension/test/readme.test.ts` diffs the committed file against the generator before packing, then diffs the tarball's README; the `check-readme` script in `packages/claude-mod` and in `packages/codex-plugin` (part of each package's `check`) diffs the committed file, since neither package has a pack/publish step and the marketplaces read the committed file directly.
 
 The npm page only picks up a README change on the *next* publish (a manual `npm publish` or a merged release-please PR), not retroactively.
 
@@ -73,7 +74,7 @@ The workflow authenticates to npm with GitHub Actions OIDC (`id-token: write`) a
    - Environment: leave empty
 3. Do not add `NPM_TOKEN` or `NODE_AUTH_TOKEN` repository secrets.
 
-Claude Code users only receive plugin updates when `packages/claude-mod/.claude-plugin/plugin.json` `version` changes; release-please bumps that file, the Claude package manifest, and `.claude-plugin/marketplace.json` as extra-files of the single root package.
+Claude Code users only receive plugin updates when `packages/claude-mod/.claude-plugin/plugin.json` `version` changes, and Codex users when `packages/codex-plugin/.codex-plugin/plugin.json` `version` changes; release-please bumps those files, both package manifests, and `.claude-plugin/marketplace.json` as extra-files of the single root package.
 
 ## Questions
 

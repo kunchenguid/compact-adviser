@@ -1,5 +1,5 @@
 // The TypeSafe Jev judgment: the Pi extension's question set, response validation, and
-// thresholds, sent through Claude Code's host fetch (`$.http.fetch`), which is injected.
+// thresholds, sent from the Codex hook process through Node's `fetch`, which is injected.
 
 export const ENDPOINT = "https://api.typesafe.ai/v1/systemone";
 export const MAX_REQUEST_BYTES = 32000;
