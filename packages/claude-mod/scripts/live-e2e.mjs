@@ -367,6 +367,24 @@ try {
     throw new Error(`[${step}] never highlighted ${JSON.stringify(rowText)}\n${screen()}`);
   }
 
+  async function openView(rowText, viewText) {
+    const deadline = Date.now() + 15000;
+    while (Date.now() < deadline) {
+      await moveTo(rowText);
+      key("Enter");
+      const opened = await waitFor(
+        (shot) => shot.includes(viewText),
+        `${JSON.stringify(rowText)} to open`,
+        1500,
+      ).then(
+        () => true,
+        () => false,
+      );
+      if (opened) return;
+    }
+    throw new Error(`[${step}] never opened ${JSON.stringify(rowText)}\n${screen()}`);
+  }
+
   step = "request logging";
   await moveTo("Log TypeSafe requests");
   key("Enter");
@@ -391,9 +409,7 @@ try {
   pass("Escape in a view returns to the list, keeping the keyboard and the row");
 
   step = "pane minimum";
-  await moveTo("Minimum context");
-  key("Enter");
-  await waitText("⏎ save");
+  await openView("Minimum context", "⏎ save");
   for (let i = 0; i < 5; i++) key("BSpace");
   type("40k");
   await sleep(300);

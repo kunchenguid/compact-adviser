@@ -352,7 +352,14 @@ try {
     "the composer",
   );
   if (screen().includes("Do you trust")) {
-    key("Enter");
+    const deadline = Date.now() + 15000;
+    while (Date.now() < deadline) {
+      const shot = screen();
+      if (shot.includes("Ask Codex to do anything")) break;
+      // The trust dialog can be painted before the TUI accepts keyboard input.
+      if (shot.includes("Do you trust")) key("Enter");
+      await sleep(300);
+    }
     await waitText("Ask Codex to do anything");
   }
   await ask("E2E-PROMPT-1 build the parser");
