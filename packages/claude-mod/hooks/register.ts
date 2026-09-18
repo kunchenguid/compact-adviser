@@ -727,6 +727,7 @@ export const register: Register = (on, options) => {
         showMenu("menu:mode");
         statusDetails = undefined;
         await openPane($);
+        await placeRing($, 40);
       } else if (["auto", "hint", "off"].includes(command) && !value) {
         await changeMode($, command as Mode);
       } else if (command === "threshold" && value) {

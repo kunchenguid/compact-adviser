@@ -338,14 +338,23 @@ try {
     let moves = 0;
     while (Date.now() < deadline && moves < 8) {
       const before = highlighted();
-      if (before.startsWith(rowText)) return;
+      if (before.startsWith(rowText)) {
+        // A delayed redraw can restore the previous row after it briefly looked correct.
+        // Enter only after the target has remained selected across the settling window.
+        await sleep(300);
+        if (highlighted().startsWith(rowText)) return;
+        continue;
+      }
       if (!before) {
         await sleep(100);
         continue;
       }
       key(direction);
       const moved = await waitFor(
-        () => highlighted() !== before,
+        () => {
+          const after = highlighted();
+          return after !== "" && after !== before;
+        },
         `the selection to move ${direction.toLowerCase()} from ${JSON.stringify(before)}`,
         1500,
       ).then(
