@@ -111,7 +111,8 @@ export function harness(
     inputs: (string | undefined)[] = [],
     confirms: boolean[] = [];
   const inputDefaults: string[] = [],
-    selectOptions: string[][] = [];
+    selectOptions: string[][] = [],
+    customRenders: string[][] = [];
   let tokens: number | null = 45000,
     idle = true,
     pending = false,
@@ -155,6 +156,7 @@ export function harness(
           component.handleInput?.("\u0001");
           component.handleInput?.("\u000b");
           for (const char of value) component.handleInput?.(char);
+          if (typeof component.render === "function") customRenders.push(component.render(40));
           component.handleInput?.("\r");
         }
         return result;
@@ -183,12 +185,12 @@ export function harness(
   let calls = 0;
   const payloads: unknown[] = [];
   const signals: AbortSignal[] = [];
-  const install = (version = "0.82.0", credential: string | undefined = "test-key") => {
+  const install = (version = "0.82.0", credential: string | undefined | false = "test-key") => {
     handlers.clear();
     installAdviser(api, {
       agentDir: dir,
       version,
-      key: () => credential,
+      ...(credential === false ? {} : { key: () => credential }),
       now: () => clock,
       evaluate: async (state, key, signal) => {
         calls++;
@@ -223,6 +225,7 @@ export function harness(
     confirms,
     inputDefaults,
     selectOptions,
+    customRenders,
     payloads,
     signals,
     fire,

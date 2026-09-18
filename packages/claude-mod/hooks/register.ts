@@ -18,6 +18,7 @@
 //   session's counters itself.
 import type { EngineInterface, PluginOptions, Register } from "claude-code";
 import {
+  API_KEY_KEY,
   CONSENT_STORE_KEY,
   type Config,
   type Consent,
@@ -29,9 +30,11 @@ import {
   type Mode,
   parseConsent,
   parseMinimum,
+  parseSavedApiKey,
   readConfig,
+  readSavedApiKey,
 } from "../lib/config.ts";
-import { parseDotenvKey } from "../lib/env.ts";
+import { formatKeyStatus, parseDotenvKey, resolveTypesafeApiKey } from "../lib/env.ts";
 import {
   floorFor,
   JUDGE_DISABLED_NETWORK_MESSAGE,
@@ -75,6 +78,7 @@ let compacting = false;
 let hintVisible = false;
 let diagnostic = "";
 let minimumDraft: { text: string; error: string } | undefined;
+let keyDraft: { text: string; error: string } | undefined;
 let statusDetails: string | undefined;
 
 function isActivated($: EngineInterface): Promise<boolean> {
@@ -87,14 +91,24 @@ function isActivated($: EngineInterface): Promise<boolean> {
   return activation;
 }
 
-async function apiKey($: EngineInterface): Promise<string> {
-  const fromEnv = ((await $.env.get("TYPESAFE_API_KEY")) ?? "").trim();
-  if (fromEnv) return fromEnv;
-  try {
-    return (parseDotenvKey(await $.fs.read(".env"), "TYPESAFE_API_KEY") ?? "").trim();
-  } catch {
-    return "";
+async function resolvedKey($: EngineInterface) {
+  const fromEnv = await $.env.get("TYPESAFE_API_KEY");
+  if (fromEnv !== undefined && fromEnv.trim() !== "") {
+    return resolveTypesafeApiKey(fromEnv);
   }
+  const saved = readSavedApiKey(await $.config.list(), loadedOptions);
+  if (saved) return resolveTypesafeApiKey(undefined, saved);
+  let dotenv: string | undefined;
+  try {
+    dotenv = parseDotenvKey(await $.fs.read(".env"), "TYPESAFE_API_KEY");
+  } catch {
+    dotenv = undefined;
+  }
+  return resolveTypesafeApiKey(undefined, undefined, dotenv);
+}
+
+async function apiKey($: EngineInterface): Promise<string> {
+  return (await resolvedKey($)).value?.trim() ?? "";
 }
 
 /** A loopback-only endpoint override for the live regression's local TypeSafe fixture. */
@@ -333,6 +347,9 @@ async function saveRow(
     $.ui.toast(`Not saved: ${result.deny}`, { timeoutMs: 8000 });
     return false;
   }
+  if (key === API_KEY_KEY && typeof value === "string") {
+    loadedOptions = { ...loadedOptions, typesafeApiKey: value };
+  }
   diagnostic = "";
   await showPendingNotice($);
   return true;
@@ -361,7 +378,7 @@ function openPane($: EngineInterface): Promise<void> {
     title: "Compact adviser (saved for all sessions)",
     focus: true,
     closeOnEscape: true,
-    rows: 10,
+    rows: 14,
   });
 }
 
@@ -441,6 +458,24 @@ async function changeLogRequests($: EngineInterface, enabled: boolean): Promise<
   );
 }
 
+async function changeSavedApiKey($: EngineInterface, text: string): Promise<boolean> {
+  return saveRow(
+    $,
+    API_KEY_KEY,
+    parseSavedApiKey(text),
+    "TypeSafe API key saved (all sessions). Status shows the source, never the value.",
+  );
+}
+
+async function clearSavedApiKey($: EngineInterface): Promise<void> {
+  await saveRow(
+    $,
+    API_KEY_KEY,
+    "",
+    "Saved TypeSafe API key cleared (all sessions). Launch environment and .env still apply.",
+  );
+}
+
 async function statusText($: EngineInterface): Promise<string> {
   const config = await loadConfig($);
   const { state } = await loadState($);
@@ -458,7 +493,7 @@ async function statusText($: EngineInterface): Promise<string> {
       ? (cooldownReason(state, tokens, await $.clock.now()) ??
         "No cooldown; semantic checks still apply.")
       : "Waiting for fresh model usage.";
-  return `Mode: ${config.mode}${config.mode === "auto" && !config.autoAcknowledged ? " (not confirmed)" : ""}. Minimum: ${formatTokens(config.minContextTokens)} tokens. Context: ${typeof tokens === "number" ? formatTokens(tokens) : "unknown"}${Number.isFinite(usageFraction(usage.context)) ? ` (${Math.round(usageFraction(usage.context) * 100)}% of the window; hint floor ${floorFor(usageFraction(usage.context)).toFixed(2)})` : ""}. Key: ${(await apiKey($)) ? "present" : "missing"}. ${cooldown}${engine} Request log: ${config.logRequests ? requestLogPath(await logHome($)) : "off"}. Settings: /config (compact-adviser rows) and /compact-adviser.`;
+  return `Mode: ${config.mode}${config.mode === "auto" && !config.autoAcknowledged ? " (not confirmed)" : ""}. Minimum: ${formatTokens(config.minContextTokens)} tokens. Context: ${typeof tokens === "number" ? formatTokens(tokens) : "unknown"}${Number.isFinite(usageFraction(usage.context)) ? ` (${Math.round(usageFraction(usage.context) * 100)}% of the window; hint floor ${floorFor(usageFraction(usage.context)).toFixed(2)})` : ""}. ${formatKeyStatus((await resolvedKey($)).source)}. ${cooldown}${engine} Request log: ${config.logRequests ? requestLogPath(await logHome($)) : "off"}. Settings: /config (compact-adviser rows) and /compact-adviser.`;
 }
 
 async function snoozeOrDismiss($: EngineInterface, command: "snooze" | "dismiss") {
@@ -554,6 +589,7 @@ export const register: Register = (on, options) => {
     try {
       if (!command) {
         minimumDraft = undefined;
+        keyDraft = undefined;
         statusDetails = undefined;
         await openPane($);
       } else if (["auto", "hint", "off"].includes(command) && !value) {
@@ -572,6 +608,13 @@ export const register: Register = (on, options) => {
       $.ui.toast(errorMessage(error), { timeoutMs: 8000 });
     }
     return {};
+  });
+
+  // Keep the saved key out of `/config` so the host menu never draws the secret.
+  // Hidden rows still persist through $.config.set in the same settings path as mode.
+  on("config.describe", { key: "compact-adviser.typesafeApiKey" }, async (_$, e, next) => {
+    const described = await next(e);
+    return { ...described, isHidden: true };
   });
 
   // The settings pane: the Pi extension's menu rows as engine elements.
@@ -600,6 +643,7 @@ export const register: Register = (on, options) => {
         .catch((error) => $.ui.toast(errorMessage(error), { timeoutMs: 8000 }))
         .finally(redraw);
     };
+    const savedKey = readSavedApiKey(await $.config.list(), loadedOptions);
     const children = [
       Select({
         key: "mode",
@@ -651,6 +695,40 @@ export const register: Register = (on, options) => {
             dimColor: true,
             children: "  A token count, not a percentage; no judgment below it.",
           }),
+      Text({
+        dimColor: true,
+        children: `TypeSafe API key: ${savedKey ? "saved" : "not saved"}`,
+      }),
+      Input({
+        key: "typesafeApiKey",
+        label: "TypeSafe API key",
+        value: keyDraft?.text ?? "",
+        placeholder: savedKey ? "saved · type to replace" : "paste key to save",
+        submitLabel: "set",
+        onSubmit: (text: string) => {
+          run(async () => {
+            try {
+              await changeSavedApiKey($, text);
+              keyDraft = undefined;
+            } catch (error) {
+              keyDraft = { text, error: errorMessage(error) };
+            }
+          });
+        },
+      }),
+      ...(keyDraft ? [Text({ color: "error", children: `  ${keyDraft.error}` })] : []),
+      ...(savedKey
+        ? [
+            Button({
+              key: "clearKey",
+              label: "Clear saved key",
+              onPress: () => {
+                keyDraft = undefined;
+                run(() => clearSavedApiKey($));
+              },
+            }),
+          ]
+        : []),
       Button({
         key: "reset",
         label: `Reset minimum to ${formatTokens(DEFAULT_MINIMUM)}`,

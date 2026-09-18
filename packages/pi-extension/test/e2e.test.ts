@@ -129,7 +129,7 @@ test("signed Pi: native configuration input is actually prefilled", (t) => {
     { send: "\r", wait: "Minimum context saved: 40,000 tokens" },
     { send: "\x1b[B\r", wait: "Minimum context tokens" },
     { send: "\x01\x0b60000\r", wait: "Minimum context saved: 60,000 tokens" },
-    { send: "\x1b[B\x1b[B\x1b[B\r", wait: "Minimum context saved: 40,000 tokens" },
+    { send: "\x1b[B\x1b[B\x1b[B\x1b[B\r", wait: "Minimum context saved: 40,000 tokens" },
   ]);
   assert.equal(r.store.read().minContextTokens, 40000);
   assert.ok(r.result.ok);

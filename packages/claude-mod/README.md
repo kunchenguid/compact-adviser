@@ -16,7 +16,7 @@ Re-run `npm run check` and the live regression after every Claude Code update.
 - `CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1` in Claude Code's launch environment.
 Without exactly `1` the module does nothing at all, even if Claude Code's own rollout loads it.
 - An interactive session. `-p` and SDK runs never judge, hint, or compact.
-- `TYPESAFE_API_KEY` in Claude Code's launch environment, or `TYPESAFE_API_KEY=...` in a `.env` file in the session working directory.
+- `TYPESAFE_API_KEY` in Claude Code's launch environment, a key entered in `/compact-adviser`, or `TYPESAFE_API_KEY=...` in a `.env` file in the session working directory.
 Installing this package is consent to send eligible checkpoint context to TypeSafe when a key is available and other product gates pass.
 - Nonessential network traffic allowed: under `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` Claude Code refuses every plugin network request, so no judgment can run; the mod says so and leaves context alone.
 
@@ -46,15 +46,18 @@ The live regression exercises the `--plugin-dir` path; marketplace install was v
 
 ## First-run setup
 
-1. Supply `TYPESAFE_API_KEY` to Claude Code's launch environment through your normal secret manager, or put `TYPESAFE_API_KEY=...` in a `.env` file in the working directory.
+1. Supply a [TypeSafe API key](https://console.typesafe.ai/settings/keys) in one of these ways, first match wins:
+   - A non-empty `TYPESAFE_API_KEY` in Claude Code's launch environment through your normal secret manager.
+   - A key entered in `/compact-adviser` (stored with this plugin's other options, hidden from `/config` so the value is never shown).
+   - `TYPESAFE_API_KEY=...` in a `.env` file in the working directory.
 `export` and `declare -x` prefixes are accepted, and one matching pair of quotes around the value is stripped.
-A non-empty launch-environment value always wins; the file is read only when the variable is unset or empty, and a missing file is ignored.
-Do not paste a key into any dialog or commit one to a repository.
+A missing `.env` file is ignored.
+Do not commit a key to a repository.
 2. Run `/compact-adviser` to choose the mode and minimum context, or leave the defaults (hints, 40,000 tokens).
 
 Installing this package is consent to send eligible checkpoint context to TypeSafe when a key is available and other product gates pass.
 Without a key, or with mode Off, no TypeSafe request is made.
-The key is never written to settings, the plugin store, logs, or messages.
+The key is never written to logs, status lines, or messages.
 
 ## Persistent settings
 
@@ -65,6 +68,8 @@ Mode: Hints only (default)
 Log TypeSafe requests: Off (default)
 Minimum context tokens: 40000
   A token count, not a percentage; no judgment below it.
+TypeSafe API key: not saved
+TypeSafe API key: [paste key to save]
 [ Reset minimum to 40,000 ]
 [ Status ]
 [ Close ]
@@ -80,13 +85,19 @@ Selecting Automatic does not compact immediately.
 Edit it and press Enter to validate and save.
 Blank, zero, negative, fractional, exponential, suffixed (`40k`), nonnumeric, and unsafe-integer inputs are rejected with a message beneath the field, and the typed text stays for correction.
 A value at or above the current model's window is saved with a warning; it is never clamped.
-Reset changes only the minimum, not the mode, request logging, or session cooldowns.
+Reset changes only the minimum, not the mode, request logging, the saved TypeSafe key, or session cooldowns.
 
-`mode`, `minContextTokens`, and `logRequests` are this plugin's declared `userConfig` options.
-Claude Code validates them and stores them in your user `settings.json` under `pluginConfigs["compact-adviser@…"].options`, and its own `/config` menu shows the same rows.
+**TypeSafe API key** shows whether a key is saved, never the value.
+Paste a key into the field and press Enter to save it; Clear saved key removes it.
+A non-empty launch-environment `TYPESAFE_API_KEY` still wins over the saved key; a cwd `.env` is used only when both are empty.
+
+`mode`, `minContextTokens`, `logRequests`, and `typesafeApiKey` are this plugin's declared `userConfig` options.
+Claude Code validates them and stores them in your user `settings.json` under `pluginConfigs["compact-adviser@…"].options`.
+`mode`, `minContextTokens`, and `logRequests` also appear in `/config`; `typesafeApiKey` is hidden there so the secret is never drawn.
 The automatic-mode acknowledgement lives in the plugin's own store, so only this mod's confirmation dialog can grant experimental auto.
 A legacy `sharingConsent` field in that store is ignored.
-Mode, minimum, request logging, and the acknowledgement survive restarts, `--resume`, compaction, and project changes.
+Mode, minimum, request logging, a saved TypeSafe key, and the acknowledgement survive restarts, `--resume`, compaction, and project changes.
+`/compact-adviser status` reports the key source as `env`, `saved`, `.env`, or `missing`, never the value.
 A value a managed setting owns, or any refused save, is reported as not saved.
 
 Claude Code reloads a mod whenever one of its options is saved, and prints a dim "options changed, reloaded" line for it in the transcript; that line is Claude Code's own notice, not a model message.
@@ -99,7 +110,7 @@ Claude Code reloads a mod whenever one of its options is saved, and prints a dim
 | `/compact-adviser auto` | Save automatic mode, with first-use confirmation |
 | `/compact-adviser hint` | Save hints-only mode |
 | `/compact-adviser off` | Save Off: no hints or TypeSafe requests |
-| `/compact-adviser status` | Mode, minimum, context usage, key readiness, cooldown, Claude Code's own auto-compact threshold |
+| `/compact-adviser status` | Mode, minimum, context usage, key source (`env` / `saved` / `.env` / `missing`), cooldown, Claude Code's own auto-compact threshold |
 | `/compact-adviser threshold 60000` | Save an absolute 60,000-token minimum |
 | `/compact-adviser threshold default` | Restore the constant 40,000-token minimum |
 | `/compact-adviser snooze` | Suppress advice for the next three completed exchanges |
@@ -175,7 +186,7 @@ Pricing and limits can change.
 
 | Pi extension | Claude Code mod | Why |
 | --- | --- | --- |
-| `compact-adviser.json` in Pi's agent directory holds mode, minimum, request logging, and the auto acknowledgement | `mode`, `minContextTokens`, and `logRequests` are host-stored `userConfig` options (also in `/config`); the auto acknowledgement is in the plugin store | Claude Code gives plugins a declared, validated configuration surface; a `/config` toggle must not bypass the auto confirmation |
+| `compact-adviser.json` in Pi's agent directory holds mode, minimum, request logging, a saved TypeSafe key, and the auto acknowledgement | `mode`, `minContextTokens`, and `logRequests` are host-stored `userConfig` options (also in `/config`); `typesafeApiKey` is the same settings path but hidden from `/config`; the auto acknowledgement is in the plugin store | Claude Code gives plugins a declared, validated configuration surface; `/config` must not display the API key, and a `/config` toggle must not bypass the auto confirmation |
 | Menu from Pi's select and input dialogs | One settings pane with a picker, a prefilled field, and buttons; confirmations in Claude Code's own question dialog | Same rows and flow on Claude Code's elements |
 | Judges at `agent_settled` | Judges at `turn.complete` for the main loop | Claude Code's turn end is already the settled point |
 | Hint as notice plus widget | Brief notice, a Tab-to-take `/compact` suggestion, and a hint pinned until the next turn | Claude Code's hint surfaces; the pinned line is only for actual advice |

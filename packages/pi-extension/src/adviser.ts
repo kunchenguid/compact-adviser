@@ -3,9 +3,16 @@ import type {
   ExtensionCommandContext,
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
-import { type Config, ConfigStore, DEFAULT_CONFIG, type Mode, parseMinimum } from "./config.ts";
+import {
+  type Config,
+  ConfigStore,
+  DEFAULT_CONFIG,
+  type Mode,
+  parseMinimum,
+  parseSavedApiKey,
+} from "./config.ts";
 import { snapshot } from "./context.ts";
-import { resolveTypesafeApiKey } from "./env.ts";
+import { formatKeyStatus, type ResolvedTypesafeApiKey, resolveTypesafeApiKey } from "./env.ts";
 import {
   floorFor,
   JUDGE_UNAVAILABLE_MESSAGE,
@@ -14,6 +21,7 @@ import {
   qualifies,
   requestBody,
 } from "./judge.ts";
+import { promptSecret } from "./key-input.ts";
 import { appendRequestLog, requestLogPath } from "./log.ts";
 import { promptMinimum } from "./minimum-input.ts";
 import {
@@ -36,9 +44,25 @@ interface Options {
   now?: () => number;
   evaluate?: (state: unknown, key: string, signal: AbortSignal) => Promise<Judgment>;
 }
+function savedApiKey(store: ConfigStore): string | undefined {
+  try {
+    return store.read().typesafeApiKey;
+  } catch {
+    return undefined;
+  }
+}
 export function installAdviser(pi: ExtensionAPI, options: Options): void {
   const store = new ConfigStore(options.agentDir);
-  const key = options.key ?? (() => resolveTypesafeApiKey());
+  const resolvedKey = (): ResolvedTypesafeApiKey => {
+    if (options.key) {
+      const value = options.key();
+      return value !== undefined && value.trim() !== ""
+        ? { value, source: "env" }
+        : { value: undefined, source: "missing" };
+    }
+    return resolveTypesafeApiKey(process.env, process.cwd(), savedApiKey(store));
+  };
+  const key = () => resolvedKey().value;
   const now = options.now ?? Date.now;
   const evaluate = options.evaluate ?? judge;
   const [major, minor] = options.version.split(".").map(Number);
@@ -350,7 +374,7 @@ export function installAdviser(pi: ExtensionAPI, options: Options): void {
       t = ctx.getContextUsage()?.tokens,
       u = usageFraction(ctx);
     ctx.ui.notify(
-      `Mode: ${c.mode}. Minimum: ${c.minContextTokens.toLocaleString("en-US")} tokens. Context: ${t ?? "unknown"}${Number.isFinite(u) ? ` (${Math.round(u * 100)}% of the window; hint floor ${floorFor(u).toFixed(2)})` : ""}. Key: ${key()?.trim() ? "present" : "missing"}. ${typeof t === "number" ? (cooldownReason(s, t, now()) ?? "No cooldown; semantic checks still apply.") : "Waiting for fresh model usage."} Request log: ${c.logRequests ? requestLogPath(options.agentDir) : "off"}. Settings: ${store.path}`,
+      `Mode: ${c.mode}. Minimum: ${c.minContextTokens.toLocaleString("en-US")} tokens. Context: ${t ?? "unknown"}${Number.isFinite(u) ? ` (${Math.round(u * 100)}% of the window; hint floor ${floorFor(u).toFixed(2)})` : ""}. ${formatKeyStatus(resolvedKey().source)}. ${typeof t === "number" ? (cooldownReason(s, t, now()) ?? "No cooldown; semantic checks still apply.") : "Waiting for fresh model usage."} Request log: ${c.logRequests ? requestLogPath(options.agentDir) : "off"}. Settings: ${store.path}`,
       "info",
     );
   }
@@ -363,13 +387,29 @@ export function installAdviser(pi: ExtensionAPI, options: Options): void {
         : "TypeSafe request logging off (all sessions).",
     );
   }
+  function changeSavedApiKey(ctx: ExtensionCommandContext, text: string) {
+    save(
+      ctx,
+      { typesafeApiKey: parseSavedApiKey(text) },
+      "TypeSafe API key saved (all sessions). Status shows the source, never the value.",
+    );
+  }
+  function clearSavedApiKey(ctx: ExtensionCommandContext) {
+    save(
+      ctx,
+      { typesafeApiKey: "" },
+      "Saved TypeSafe API key cleared (all sessions). Launch environment and .env still apply.",
+    );
+  }
   async function menu(ctx: ExtensionCommandContext) {
     while (true) {
       const c = store.read();
+      const keyLabel = `TypeSafe API key: ${c.typesafeApiKey ? "saved" : "not saved"}`;
       const labels = [
         `Mode: ${c.mode}`,
         `Minimum context: ${c.minContextTokens.toLocaleString("en-US")} tokens`,
         `Log TypeSafe requests: ${c.logRequests ? "on" : "off"}`,
+        keyLabel,
         "Reset minimum to 40,000",
         "Status",
         "Close",
@@ -404,7 +444,26 @@ export function installAdviser(pi: ExtensionAPI, options: Options): void {
       } else if (selected === labels[2]) {
         const logging = await ctx.ui.select("Log TypeSafe requests", ["Off (default)", "On"]);
         if (logging) await changeLogRequests(ctx, logging.startsWith("On"));
-      } else if (selected === labels[3]) minimum(ctx, "default");
+      } else if (selected === keyLabel) {
+        const actions = c.typesafeApiKey ? ["Set key", "Clear saved key"] : ["Set key"];
+        const action = await ctx.ui.select("TypeSafe API key", actions);
+        if (action === "Clear saved key") clearSavedApiKey(ctx);
+        else if (action === "Set key") {
+          while (true) {
+            const input = await promptSecret(ctx);
+            if (input === undefined) break;
+            try {
+              changeSavedApiKey(ctx, input);
+              break;
+            } catch (error) {
+              ctx.ui.notify(
+                error instanceof Error ? error.message : "Could not save the TypeSafe API key.",
+                "error",
+              );
+            }
+          }
+        }
+      } else if (selected === labels[4]) minimum(ctx, "default");
       else status(ctx);
     }
   }

@@ -14,12 +14,14 @@ import { dirname, join } from "node:path";
 import { lockSync } from "proper-lockfile";
 
 export type Mode = "hint" | "auto" | "off";
+export const MAX_SAVED_API_KEY_LENGTH = 1024;
 export interface Config {
   version: 1;
   mode: Mode;
   minContextTokens: number;
   autoAcknowledged: boolean;
   logRequests: boolean;
+  typesafeApiKey?: string;
 }
 export const DEFAULT_CONFIG: Readonly<Config> = Object.freeze({
   version: 1,
@@ -36,6 +38,20 @@ export function parseMinimum(text: string): number {
   }
   return number;
 }
+export function parseSavedApiKey(text: string): string {
+  const value = text.trim();
+  if (!value) throw new Error("Enter a TypeSafe API key, or cancel to leave it unchanged.");
+  if (value.length > MAX_SAVED_API_KEY_LENGTH) {
+    throw new Error("That value is too long to save as a TypeSafe API key.");
+  }
+  for (let i = 0; i < value.length; i++) {
+    const code = value.charCodeAt(i);
+    if (code < 32 || code === 127) {
+      throw new Error("The key cannot contain control characters.");
+    }
+  }
+  return value;
+}
 function validate(value: unknown): Config {
   if (!value || typeof value !== "object" || Array.isArray(value))
     throw new Error("Invalid settings.");
@@ -47,8 +63,16 @@ function validate(value: unknown): Config {
     !Number.isSafeInteger(c.minContextTokens) ||
     c.minContextTokens <= 0 ||
     typeof c.autoAcknowledged !== "boolean" ||
-    (c.logRequests !== undefined && typeof c.logRequests !== "boolean")
+    (c.logRequests !== undefined && typeof c.logRequests !== "boolean") ||
+    (c.typesafeApiKey !== undefined && typeof c.typesafeApiKey !== "string")
   ) {
+    throw new Error("Invalid or unsupported settings. Restore a valid version-1 configuration.");
+  }
+  const typesafeApiKey =
+    typeof c.typesafeApiKey === "string" && c.typesafeApiKey.trim() !== ""
+      ? c.typesafeApiKey.trim()
+      : undefined;
+  if (typesafeApiKey !== undefined && typesafeApiKey.length > MAX_SAVED_API_KEY_LENGTH) {
     throw new Error("Invalid or unsupported settings. Restore a valid version-1 configuration.");
   }
   return {
@@ -57,6 +81,7 @@ function validate(value: unknown): Config {
     minContextTokens: c.minContextTokens,
     autoAcknowledged: c.autoAcknowledged,
     logRequests: c.logRequests === true,
+    ...(typesafeApiKey !== undefined ? { typesafeApiKey } : {}),
   };
 }
 export class ConfigStore {
