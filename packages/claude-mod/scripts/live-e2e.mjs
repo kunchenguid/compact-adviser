@@ -433,18 +433,12 @@ try {
   await waitText("Compaction is lossy");
   await waitText("Enable automatic mode");
   key("Enter");
-  await waitText("Automatic mode saved (all sessions)", 20000);
   await waitFor(() => pluginOptions().mode === "auto", "the host to store auto mode");
-  // The confirmation dialog and hot reload can drop an Escape or return focus to an Input,
-  // where Escape only blurs it. Send one at a time and stop as soon as the pane closes so an
-  // extra Escape cannot open Claude's Rewind dialog.
-  for (let attempt = 0; attempt < 6 && screen().includes("Reset minimum to 40,000"); attempt++) {
-    key("Escape");
-    const closeDeadline = Date.now() + 3000;
-    while (screen().includes("Reset minimum to 40,000") && Date.now() < closeDeadline) {
-      await sleep(200);
-    }
-  }
+  // The confirmation reopens the pane with the mode row focused. Use its own Close button;
+  // Escape can be consumed while the host hot-reloads the saved option.
+  await waitText("Mode: Automatic (experimental)");
+  for (let i = 0; i < 6; i++) key("Tab");
+  key("Enter");
   await waitFor((s) => !s.includes("Reset minimum to 40,000"), "the pane to close");
   pass("automatic mode chosen in the pane asks first, then persists");
 
@@ -478,5 +472,5 @@ try {
   } catch {}
   server.close();
   if (process.env.COMPACT_TEST_KEEP_LAB) console.error(`lab kept at ${lab}`);
-  else rmSync(lab, { recursive: true, force: true });
+  else rmSync(lab, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 }
