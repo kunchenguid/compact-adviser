@@ -72,7 +72,5 @@ export function cooldownReason(
     (state.baseline === null || tokens - state.baseline < 20000 || state.completed < 3)
   )
     return "Waiting for 20k new tokens and 3 completed exchanges after compaction";
-  if (state.lastHintAt !== null && state.completed - state.lastHintAt < 3)
-    return "Notification cooldown";
   return undefined;
 }

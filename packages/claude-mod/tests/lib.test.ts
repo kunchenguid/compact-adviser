@@ -198,9 +198,9 @@ describe("session cooldowns", () => {
     expect(cooldownReason(s, 25000, 3)).toBeUndefined();
   });
 
-  test("hint spacing, snooze, and capped exponential backoff", () => {
+  test("a recent hint does not cooldown; snooze and capped exponential backoff still do", () => {
     const hinted = { ...initialState(false, 0), completed: 4, lastHintAt: 2 };
-    expect(cooldownReason(hinted, 60000, 0)).toBe("Notification cooldown");
+    expect(cooldownReason(hinted, 60000, 0)).toBeUndefined();
     expect(cooldownReason({ ...hinted, completed: 5 }, 60000, 0)).toBeUndefined();
     const failed = backoff(initialState(false, 0), 1000);
     expect(failed.retryAfter).toBe(11000);

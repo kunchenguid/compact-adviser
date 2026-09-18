@@ -132,7 +132,7 @@ Cached input counts toward context; cumulative spending does not determine eligi
 - More than approximately 20k tokens of actual conversation history, so a large static system prompt alone does not justify compaction.
 - A key, and no error backoff or snooze.
 - After successful compaction: fresh usage, at least 20k growth from the first post-compaction usage, and three completed exchanges.
-- At least three exchanges between hints, and a materially different current-user/final-reply checkpoint fingerprint.
+- A materially different current-user/final-reply checkpoint fingerprint than the last hint.
 
 Cooldown facts persist as small Pi custom entries on the active branch and are restored on reload/navigation.
 They do not enter model context.

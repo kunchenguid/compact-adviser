@@ -11,9 +11,11 @@ import { test } from "node:test";
 import * as claude from "../../claude-mod/lib/judge.ts";
 import * as claudeLog from "../../claude-mod/lib/log.ts";
 import * as claudeSnapshot from "../../claude-mod/lib/snapshot.ts";
+import * as claudeState from "../../claude-mod/lib/state.ts";
 import * as piContext from "../src/context.ts";
 import * as pi from "../src/judge.ts";
 import * as piLog from "../src/log.ts";
+import * as piState from "../src/state.ts";
 
 /** Shaped like a real `snapshot()`, small enough to stay well under the cap. */
 const state = {
@@ -172,4 +174,84 @@ test("both packages write the same TypeSafe log line shape", () => {
     claudeLog.loggedJudgeErrorKind(new Error("boom")),
     piLog.loggedJudgeErrorKind(new Error("boom")),
   );
+});
+
+test("both packages apply the same cooldownReason gates", () => {
+  const waiting = "Waiting for 20k new tokens and 3 completed exchanges after compaction";
+  const cases: Array<{
+    name: string;
+    tokens: number;
+    now: number;
+    compacted: boolean;
+    patch: {
+      completed?: number;
+      snoozeUntil?: number;
+      retryAfter?: number;
+      lastHintAt?: number | null;
+      baseline?: number | null;
+    };
+    reason: string | undefined;
+  }> = [
+    { name: "fresh", tokens: 50000, now: 0, compacted: false, patch: {}, reason: undefined },
+    {
+      name: "recent hint is not a cooldown",
+      tokens: 60000,
+      now: 0,
+      compacted: false,
+      patch: { completed: 4, lastHintAt: 2 },
+      reason: undefined,
+    },
+    {
+      name: "snooze",
+      tokens: 90000,
+      now: 5,
+      compacted: false,
+      patch: { snoozeUntil: 3, completed: 0 },
+      reason: "Snoozed",
+    },
+    {
+      name: "typesafe backoff",
+      tokens: 60000,
+      now: 10999,
+      compacted: false,
+      patch: { retryAfter: 11000 },
+      reason: "TypeSafe backoff",
+    },
+    {
+      name: "post-compaction no baseline",
+      tokens: 90000,
+      now: 1,
+      compacted: true,
+      patch: { completed: 1, baseline: null },
+      reason: waiting,
+    },
+    {
+      name: "post-compaction short of tokens",
+      tokens: 24999,
+      now: 3,
+      compacted: true,
+      patch: { completed: 3, baseline: 5000 },
+      reason: waiting,
+    },
+    {
+      name: "post-compaction cleared",
+      tokens: 25000,
+      now: 3,
+      compacted: true,
+      patch: { completed: 3, baseline: 5000 },
+      reason: undefined,
+    },
+  ];
+  for (const c of cases) {
+    const pi = {
+      ...piState.initialState(c.compacted ? "compact-1" : null),
+      ...c.patch,
+    };
+    const claude = {
+      ...claudeState.initialState(c.compacted, c.now),
+      ...c.patch,
+    };
+    assert.equal(piState.cooldownReason(pi, c.tokens, c.now), c.reason, `pi ${c.name}`);
+    assert.equal(claudeState.cooldownReason(claude, c.tokens, c.now), c.reason, `claude ${c.name}`);
+  }
 });

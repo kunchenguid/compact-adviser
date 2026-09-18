@@ -135,7 +135,7 @@ Usage is unknown immediately after a compaction until the next response; the mod
 - More than approximately 20k tokens of actual conversation text, so a large static prompt alone does not justify compaction.
 - No error backoff or snooze.
 - After any compaction (yours, Claude Code's automatic one, or this mod's): fresh usage, at least 20k growth from the first post-compaction usage, and three completed exchanges.
-- At least three exchanges between hints, and a different latest-ask/latest-reply checkpoint fingerprint.
+- A different latest-ask/latest-reply checkpoint fingerprint than the last hint.
 
 Cooldown facts live in the plugin's store keyed by session id and are pruned after 30 days.
 A new turn, any compaction, or a settings save invalidates an outstanding judgment.

@@ -379,7 +379,7 @@ describe("turn-end gates", () => {
     expect(w.journal.statuses.includes(HINT)).toBe(false);
   });
 
-  test("no repeat at the same checkpoint, and three exchanges between hints", async ($, on) => {
+  test("no repeat at the same checkpoint; a new checkpoint can hint immediately", async ($, on) => {
     const w = world(on);
     await $.session.start(interactiveStart);
     await turnEnd($, w);
@@ -392,7 +392,8 @@ describe("turn-end gates", () => {
     expect(stored(w).lastHintAt).toBe(5);
     w.messages = longConversation("And a changelog entry.");
     await turn($, w, "new-2");
-    expect(w.journal.requests).toHaveLength(2);
+    expect(w.journal.requests).toHaveLength(3);
+    expect(stored(w).lastHintAt).toBe(6);
   });
 
   test("the hint floor slides with context usage: a finished coordinating unit hints only once the window is fuller", async ($, on) => {

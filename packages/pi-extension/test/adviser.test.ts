@@ -32,6 +32,18 @@ test("threshold is a constant 40k and requests only run at settlement", async (t
   assert.equal(h.calls, 1);
 });
 
+test("a new checkpoint can be judged immediately; the same checkpoint is not", async (t) => {
+  const h = harness(t);
+  h.enable();
+  await h.fire("agent_settled");
+  assert.equal(h.calls, 1);
+  await h.fire("agent_settled");
+  assert.equal(h.calls, 1);
+  h.next("Now add the README section.");
+  await h.fire("agent_settled");
+  assert.equal(h.calls, 2);
+});
+
 test("the hint floor slides with context usage: a finished coordinating unit hints only once the window is fuller", async (t) => {
   // finished but coordinating scores 0.5: below the 0.87 floor at 17 % of the
   // 272k window, at the 0.50 floor from 90 % on. Same judgment, different window fill.
