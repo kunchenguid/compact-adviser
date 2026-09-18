@@ -122,6 +122,21 @@ test("bounded snapshot excludes system prompt, thinking, images and known secret
 test("a compact-adviser.json read keeps mode diagnostics and drops the saved key from the body", (t) => {
   const h = harness(t);
   const secret = "tsk-saved-key-must-not-leave";
+  const artifact = `notes-${secret}.md`;
+  writeFileSync(join(h.dir, artifact), "ok");
+  h.sm.appendMessage({
+    ...assistant(""),
+    content: [
+      {
+        type: "toolCall",
+        id: "write-notes",
+        name: "write",
+        arguments: { path: artifact },
+      },
+    ],
+    stopReason: "toolUse",
+  });
+  h.sm.appendMessage(toolResult("ok", "write", "write-notes"));
   h.sm.appendMessage({
     ...assistant(""),
     content: [
@@ -154,6 +169,7 @@ test("a compact-adviser.json read keeps mode diagnostics and drops the saved key
   assert.ok(body.includes("40000"));
   assert.ok(body.includes("[REDACTED]"));
   assert.equal(view.state.coverage.redacted, true);
+  assert.deepEqual(view.state.savedArtifacts, ["notes-[REDACTED].md"]);
 });
 
 test("recent tail keeps the last 64 messages and still clips to byte budgets", (t) => {

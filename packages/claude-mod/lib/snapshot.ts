@@ -263,7 +263,11 @@ export function snapshot(
     userConstraints: users,
     recent,
     previousSummary: summary,
-    savedArtifacts: [...artifacts].slice(-8).map((p) => clip(p, 256).text),
+    savedArtifacts: [...artifacts].slice(-8).map((p) => {
+      const cleaned = sanitizeText(p, secrets);
+      redacted ||= cleaned.redacted;
+      return clip(cleaned.text, 256).text;
+    }),
     coverage: {
       omittedUserMessages: omittedUsers,
       olderMessagesOmitted: Math.max(0, messages.length - RECENT_TAIL_MESSAGES),

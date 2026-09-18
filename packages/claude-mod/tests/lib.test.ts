@@ -266,6 +266,18 @@ describe("judge input", () => {
         ...longConversation(),
         {
           role: "assistant",
+          text: "Saved notes.",
+          toolUses: [
+            {
+              tool_use_id: "write-notes",
+              tool: "Write",
+              input: { file_path: `/tmp/notes-${secret}.md` },
+              text: "ok",
+            },
+          ],
+        },
+        {
+          role: "assistant",
           text: "Read the plugin settings.",
           toolUses: [
             {
@@ -296,6 +308,7 @@ describe("judge input", () => {
     expect(body).toContain("40000");
     expect(body).toContain("[REDACTED]");
     expect(view.state.coverage.redacted).toBe(true);
+    expect(view.state.savedArtifacts).toContain("/tmp/notes-[REDACTED].md");
   });
 
   test("recent tail keeps the last 64 assistant messages when they fit the byte budget", () => {

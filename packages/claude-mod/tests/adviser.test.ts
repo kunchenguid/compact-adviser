@@ -111,6 +111,18 @@ describe("turn-end gates", () => {
       ...w.messages,
       {
         role: "assistant",
+        text: "Saved notes.",
+        toolUses: [
+          {
+            tool_use_id: "write-notes",
+            tool: "Write",
+            input: { file_path: `/tmp/notes-${secret}.md` },
+            text: "ok",
+          },
+        ],
+      },
+      {
+        role: "assistant",
         text: "Read the plugin settings.",
         toolUses: [
           {

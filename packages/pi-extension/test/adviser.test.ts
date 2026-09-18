@@ -398,6 +398,21 @@ test("a saved key in a compact-adviser.json read is absent from the request body
   const secret = "tsk-saved-key-must-not-leave";
   h.store.update({ typesafeApiKey: secret, logRequests: true });
   h.enable();
+  const artifact = `notes-${secret}.md`;
+  writeFileSync(`${h.dir}/${artifact}`, "ok");
+  h.sm.appendMessage({
+    ...assistant(""),
+    content: [
+      {
+        type: "toolCall",
+        id: "write-notes",
+        name: "write",
+        arguments: { path: artifact },
+      },
+    ],
+    stopReason: "toolUse",
+  });
+  h.sm.appendMessage(toolResult("ok", "write", "write-notes"));
   h.sm.appendMessage({
     ...assistant(""),
     content: [
