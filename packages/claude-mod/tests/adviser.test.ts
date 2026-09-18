@@ -999,6 +999,23 @@ describe("settings pane", () => {
     expect(rows(await $.ui.render(pane))[3]).toBe("TypeSafe API key from the environment");
   });
 
+  test("a denied clear keeps the key view and the saved key", async ($, on) => {
+    const secret = "tsk-menu-fixture-not-for-display";
+    const w = world(on, { key: undefined, savedKey: secret });
+    await $.session.start(interactiveStart);
+    await $.ui.render(pane);
+    await $.ui.press({ plugin: PLUGIN, key: "menu:typesafeApiKey" });
+    await $.ui.render(pane);
+    w.denyConfig("a managed setting owns this row");
+    await $.ui.press({ plugin: PLUGIN, key: "clearKey" });
+    await drain(w);
+    expect(w.rows.get(`${PLUGIN}.typesafeApiKey`)).toBe(secret);
+    expect(w.journal.toasts.at(-1)).toBe("Not saved: a managed setting owns this row");
+    const tree = await $.ui.render(pane);
+    expect(rows(tree)).toEqual(["Clear saved key", "Back"]);
+    expect(elements(tree).find((e) => e.type === "Input")?.props.key).toBe("typesafeApiKey");
+  });
+
   test("without any key the list says so and the view explains where one can come from", async ($, on) => {
     world(on, { key: undefined });
     await $.session.start(interactiveStart);

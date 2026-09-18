@@ -98,8 +98,8 @@ let menuRow = "menu:mode";
 // Where the ring should land once the next drawing is up: the engine keeps a moved ring
 // at its position, so a view change places it itself.
 let pendingFocus: string | undefined;
-let minimumDraft: { text: string; error: string } | undefined;
-let keyDraft: { text: string; error: string } | undefined;
+let minimumDraft: { text: string; error?: string } | undefined;
+let keyDraft: { text: string; error?: string } | undefined;
 let statusDetails: string | undefined;
 
 function isActivated($: EngineInterface): Promise<boolean> {
@@ -603,8 +603,8 @@ async function changeSavedApiKey($: EngineInterface, text: string): Promise<bool
   );
 }
 
-async function clearSavedApiKey($: EngineInterface): Promise<void> {
-  await saveRow(
+async function clearSavedApiKey($: EngineInterface): Promise<boolean> {
+  return saveRow(
     $,
     API_KEY_KEY,
     "",
@@ -897,15 +897,15 @@ export const register: Register = (on, options) => {
           onSubmit: (text: string) => {
             run(async () => {
               try {
-                await changeMinimum($, text);
-                showMenu();
+                if (await changeMinimum($, text)) showMenu();
+                else minimumDraft = { text };
               } catch (error) {
                 minimumDraft = { text, error: errorMessage(error) };
               }
             });
           },
         }),
-        minimumDraft
+        minimumDraft?.error
           ? Text({ color: "error", children: minimumDraft.error })
           : Text({
               dimColor: true,
@@ -929,15 +929,15 @@ export const register: Register = (on, options) => {
           onSubmit: (text: string) => {
             run(async () => {
               try {
-                await changeSavedApiKey($, text);
-                showMenu();
+                if (await changeSavedApiKey($, text)) showMenu();
+                else keyDraft = { text };
               } catch (error) {
                 keyDraft = { text, error: errorMessage(error) };
               }
             });
           },
         }),
-        ...(keyDraft ? [Text({ color: "error", children: keyDraft.error })] : []),
+        ...(keyDraft?.error ? [Text({ color: "error", children: keyDraft.error })] : []),
         list(
           [
             ...(savedKey
@@ -946,8 +946,9 @@ export const register: Register = (on, options) => {
                     key: "clearKey",
                     label: "Clear saved key",
                     onPress: () => {
-                      showMenu();
-                      run(() => clearSavedApiKey($));
+                      run(async () => {
+                        if (await clearSavedApiKey($)) showMenu();
+                      });
                     },
                   },
                 ]
