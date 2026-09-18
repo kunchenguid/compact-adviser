@@ -380,7 +380,12 @@ try {
   key("Enter");
   await waitText("Automatic mode saved (all sessions)", 20000);
   await waitFor(() => pluginOptions().mode === "auto", "the host to store auto mode");
-  key("Escape");
+  // The pane can return focus to an Input after the confirmation dialog and hot reload.
+  // Its first Escape blurs that input; a second Escape closes the pane.
+  for (let i = 0; i < 2 && screen().includes("Reset minimum to 40,000"); i++) {
+    key("Escape");
+    await sleep(300);
+  }
   await waitFor((s) => !s.includes("Reset minimum to 40,000"), "the pane to close");
   pass("automatic mode chosen in the pane asks first, then persists");
 
