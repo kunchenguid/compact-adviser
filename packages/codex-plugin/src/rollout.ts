@@ -187,7 +187,7 @@ function processExitCode(value: unknown): number | undefined {
       } catch {
       }
     }
-    const match = /^Process exited with code (-?\d+)\b/.exec(trimmed);
+    const match = /^Process exited with code (-?\d+)\b/m.exec(trimmed);
     return match ? Number(match[1]) : undefined;
   }
   if (Array.isArray(value)) {

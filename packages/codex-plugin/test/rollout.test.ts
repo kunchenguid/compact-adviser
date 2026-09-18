@@ -208,6 +208,54 @@ test("a plain-text process envelope with a non-zero exit is an error", () => {
   assert.ok(rollout.messages[0]?.toolUses[0]?.text?.includes("command failed"));
 });
 
+test("a prefixed plain-text process envelope with a non-zero exit is an error", () => {
+  const rollout = mapRecords([
+    toolCall("shell", "{}"),
+    {
+      type: "response_item",
+      payload: {
+        type: "custom_tool_call_output",
+        call_id: "call_1",
+        output: [
+          {
+            type: "input_text",
+            text: [
+              "Script completed",
+              "Wall time 0.1 seconds",
+              "Output:",
+              "command failed",
+              "Process exited with code 1",
+            ].join("\n"),
+          },
+        ],
+      },
+    },
+  ]);
+  assert.equal(rollout.messages[0]?.toolUses[0]?.isError, true);
+  assert.ok(rollout.messages[0]?.toolUses[0]?.text?.includes("command failed"));
+});
+
+test("a plain-text process envelope with exit code 0 is not an error", () => {
+  const rollout = mapRecords([
+    toolCall("shell", "{}"),
+    {
+      type: "response_item",
+      payload: {
+        type: "custom_tool_call_output",
+        call_id: "call_1",
+        output: [
+          {
+            type: "input_text",
+            text: "Process exited with code 0\nFinal output:\nok",
+          },
+        ],
+      },
+    },
+  ]);
+  assert.equal(rollout.messages[0]?.toolUses[0]?.isError, undefined);
+  assert.ok(rollout.messages[0]?.toolUses[0]?.text?.includes("ok"));
+});
+
 test("a content-array plain-text process envelope with a non-zero exit is an error", () => {
   const rollout = mapRecords([
     toolCall("shell", "{}"),
