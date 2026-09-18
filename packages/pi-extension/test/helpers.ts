@@ -141,7 +141,7 @@ export function harness(
             {},
             { fg: (color, text) => (color === "warning" ? `warning:${text}` : text) },
           );
-          widgets.push(component.render(80));
+          widgets.push(component.render(120));
           return;
         }
         widgets.push(content);

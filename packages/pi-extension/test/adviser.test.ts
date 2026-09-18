@@ -12,7 +12,7 @@ import { requestLogPath } from "../src/log.ts";
 import { restoreState } from "../src/state.ts";
 import { apiResponse, assistant, flush, harness, success, toolResult } from "./helpers.ts";
 
-const HINT = "Compact adviser: Run /compact to save tokens.";
+const HINT = "Compact adviser: work appears completed or recorded. Run /compact to save tokens.";
 const HINT_LINE = `warning:${HINT}`;
 function lastWidget(h: ReturnType<typeof harness>) {
   return h.widgets.at(-1);

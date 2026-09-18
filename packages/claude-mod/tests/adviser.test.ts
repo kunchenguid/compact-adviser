@@ -27,7 +27,7 @@ import {
 } from "./support.ts";
 
 const MESSAGES = [{ role: "user" as const, text: "hello", toolUses: [] }];
-const HINT = "Compact adviser: Run /compact to save tokens.";
+const HINT = "Compact adviser: work appears completed or recorded. Run /compact to save tokens.";
 
 function lastJsonl(write: { text: string } | undefined) {
   const lines = (write?.text ?? "").trim().split("\n").filter(Boolean);
@@ -102,7 +102,7 @@ describe("turn-end gates", () => {
     expect(w.journal.statuses.at(-1)).toContain(HINT);
     expect(w.journal.statuses.at(-1)).toContain("\x1b[33m");
     expect(w.journal.toasts.includes(HINT)).toBe(false);
-    expect(w.journal.suggestions).toEqual(["/compact"]);
+    expect(w.journal.suggestions).toEqual([]);
     expect(w.journal.compactions).toHaveLength(0);
     expect(w.journal.fsWrites).toHaveLength(0);
   });

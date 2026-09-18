@@ -153,7 +153,12 @@ test("signed Pi: real settled event produces the hint and a complete Jev decisio
   const r = run(
     t,
     "hint",
-    [{ send: "Finish the fixture report.\r", wait: "Run /compact to save tokens." }],
+    [
+      {
+        send: "Finish the fixture report.\r",
+        wait: "Compact adviser: work appears completed or recorded. Run /compact to save tokens.",
+      },
+    ],
     false,
     { logRequests: true },
   );
@@ -190,7 +195,11 @@ test("signed Pi: knee floor withholds a coordinating hint until 90% usage", (t) 
     { inputTokens: 45000, coordinating: true, logRequests: true },
   );
   assert.equal(early.events.filter((e) => e.event === "jev").length, 1);
-  assert.ok(!early.result.tail.includes("Run /compact to save tokens."));
+  assert.ok(
+    !early.result.tail.includes(
+      "Compact adviser: work appears completed or recorded. Run /compact to save tokens.",
+    ),
+  );
   assert.equal(early.logLines.length, 2);
   assert.equal(early.logLines[1].kind, "response");
   assert.equal(early.logLines[1].qualifies, false);
@@ -202,7 +211,12 @@ test("signed Pi: knee floor withholds a coordinating hint until 90% usage", (t) 
   const full = run(
     t,
     "hint",
-    [{ send: "Finish the nearly-full fixture report.\r", wait: "Run /compact to save tokens." }],
+    [
+      {
+        send: "Finish the nearly-full fixture report.\r",
+        wait: "Compact adviser: work appears completed or recorded. Run /compact to save tokens.",
+      },
+    ],
     false,
     { inputTokens: 245000, coordinating: true },
   );
@@ -221,7 +235,12 @@ test("signed Pi: production-only independent package installs and loads through 
   const r = run(
     t,
     "hint",
-    [{ send: "Finish the installed package fixture.\r", wait: "Run /compact to save tokens." }],
+    [
+      {
+        send: "Finish the installed package fixture.\r",
+        wait: "Compact adviser: work appears completed or recorded. Run /compact to save tokens.",
+      },
+    ],
     true,
   );
   assert.equal(r.events.filter((e) => e.event === "jev").length, 1);

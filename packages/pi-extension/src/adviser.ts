@@ -35,7 +35,7 @@ import {
 } from "./state.ts";
 
 const LABEL = "compact-adviser";
-const HINT = "Compact adviser: Run /compact to save tokens.";
+const HINT = "Compact adviser: work appears completed or recorded. Run /compact to save tokens.";
 const USAGE =
   "Use /compact-adviser, auto, hint, off, status, threshold <tokens|default>, snooze or dismiss.";
 interface Options {

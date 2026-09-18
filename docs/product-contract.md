@@ -6,7 +6,7 @@ Each harness implementation owns its event handling, dependencies, installation,
 ## Semantics
 
 - Modes: `hint` (default), `auto` (explicit experimental opt-in), and `off`.
-- Hint text: **Run /compact to save tokens.**
+- Hint text: **Compact adviser: work appears completed or recorded. Run /compact to save tokens.**
 - `minContextTokens` defaults to the constant **40000**, is configurable and persists with the selected mode.
 There is no percentage-of-context-window condition.
 - A size threshold makes a checkpoint eligible for judgment; it does not order compaction.
