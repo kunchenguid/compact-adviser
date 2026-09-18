@@ -199,6 +199,50 @@ test("a TypeSafe timeout aborts the in-flight request and stays silent", async (
   });
 });
 
+test("a concurrent off after TypeSafe returns is honoured and does not hint", async () => {
+  await withLab(async (lab) => {
+    writeRollout(lab.transcript, settledRollout());
+    const root = adviserRoot({ CODEX_HOME: lab.home });
+    const typesafe = fakeTypesafe();
+    const fetch: Environment["fetch"] = async (url, init) => {
+      new ConfigStore(root).update({ mode: "off" });
+      return typesafe.fetch(url, init);
+    };
+
+    const output = await handle(stop(lab), environment(lab, { fetch }));
+
+    assert.deepEqual(output, {});
+    assert.equal(typesafe.requests.length, 1);
+    assert.equal(new SessionStore(root).read("s1", 0).state.lastHintKey, null);
+  });
+});
+
+test("a concurrent snooze after TypeSafe returns is preserved and does not hint", async () => {
+  await withLab(async (lab) => {
+    writeRollout(lab.transcript, settledRollout());
+    const root = adviserRoot({ CODEX_HOME: lab.home });
+    const typesafe = fakeTypesafe();
+    const fetch: Environment["fetch"] = async (url, init) => {
+      const store = new SessionStore(root);
+      const record = store.read("s1", 1_000_000);
+      store.write("s1", {
+        ...record.state,
+        snoozeUntil: record.state.completed + 4,
+        updatedAt: 1_000_001,
+      });
+      return typesafe.fetch(url, init);
+    };
+
+    const output = await handle(stop(lab), environment(lab, { fetch }));
+    const state = new SessionStore(root).read("s1", 1_000_000).state;
+
+    assert.deepEqual(output, {});
+    assert.equal(typesafe.requests.length, 1);
+    assert.equal(state.snoozeUntil, 5);
+    assert.equal(state.lastHintKey, null);
+  });
+});
+
 test("a TypeSafe failure backs off and stays silent", async () => {
   await withLab(async (lab) => {
     writeRollout(lab.transcript, settledRollout());

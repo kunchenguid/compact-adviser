@@ -132,8 +132,42 @@ function toolPaths(name: string, input: string): string[] {
   return name === "apply_patch" ? patchPaths(input) : argumentPaths(input);
 }
 
+function processExitCode(value: unknown): number | undefined {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+      try {
+        return processExitCode(JSON.parse(trimmed));
+      } catch {
+        return undefined;
+      }
+    }
+    return undefined;
+  }
+  if (Array.isArray(value)) {
+    for (const part of value) {
+      const code = processExitCode((part as { text?: unknown } | null)?.text);
+      if (code !== undefined) return code;
+    }
+    return undefined;
+  }
+  if (value && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    const meta = record.metadata;
+    if (meta && typeof meta === "object" && !Array.isArray(meta)) {
+      const code = processExitCode((meta as Record<string, unknown>).exit_code);
+      if (code !== undefined) return code;
+    }
+    return processExitCode(record.exit_code);
+  }
+  return undefined;
+}
+
 /** True when the tool output records a failure rather than a result. */
 function isFailure(output: unknown): boolean {
+  const code = processExitCode(output);
+  if (code !== undefined) return code !== 0;
   if (!output || typeof output !== "object" || Array.isArray(output)) return false;
   const record = output as Record<string, unknown>;
   return record.success === false || record.status === "failed" || record.status === "error";
@@ -157,6 +191,72 @@ function outputText(output: unknown): string {
  * records. A `compaction` record becomes the prior summary the snapshot already knows how to
  * read, which is how the same field is filled on the other two hosts.
  */
+function consumeResponseItem(
+  payload: Record<string, unknown>,
+  messages: MessageLike[],
+  pending: Map<string, ToolUseLike>,
+): void {
+  if (payload.type === "message") {
+    const text = textOf(payload.content).trim();
+    if (!text) return;
+    if (payload.role === "assistant") {
+      messages.push({ role: "assistant", text, toolUses: [] });
+    } else if (payload.role === "user") {
+      if (INJECTED_USER_PREFIXES.some((prefix) => text.startsWith(prefix))) return;
+      messages.push({ role: "user", text, toolUses: [] });
+    }
+    return;
+  }
+
+  if (payload.type === "compaction") {
+    const text = textOf(payload.content ?? payload.summary ?? payload.text).trim();
+    if (text) messages.push({ role: "user", text: `${SUMMARY_PREFIX}: ${text}`, toolUses: [] });
+    return;
+  }
+
+  if (payload.type === "custom_tool_call" || payload.type === "function_call") {
+    const name = typeof payload.name === "string" ? payload.name : "tool";
+    const raw = payload.type === "custom_tool_call" ? payload.input : payload.arguments;
+    const input = typeof raw === "string" ? raw : "";
+    const use: ToolUseLike = { tool: name, paths: toolPaths(name, input) };
+    messages.push({ role: "assistant", text: "", toolUses: [use] });
+    if (typeof payload.call_id === "string") pending.set(payload.call_id, use);
+    return;
+  }
+
+  if (payload.type === "custom_tool_call_output" || payload.type === "function_call_output") {
+    const use = typeof payload.call_id === "string" ? pending.get(payload.call_id) : undefined;
+    if (!use) return;
+    pending.delete(payload.call_id as string);
+    use.text = outputText(payload.output);
+    if (isFailure(payload.output)) use.isError = true;
+  }
+}
+
+function applyCompacted(
+  payload: unknown,
+  messages: MessageLike[],
+  pending: Map<string, ToolUseLike>,
+): void {
+  messages.length = 0;
+  pending.clear();
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return;
+  const record = payload as Record<string, unknown>;
+  const history = Array.isArray(record.replacement_history) ? record.replacement_history : [];
+  for (const item of history) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) continue;
+    consumeResponseItem(item as Record<string, unknown>, messages, pending);
+  }
+  const summary = typeof record.message === "string" ? record.message.trim() : "";
+  if (summary && !messages.some((m) => m.role === "user" && m.text.startsWith(SUMMARY_PREFIX))) {
+    messages.push({
+      role: "user",
+      text: summary.startsWith(SUMMARY_PREFIX) ? summary : `${SUMMARY_PREFIX}: ${summary}`,
+      toolUses: [],
+    });
+  }
+}
+
 export function mapRecords(records: readonly unknown[]): Rollout {
   const messages: MessageLike[] = [];
   const pending = new Map<string, ToolUseLike>();
@@ -166,6 +266,11 @@ export function mapRecords(records: readonly unknown[]): Rollout {
 
   for (const record of records) {
     const entry = record as { type?: unknown; payload?: unknown } | null;
+    if (entry?.type === "compacted") {
+      applyCompacted(entry.payload, messages, pending);
+      continue;
+    }
+
     const payload = (entry?.payload ?? null) as Record<string, unknown> | null;
     if (!payload || typeof payload !== "object") continue;
 
@@ -183,42 +288,7 @@ export function mapRecords(records: readonly unknown[]): Rollout {
     }
 
     if (entry?.type !== "response_item") continue;
-
-    if (payload.type === "message") {
-      const text = textOf(payload.content).trim();
-      if (!text) continue;
-      if (payload.role === "assistant") {
-        messages.push({ role: "assistant", text, toolUses: [] });
-      } else if (payload.role === "user") {
-        if (INJECTED_USER_PREFIXES.some((prefix) => text.startsWith(prefix))) continue;
-        messages.push({ role: "user", text, toolUses: [] });
-      }
-      continue;
-    }
-
-    if (payload.type === "compaction") {
-      const text = textOf(payload.content ?? payload.summary ?? payload.text).trim();
-      if (text) messages.push({ role: "user", text: `${SUMMARY_PREFIX}: ${text}`, toolUses: [] });
-      continue;
-    }
-
-    if (payload.type === "custom_tool_call" || payload.type === "function_call") {
-      const name = typeof payload.name === "string" ? payload.name : "tool";
-      const raw = payload.type === "custom_tool_call" ? payload.input : payload.arguments;
-      const input = typeof raw === "string" ? raw : "";
-      const use: ToolUseLike = { tool: name, paths: toolPaths(name, input) };
-      messages.push({ role: "assistant", text: "", toolUses: [use] });
-      if (typeof payload.call_id === "string") pending.set(payload.call_id, use);
-      continue;
-    }
-
-    if (payload.type === "custom_tool_call_output" || payload.type === "function_call_output") {
-      const use = typeof payload.call_id === "string" ? pending.get(payload.call_id) : undefined;
-      if (!use) continue;
-      pending.delete(payload.call_id as string);
-      use.text = outputText(payload.output);
-      if (isFailure(payload.output)) use.isError = true;
-    }
+    consumeResponseItem(payload, messages, pending);
   }
 
   return {

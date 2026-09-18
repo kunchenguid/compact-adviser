@@ -74,6 +74,59 @@ test("a compaction record becomes the prior summary the snapshot already reads",
   assert.ok(rollout.messages[0]?.text.includes("earlier work"));
 });
 
+test("an outer compacted record replaces earlier history with its replacement and summary", () => {
+  const rollout = mapRecords([
+    sessionMeta(),
+    userMessage("old ask that must not survive"),
+    toolCall("apply_patch", "*** Begin Patch\n*** Update File: src/old.ts\n*** End Patch"),
+    toolOutput("Applied old."),
+    assistantMessage("old answer"),
+    {
+      type: "compacted",
+      payload: {
+        message: `${SUMMARY_PREFIX}\nparser work so far`,
+        replacement_history: [
+          {
+            type: "message",
+            role: "user",
+            content: [{ type: "input_text", text: "Ship the remaining tests." }],
+          },
+        ],
+      },
+    },
+    assistantMessage("Done: tests pass."),
+    tokenCount(50000),
+  ]);
+  assert.equal(rollout.originator, "codex-tui");
+  assert.equal(rollout.tokens, 50000);
+  assert.ok(!rollout.messages.some((m) => m.text.includes("old ask")));
+  assert.ok(!rollout.messages.some((m) => m.toolUses.some((use) => use.paths?.includes("src/old.ts"))));
+  assert.ok(
+    rollout.messages.some(
+      (m) =>
+        m.role === "user" && m.text.startsWith(SUMMARY_PREFIX) && m.text.includes("parser work so far"),
+    ),
+  );
+  assert.deepEqual(
+    rollout.messages.map((m) => m.text),
+    ["Ship the remaining tests.", `${SUMMARY_PREFIX}\nparser work so far`, "Done: tests pass."],
+  );
+});
+
+test("a malformed compacted record drops pre-compaction context instead of keeping it", () => {
+  const rollout = mapRecords([
+    userMessage("stale pre-compaction ask"),
+    assistantMessage("stale pre-compaction answer"),
+    { type: "compacted", payload: { replacement_history: "not-an-array" } },
+    assistantMessage("after compact"),
+  ]);
+  assert.ok(!rollout.messages.some((m) => m.text.includes("stale")));
+  assert.deepEqual(
+    rollout.messages.map((m) => m.text),
+    ["after compact"],
+  );
+});
+
 test("a failed tool result is marked as an error", () => {
   const rollout = mapRecords([
     toolCall("shell", "{}"),
@@ -88,6 +141,52 @@ test("a failed tool result is marked as an error", () => {
   ]);
   assert.equal(rollout.messages[0]?.toolUses[0]?.isError, true);
   assert.equal(rollout.messages[0]?.toolUses[0]?.text, "exit 1");
+});
+
+test("a string tool output with a non-zero process exit is an error", () => {
+  const rollout = mapRecords([
+    {
+      type: "response_item",
+      payload: { type: "function_call", name: "shell", arguments: "{}", call_id: "call_1" },
+    },
+    {
+      type: "response_item",
+      payload: {
+        type: "function_call_output",
+        call_id: "call_1",
+        output: JSON.stringify({
+          output: "command failed",
+          metadata: { exit_code: 1, duration_seconds: 0.2 },
+        }),
+      },
+    },
+  ]);
+  assert.equal(rollout.messages[0]?.toolUses[0]?.isError, true);
+  assert.ok(rollout.messages[0]?.toolUses[0]?.text?.includes("command failed"));
+});
+
+test("a content-array tool output with a non-zero process exit is an error", () => {
+  const rollout = mapRecords([
+    toolCall("shell", "{}"),
+    {
+      type: "response_item",
+      payload: {
+        type: "custom_tool_call_output",
+        call_id: "call_1",
+        output: [
+          {
+            type: "input_text",
+            text: JSON.stringify({
+              output: "command failed",
+              metadata: { exit_code: 1, duration_seconds: 0.2 },
+            }),
+          },
+        ],
+      },
+    },
+  ]);
+  assert.equal(rollout.messages[0]?.toolUses[0]?.isError, true);
+  assert.ok(rollout.messages[0]?.toolUses[0]?.text?.includes("command failed"));
 });
 
 test("usage comes from the last token_count record and degrades to NaN", () => {

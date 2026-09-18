@@ -202,7 +202,8 @@ async function onStop(payload: HookPayload, environment: Environment): Promise<H
     }
     // Silence is the only honest report here: Codex's one channel is a permanent scrollback
     // line, and a transient TypeSafe failure is not worth one. Backoff keeps retries rare.
-    sessions.write(sessionId, backoff(state, environment.now()), usage);
+    const current = sessions.read(sessionId, environment.now()).state;
+    sessions.write(sessionId, backoff(current, environment.now()), usage);
     return {};
   }
 
@@ -219,14 +220,21 @@ async function onStop(payload: HookPayload, environment: Environment): Promise<H
     }
   }
 
-  const cleared = { ...state, failures: 0, retryAfter: 0, updatedAt: environment.now() };
-  if (!qualifies(result, fraction)) {
-    sessions.write(sessionId, cleared, usage);
+  const nowAfter = environment.now();
+  const latestConfig = new ConfigStore(root).read();
+  const current = sessions.read(sessionId, nowAfter).state;
+  const settled = { ...current, failures: 0, retryAfter: 0, updatedAt: nowAfter };
+  if (
+    latestConfig.mode === "off" ||
+    cooldownReason(current, tokens, nowAfter) !== undefined ||
+    !qualifies(result, fraction)
+  ) {
+    sessions.write(sessionId, settled, usage);
     return {};
   }
   sessions.write(
     sessionId,
-    { ...cleared, lastHintAt: cleared.completed, lastHintKey: fingerprint },
+    { ...settled, lastHintAt: settled.completed, lastHintKey: fingerprint },
     usage,
   );
   return { systemMessage: HINT };
