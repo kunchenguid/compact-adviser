@@ -71,7 +71,7 @@ Then `/compact-adviser`.
 | No `/compact-adviser` command in Claude Code | `CLAUDE_CODE_ENABLE_FUNCTION_HOOKS` is not exactly `1` |
 | Command exists, no hint | Context is below the constant 40,000-token minimum, the session is not idle, or the last turn was not a settled final answer |
 | Claude Code: "nonessential traffic" | `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` blocks plugin network requests |
-| Pi print / RPC / JSON, or Claude `-p` | Non-interactive sessions never judge |
+| Pi print / RPC / JSON, or Claude `-p` | The adviser stays inert in reliably detected non-interactive sessions |
 | Nothing at all, in either host | `COMPACT_ADVISER_DISABLE` is set to a truthy value |
 
 ## Environment variables
