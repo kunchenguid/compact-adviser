@@ -24,7 +24,7 @@
     "logRequests": {
       "type": "boolean",
       "title": "Log TypeSafe requests",
-      "description": "When on, each TypeSafe/Jev request and Jev response is appended to ~/.claude/compact-adviser-requests-<session-id>.jsonl. Off by default. Never logs the API key.",
+      "description": "When on, each TypeSafe/Jev request and sanitized Jev outcome is appended to ~/.claude/compact-adviser-requests-<session-id>.jsonl. Off by default. Never logs the API key.",
       "default": false
     },
     "typesafeApiKey": {

@@ -19,7 +19,16 @@
 // COMPACT_TEST_KEEP_LAB=1 keeps the lab directory and, after a failure, the tmux session
 // for ten minutes so the screen can be inspected.
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import {
+  copyFileSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -217,6 +226,7 @@ function launch(flag) {
   } catch {}
   const env = claudeEnv({
     CLAUDE_CONFIG_DIR: config,
+    HOME: lab,
     ANTHROPIC_API_KEY: API_KEY,
     ANTHROPIC_BASE_URL: `http://127.0.0.1:${port}`,
     CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION: "false",
@@ -305,6 +315,20 @@ try {
   }
   pass("the settings pane opens without a sharing toggle or idle status strip");
 
+  step = "request logging";
+  key("Tab");
+  for (let i = 0; i < 6 && !screen().includes("│  On"); i++) {
+    await sleep(1000);
+    key("Enter");
+    await sleep(1000);
+  }
+  await waitText("│  On");
+  key("Down");
+  key("Enter");
+  await waitText("TypeSafe request logging on (all sessions)", 20000);
+  await waitFor(() => pluginOptions().logRequests === true, "the host to enable request logging");
+  pass("request logging is enabled through the real settings pane");
+
   step = "pane minimum";
   for (let i = 0; i < 6 && !screen().includes("⏎ save"); i++) {
     await sleep(1000);
@@ -349,7 +373,38 @@ try {
   }
   if (JSON.stringify(request.body).includes(TYPESAFE_KEY))
     throw new Error(`[${step}] the key leaked into the body`);
-  pass("a settled 70,000-token exchange is judged once through the host fetch and shows the hint");
+  const logDir = join(lab, ".claude");
+  const logNames = readdirSync(logDir).filter(
+    (name) => name.startsWith("compact-adviser-requests-") && name.endsWith(".jsonl"),
+  );
+  if (logNames.length !== 1)
+    throw new Error(`[${step}] expected one per-session request log, saw ${logNames.length}`);
+  const requestLog = join(logDir, logNames[0]);
+  const logLines = readFileSync(requestLog, "utf8")
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line));
+  if (logLines.length !== 2 || logLines[0].kind !== "request" || logLines[1].kind !== "response")
+    throw new Error(`[${step}] expected correlated request and response log records`);
+  const [loggedRequest, loggedResponse] = logLines;
+  if (
+    loggedResponse.id !== loggedRequest.id ||
+    loggedResponse.answers?.done?.choice !== "finished" ||
+    loggedResponse.answers?.shape?.choice !== "hands_on" ||
+    typeof loggedResponse.score !== "number" ||
+    typeof loggedResponse.usage !== "number" ||
+    typeof loggedResponse.floor !== "number" ||
+    loggedResponse.qualifies !== true
+  ) {
+    throw new Error(`[${step}] Jev decision log is incomplete: ${JSON.stringify(loggedResponse)}`);
+  }
+  if (readFileSync(requestLog, "utf8").includes(TYPESAFE_KEY))
+    throw new Error(`[${step}] the TypeSafe key leaked into the request log`);
+  if (process.env.COMPACT_TEST_LOG_EVIDENCE)
+    copyFileSync(requestLog, process.env.COMPACT_TEST_LOG_EVIDENCE);
+  pass(
+    "a settled 70,000-token exchange is judged once, shows the hint, and logs its complete Jev decision without the key",
+  );
 
   step = "hint clears";
   await command("E2E-PROMPT-2 run the tests");

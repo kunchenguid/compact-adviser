@@ -37,11 +37,15 @@ function run(
   mode: "hint" | "auto",
   actions: { send: string; wait?: string }[],
   installed = false,
-  fixture: { inputTokens?: number; coordinating?: boolean } = {},
+  fixture: { inputTokens?: number; coordinating?: boolean; logRequests?: boolean } = {},
 ) {
   const dir = temp(t),
     store = new ConfigStore(dir);
-  store.update({ mode, autoAcknowledged: mode === "auto" });
+  store.update({
+    mode,
+    autoAcknowledged: mode === "auto",
+    logRequests: fixture.logRequests ?? false,
+  });
   const sm = SessionManager.create(dir, join(dir, "sessions"));
   sm.appendMessage({
     role: "user",
@@ -117,7 +121,14 @@ function run(
     .trim()
     .split("\n")
     .map((line) => JSON.parse(line));
-  return { dir, store, result: JSON.parse(result), events };
+  const requestLog = join(dir, "compact-adviser-requests.jsonl");
+  const logLines = existsSync(requestLog)
+    ? readFileSync(requestLog, "utf8")
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line))
+    : [];
+  return { dir, store, result: JSON.parse(result), events, requestLog, logLines };
 }
 
 test("signed Pi: native configuration input is actually prefilled", (t) => {
@@ -138,14 +149,33 @@ test("signed Pi: native configuration input is actually prefilled", (t) => {
   assert.ok(r.result.ok);
 });
 
-test("signed Pi: real settled event produces the hint through native UI", (t) => {
-  const r = run(t, "hint", [
-    { send: "Finish the fixture report.\r", wait: "Run /compact to save tokens." },
-  ]);
+test("signed Pi: real settled event produces the hint and a complete Jev decision log", (t) => {
+  const r = run(
+    t,
+    "hint",
+    [{ send: "Finish the fixture report.\r", wait: "Run /compact to save tokens." }],
+    false,
+    { logRequests: true },
+  );
   assert.equal(r.events.filter((e) => e.event === "jev").length, 1);
   assert.ok(r.events.some((e) => e.event === "start" && e.mode === "tui"));
   assert.ok(r.events.some((e) => e.event === "settled" && e.idle));
   assert.ok(!r.events.some((e) => e.event === "compacted"));
+  assert.equal(r.logLines.length, 2);
+  const [request, response] = r.logLines;
+  assert.equal(request.kind, "request");
+  assert.equal(response.kind, "response");
+  assert.equal(response.id, request.id);
+  assert.equal(response.answers.done.choice, "finished");
+  assert.equal(response.answers.shape.choice, "hands_on");
+  assert.equal(typeof response.score, "number");
+  assert.equal(typeof response.usage, "number");
+  assert.equal(typeof response.floor, "number");
+  assert.equal(response.qualifies, true);
+  assert.equal(readFileSync(r.requestLog, "utf8").includes("test-key-not-a-secret"), false);
+  if (process.env.COMPACT_TEST_LOG_EVIDENCE) {
+    cpSync(r.requestLog, process.env.COMPACT_TEST_LOG_EVIDENCE);
+  }
 });
 
 test("signed Pi: knee floor withholds a coordinating hint until 90% usage", (t) => {
@@ -157,10 +187,17 @@ test("signed Pi: knee floor withholds a coordinating hint until 90% usage", (t) 
       { send: "/compact-adviser status\r", wait: "hint floor 0.87" },
     ],
     false,
-    { inputTokens: 45000, coordinating: true },
+    { inputTokens: 45000, coordinating: true, logRequests: true },
   );
   assert.equal(early.events.filter((e) => e.event === "jev").length, 1);
   assert.ok(!early.result.tail.includes("Run /compact to save tokens."));
+  assert.equal(early.logLines.length, 2);
+  assert.equal(early.logLines[1].kind, "response");
+  assert.equal(early.logLines[1].qualifies, false);
+  assert.equal(typeof early.logLines[1].score, "number");
+  assert.equal(typeof early.logLines[1].usage, "number");
+  assert.equal(typeof early.logLines[1].floor, "number");
+  assert.equal(readFileSync(early.requestLog, "utf8").includes("test-key-not-a-secret"), false);
 
   const full = run(
     t,
