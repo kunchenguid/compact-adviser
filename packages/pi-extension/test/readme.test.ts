@@ -49,3 +49,30 @@ test("committed and packed READMEs equal the transformed root README, with no br
     /https:\/\/raw\.githubusercontent\.com\/kunchenguid\/compact-adviser\/main\/docs\/eval-usage-floor-curve\.png/,
   );
 });
+
+test("rewrites titled Markdown refs and single-quoted HTML attrs to absolute GitHub URLs", () => {
+  const out = generatePackageReadme(
+    [
+      '[Security](SECURITY.md "Policy")',
+      "[Eval](packages/pi-extension/eval/README.md)",
+      "<a href='LICENSE'>License</a>",
+      '<a href="LICENSE">License</a>',
+      '[Jev](https://typesafe.ai "Docs")',
+      "[Frag](#section)",
+      '![curve](docs/eval-usage-floor-curve.png "Floor")',
+    ].join("\n"),
+  );
+
+  assert.equal(
+    out,
+    [
+      '[Security](https://github.com/kunchenguid/compact-adviser/blob/main/SECURITY.md "Policy")',
+      "[Eval](https://github.com/kunchenguid/compact-adviser/blob/main/packages/pi-extension/eval/README.md)",
+      "<a href='https://github.com/kunchenguid/compact-adviser/blob/main/LICENSE'>License</a>",
+      '<a href="https://github.com/kunchenguid/compact-adviser/blob/main/LICENSE">License</a>',
+      '[Jev](https://typesafe.ai "Docs")',
+      "[Frag](#section)",
+      '![curve](https://raw.githubusercontent.com/kunchenguid/compact-adviser/main/docs/eval-usage-floor-curve.png "Floor")',
+    ].join("\n"),
+  );
+});

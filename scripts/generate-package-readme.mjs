@@ -48,13 +48,19 @@ function absoluteUrl(relativePath, { image }) {
 export function generatePackageReadme(rootReadme) {
   const source = rootReadme ?? readFileSync(path.join(REPO_ROOT, "README.md"), "utf8");
   return source
-    .replace(/(!?)\[([^\]]*)\]\(([^)\s]+)\)/g, (whole, bang, text, target) => {
+    .replace(
+      /(!?)\[([^\]]*)\]\(([^)\s]+)(?:\s+("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'))?\)/g,
+      (whole, bang, text, target, title) => {
+        if (SKIP_TARGET.test(target)) return whole;
+        const url = absoluteUrl(target, { image: bang === "!" });
+        return title ? `${bang}[${text}](${url} ${title})` : `${bang}[${text}](${url})`;
+      },
+    )
+    .replace(/\b(href|src)=(?:"([^"]*)"|'([^']*)')/g, (whole, attr, double, single) => {
+      const quote = double !== undefined ? '"' : "'";
+      const target = double ?? single;
       if (SKIP_TARGET.test(target)) return whole;
-      return `${bang}[${text}](${absoluteUrl(target, { image: bang === "!" })})`;
-    })
-    .replace(/\b(href|src)="([^"]+)"/g, (whole, attr, target) => {
-      if (SKIP_TARGET.test(target)) return whole;
-      return `${attr}="${absoluteUrl(target, { image: attr === "src" })}"`;
+      return `${attr}=${quote}${absoluteUrl(target, { image: attr === "src" })}${quote}`;
     });
 }
 
