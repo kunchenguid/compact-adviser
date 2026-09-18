@@ -34,7 +34,7 @@ Judgment is two one-sentence Jev questions in one request (is the unit finished;
 
 ## Quick Start
 
-Prerequisites: Node 22+, [Pi](https://pi.dev) 0.82.0 or newer (verified on **0.85.1**) or Claude Code 2.1.274 or newer (verified on **2.1.275**), and a [TypeSafe API key](https://console.typesafe.ai/settings/keys) (`TYPESAFE_API_KEY` in the launch environment, or in `./.env`). Jev is TypeSafe's structured decision model; this package asks it two one-sentence classification questions and never asks it to write a summary.
+Prerequisites: Node 22+, [Pi](https://pi.dev) 0.82.0 or newer (verified on **0.85.1**) or Claude Code 2.1.274 or newer (verified on **2.1.275**), and a [TypeSafe API key](https://console.typesafe.ai/settings/keys). Supply it as `TYPESAFE_API_KEY` in the launch environment, enter it in `/compact-adviser`, or put it in `./.env`. Jev is TypeSafe's structured decision model; this package asks it two one-sentence classification questions and never asks it to write a summary.
 
 Installing the package is consent to send eligible checkpoint context to TypeSafe when a key is available and the other product gates pass.
 
@@ -45,7 +45,7 @@ pi install npm:compact-adviser
 ```
 
 Restart Pi or run `/reload`, then `/compact-adviser`.
-`/compact-adviser status` should say `Key: present`.
+`/compact-adviser status` should say `Key: env`, `Key: saved`, or `Key: .env`.
 
 To install from git: `pi install git:github.com/kunchenguid/compact-adviser` (add `-l` for project-local).
 
@@ -67,7 +67,7 @@ See the [Pi guide](packages/pi-extension/README.md) and the [Claude Code guide](
 
 | Symptom | Cause |
 | --- | --- |
-| `Key: missing` in `/compact-adviser status` | No `TYPESAFE_API_KEY` in the launch environment or `./.env` |
+| `Key: missing` in `/compact-adviser status` | No `TYPESAFE_API_KEY` in the launch environment, saved settings, or `./.env` |
 | No `/compact-adviser` command in Claude Code | `CLAUDE_CODE_ENABLE_FUNCTION_HOOKS` is not exactly `1` |
 | Command exists, no hint | Context is below the constant 40,000-token minimum, the session is not idle, or the last turn was not a settled final answer |
 | Claude Code: "nonessential traffic" | `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` blocks plugin network requests |
@@ -104,9 +104,9 @@ settled turn
 
 | Command | Effect |
 | --- | --- |
-| `/compact-adviser` | Settings (mode, minimum, request log) |
+| `/compact-adviser` | Settings (mode, minimum, request log, TypeSafe API key) |
 | `/compact-adviser auto` / `hint` / `off` | Save that mode; auto asks for first-use confirmation |
-| `/compact-adviser status` | Mode, minimum, context, key readiness, cooldown |
+| `/compact-adviser status` | Mode, minimum, context, key source (`env` / `saved` / `.env` / `missing`), cooldown |
 | `/compact-adviser threshold 60000` | Save an absolute token minimum |
 | `/compact-adviser snooze` / `dismiss` | Suppress the next three exchanges, or clear the current hint |
 

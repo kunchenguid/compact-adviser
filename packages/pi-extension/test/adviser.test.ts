@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import test from "node:test";
 import { JUDGE_UNAVAILABLE_MESSAGE, parseJudgment } from "../src/judge.ts";
 import { requestLogPath } from "../src/log.ts";
@@ -100,9 +100,47 @@ test("persistent settings menu prefills, validates, saves, cancels and resets on
   assert.equal(h.store.read().minContextTokens, 999999);
   assert.ok(h.notifications.some((n) => n.includes("at or above")));
   await h.command("status");
-  assert.ok(h.notifications.at(-1)?.includes("Key: present"));
+  assert.ok(h.notifications.at(-1)?.includes("Key: env"));
   assert.ok(!h.notifications.at(-1)?.includes("test-key"));
   assert.ok(!h.notifications.at(-1)?.includes("Sharing:"));
+});
+
+test("settings menu saves and clears a TypeSafe key without printing it", async (t) => {
+  const previous = process.env.TYPESAFE_API_KEY;
+  t.after(() => {
+    if (previous === undefined) delete process.env.TYPESAFE_API_KEY;
+    else process.env.TYPESAFE_API_KEY = previous;
+  });
+  delete process.env.TYPESAFE_API_KEY;
+  const h = harness(t);
+  h.install("0.82.0", false);
+  const secret = "tsk-menu-fixture-not-for-display";
+  h.selects.push("TypeSafe API key: not saved", "Set key", "Close");
+  h.inputs.push(secret);
+  await h.command("");
+  assert.equal(h.store.read().typesafeApiKey, secret);
+  assert.equal(statSync(h.store.path).mode & 0o777, 0o600);
+  assert.ok(
+    h.notifications.includes(
+      "TypeSafe API key saved (all sessions). Status shows the source, never the value.",
+    ),
+  );
+  assert.ok(h.notifications.every((n) => !n.includes(secret)));
+  assert.ok(
+    h.customRenders.some((lines) =>
+      lines.some((line) => line.includes("*") && !line.includes(secret)),
+    ),
+  );
+  await h.command("status");
+  assert.ok(h.notifications.at(-1)?.includes("Key: saved"));
+  assert.ok(!h.notifications.at(-1)?.includes(secret));
+  h.selects.push("TypeSafe API key: saved", "Clear saved key", "Close");
+  await h.command("");
+  assert.equal(h.store.read().typesafeApiKey, undefined);
+  assert.ok(h.notifications.every((n) => !n.includes(secret)));
+  await h.command("status");
+  assert.ok(h.notifications.at(-1)?.includes("Key: missing"));
+  assert.ok(!h.notifications.at(-1)?.includes(secret));
 });
 
 test("auto requires explicit confirmation, persist, and never compact on selection", async (t) => {

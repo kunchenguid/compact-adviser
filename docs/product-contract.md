@@ -17,7 +17,7 @@ There is no percentage-of-context-window condition.
 - Judge whether known next work can continue without exact older details, not whether context is merely large.
 - One judgment decides both hint and auto: two atomic Jev questions in one request, `done` (is the assistant's own latest unit finished) and `shape` (is this conversation hands-on work or coordination), composed in code as score = P(finished) x (0.5 + 0.5 x P(hands_on)). The score must clear a floor that depends on context usage (tokens over the model's window): floor = clamp(1.3 - usage, 0.40, 0.90), so 0.90 while the window is at most 40 % full, sliding to 0.40 from 90 % on; unknown usage takes the strictest floor. Auto is not a higher bar. Mode only chooses what happens after a qualifying judgment (hint vs compact). Experimental auto still requires the existing first-use acknowledgement to turn auto on. Measured on the judgment-eval set against what users actually asked next: 95 % precision at 19 % recall at the strict end, 74 % / 91 % at the loose end, with no cliff between. A question that asked Jev to judge finished-and-hands-on in one step, and a companion "would older detail be lost" question, both measured worse and were not kept.
 - Uncertain, stale, interrupted, or failed judgments leave context alone.
-- Installing or loading the package is consent to send eligible checkpoint context to TypeSafe when a key is available and other product gates pass (mode, minimum context, idle session, and so on). Secrets are never settings values.
+- Installing or loading the package is consent to send eligible checkpoint context to TypeSafe when a key is available and other product gates pass (mode, minimum context, idle session, and so on). A TypeSafe API key may be entered in the compact-adviser menu and stored in the same settings store as mode and threshold; after save the UI reports only presence or key source (`env` / `saved` / `.env` / `missing`), never the value. A non-empty launch-environment value wins over the saved key, which wins over a cwd `.env`.
 - There is no separate sharing toggle. A saved `sharingConsent` value from an older version is ignored.
 - Native compaction remains authoritative and lossy; no timing model promises perfect preservation.
 - Configuration changes do not immediately compact.
@@ -31,6 +31,7 @@ Invalid values and cancellation preserve existing settings; failed saves are rep
 | `packages/claude-mod` | Claude Code mod (early-access function-hooks API) | Load this package path with `claude --plugin-dir` and `CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1` |
 
 Pi uses its own agent-directory `compact-adviser.json` and Pi session custom entries.
-The Claude Code mod uses its own `userConfig` options (`mode`, `minContextTokens`) in Claude Code's settings, and its own plugin store for the automatic-mode acknowledgement and per-session cooldowns.
+The Claude Code mod uses its own `userConfig` options (`mode`, `minContextTokens`, `logRequests`, `typesafeApiKey`) in Claude Code's settings, and its own plugin store for the automatic-mode acknowledgement and per-session cooldowns.
+`typesafeApiKey` is hidden from `/config` so the host menu never draws the secret.
 Neither implementation reads or mutates the other's records.
 No harness installs or loads the other harness's runtime.

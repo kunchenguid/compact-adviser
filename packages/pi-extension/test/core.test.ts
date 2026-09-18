@@ -3,7 +3,7 @@ import { readFileSync, statSync, symlinkSync, unlinkSync, writeFileSync } from "
 import { join } from "node:path";
 import test from "node:test";
 import { lockSync } from "proper-lockfile";
-import { ConfigStore, DEFAULT_CONFIG, parseMinimum } from "../src/config.ts";
+import { ConfigStore, DEFAULT_CONFIG, parseMinimum, parseSavedApiKey } from "../src/config.ts";
 import { RECENT_TAIL_MESSAGES, snapshot } from "../src/context.ts";
 import { parseDotenvKey, resolveTypesafeApiKey } from "../src/env.ts";
 import {
@@ -70,12 +70,24 @@ test("config defaults, atomic persistence, field merging, contention and invalid
   });
   a.update({ mode: "hint" });
   assert.equal("sharingConsent" in JSON.parse(readFileSync(a.path, "utf8")), false);
+  a.update({ typesafeApiKey: "tsk-store-fixture" });
+  assert.equal(a.read().typesafeApiKey, "tsk-store-fixture");
+  assert.equal(statSync(a.path).mode & 0o777, 0o600);
+  a.update({ typesafeApiKey: "" });
+  assert.equal("typesafeApiKey" in JSON.parse(readFileSync(a.path, "utf8")), false);
 });
 
 test("minimum parsing rejects ambiguous, nonpositive or unsafe values", () => {
   assert.equal(parseMinimum(" 40000 "), 40000);
   for (const value of ["", "0", "-1", "1.5", "40k", "4e4", "NaN", "Infinity", "9007199254740992"])
     assert.throws(() => parseMinimum(value), value);
+});
+
+test("saved API key parsing trims, rejects empty, overlong, and control characters", () => {
+  assert.equal(parseSavedApiKey("  tsk-ok  "), "tsk-ok");
+  assert.throws(() => parseSavedApiKey("   "));
+  assert.throws(() => parseSavedApiKey("x".repeat(1025)));
+  assert.throws(() => parseSavedApiKey("tsk\nok"));
 });
 
 test("bounded snapshot excludes system prompt, thinking, images and known secrets", (t) => {
@@ -284,22 +296,34 @@ test("cwd .env supplies TYPESAFE_API_KEY when process env is empty and is ignore
     join(dir, ".env"),
     "# TYPESAFE_API_KEY=commented\n\nOTHER=nope\nTYPESAFE_API_KEY=from-dotenv\nTYPESAFE_API_KEY=from-dotenv-last\n",
   );
-  assert.equal(resolveTypesafeApiKey({ TYPESAFE_API_KEY: "" }, dir), "from-dotenv-last");
-  assert.equal(resolveTypesafeApiKey({}, dir), "from-dotenv-last");
-  assert.equal(resolveTypesafeApiKey({ TYPESAFE_API_KEY: "from-env" }, dir), "from-env");
-  assert.equal(resolveTypesafeApiKey({ TYPESAFE_API_KEY: "   " }, dir), "from-dotenv-last");
-  assert.equal(resolveTypesafeApiKey({}, temp(t)), undefined);
+  assert.deepEqual(resolveTypesafeApiKey({ TYPESAFE_API_KEY: "" }, dir), {
+    value: "from-dotenv-last",
+    source: ".env",
+  });
+  assert.deepEqual(resolveTypesafeApiKey({}, dir), { value: "from-dotenv-last", source: ".env" });
+  assert.deepEqual(resolveTypesafeApiKey({ TYPESAFE_API_KEY: "from-env" }, dir), {
+    value: "from-env",
+    source: "env",
+  });
+  assert.deepEqual(resolveTypesafeApiKey({ TYPESAFE_API_KEY: "   " }, dir), {
+    value: "from-dotenv-last",
+    source: ".env",
+  });
+  assert.deepEqual(resolveTypesafeApiKey({}, temp(t)), { value: undefined, source: "missing" });
   assert.equal(parseDotenvKey("TYPESAFE_API_KEY=only\n", "TYPESAFE_API_KEY"), "only");
 });
 
 test("cwd .env accepts export, declare -x, and one matching quote layer", (t) => {
   const dir = temp(t);
   writeFileSync(join(dir, ".env"), 'declare -x TYPESAFE_API_KEY="from-declare"\n');
-  assert.equal(resolveTypesafeApiKey({}, dir), "from-declare");
+  assert.deepEqual(resolveTypesafeApiKey({}, dir), { value: "from-declare", source: ".env" });
   writeFileSync(join(dir, ".env"), "export TYPESAFE_API_KEY='from-export'\n");
-  assert.equal(resolveTypesafeApiKey({}, dir), "from-export");
+  assert.deepEqual(resolveTypesafeApiKey({}, dir), { value: "from-export", source: ".env" });
   writeFileSync(join(dir, ".env"), "export TYPESAFE_API_KEY=from-export-plain\n");
-  assert.equal(resolveTypesafeApiKey({ TYPESAFE_API_KEY: "from-env" }, dir), "from-env");
+  assert.deepEqual(resolveTypesafeApiKey({ TYPESAFE_API_KEY: "from-env" }, dir), {
+    value: "from-env",
+    source: "env",
+  });
   assert.equal(
     parseDotenvKey('TYPESAFE_API_KEY="from-double"\n', "TYPESAFE_API_KEY"),
     "from-double",
@@ -312,6 +336,31 @@ test("cwd .env accepts export, declare -x, and one matching quote layer", (t) =>
     parseDotenvKey('export TYPESAFE_API_KEY="from-export-quoted"\n', "TYPESAFE_API_KEY"),
     "from-export-quoted",
   );
+});
+
+test("a saved menu key sits between process env and cwd .env", (t) => {
+  const dir = temp(t);
+  writeFileSync(join(dir, ".env"), "TYPESAFE_API_KEY=from-dotenv\n");
+  assert.deepEqual(resolveTypesafeApiKey({}, dir, "from-saved"), {
+    value: "from-saved",
+    source: "saved",
+  });
+  assert.deepEqual(resolveTypesafeApiKey({ TYPESAFE_API_KEY: "from-env" }, dir, "from-saved"), {
+    value: "from-env",
+    source: "env",
+  });
+  assert.deepEqual(resolveTypesafeApiKey({ TYPESAFE_API_KEY: "   " }, dir, "from-saved"), {
+    value: "from-saved",
+    source: "saved",
+  });
+  assert.deepEqual(resolveTypesafeApiKey({}, dir, "   "), {
+    value: "from-dotenv",
+    source: ".env",
+  });
+  assert.deepEqual(resolveTypesafeApiKey({}, temp(t), undefined), {
+    value: undefined,
+    source: "missing",
+  });
 });
 
 test("the request deadline aborts work instead of delaying the next turn", async () => {

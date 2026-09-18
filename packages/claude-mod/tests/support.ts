@@ -82,6 +82,7 @@ export type WorldOptions = {
   mode?: string;
   minimum?: number;
   logRequests?: boolean;
+  savedKey?: string;
   store?: Record<string, unknown>;
   /** Text `$.fs.read(".env")` should return; omit to treat the file as missing. */
   dotenv?: string;
@@ -164,6 +165,7 @@ export function world(on: On, options: WorldOptions = {}): World {
     [`${PLUGIN}.mode`, options.mode ?? "hint"],
     [`${PLUGIN}.minContextTokens`, options.minimum ?? 40000],
     [`${PLUGIN}.logRequests`, options.logRequests ?? false],
+    [`${PLUGIN}.typesafeApiKey`, options.savedKey ?? ""],
   ]);
   let configDenial: string | undefined;
   const w: World = {

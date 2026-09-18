@@ -4,6 +4,12 @@ import { join } from "node:path";
 const NAME = "TYPESAFE_API_KEY";
 const PREFIX = /^(?:export|declare\s+-x)\s+/;
 
+export type TypesafeKeySource = "env" | "saved" | ".env" | "missing";
+export interface ResolvedTypesafeApiKey {
+  value: string | undefined;
+  source: TypesafeKeySource;
+}
+
 function unquote(value: string): string {
   if (value.length >= 2) {
     const quote = value[0];
@@ -27,19 +33,32 @@ export function parseDotenvKey(text: string, name: string): string | undefined {
   return found;
 }
 
+function nonempty(value: string | undefined): string | undefined {
+  return value !== undefined && value.trim() !== "" ? value : undefined;
+}
+
 /**
- * Prefer a non-empty process env value. Otherwise read `TYPESAFE_API_KEY` from
- * `.env` in `cwd`. A missing file is ignored; the value is never logged.
+ * Process env (non-empty) wins, then a menu-saved key, then `TYPESAFE_API_KEY`
+ * from `.env` in `cwd`. A missing file is ignored; the value is never logged.
  */
 export function resolveTypesafeApiKey(
   env: NodeJS.ProcessEnv = process.env,
   cwd: string = process.cwd(),
-): string | undefined {
-  const fromEnv = env.TYPESAFE_API_KEY;
-  if (fromEnv !== undefined && fromEnv.trim() !== "") return fromEnv;
+  saved?: string,
+): ResolvedTypesafeApiKey {
+  const fromEnv = nonempty(env.TYPESAFE_API_KEY);
+  if (fromEnv !== undefined) return { value: fromEnv, source: "env" };
+  const fromSaved = nonempty(saved);
+  if (fromSaved !== undefined) return { value: fromSaved, source: "saved" };
   try {
-    return parseDotenvKey(readFileSync(join(cwd, ".env"), "utf8"), NAME);
+    const fromFile = nonempty(parseDotenvKey(readFileSync(join(cwd, ".env"), "utf8"), NAME));
+    if (fromFile !== undefined) return { value: fromFile, source: ".env" };
   } catch {
-    return undefined;
+    // A missing or unreadable .env is ignored.
   }
+  return { value: undefined, source: "missing" };
+}
+
+export function formatKeyStatus(source: TypesafeKeySource): string {
+  return `Key: ${source}`;
 }

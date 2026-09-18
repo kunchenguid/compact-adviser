@@ -185,6 +185,29 @@ describe("turn-end gates", () => {
     expect(w.journal.requests[0]?.body.includes("from-dotenv")).toBe(false);
   });
 
+  test("a saved menu key is used when env is empty and wins over cwd .env", async ($, on) => {
+    const w = world(on, {
+      key: undefined,
+      savedKey: "from-saved",
+      dotenv: "TYPESAFE_API_KEY=from-dotenv\n",
+    });
+    await $.session.start(interactiveStart);
+    await turnEnd($, w);
+    expect(w.journal.fsReads).toEqual([]);
+    expect(w.journal.requests).toHaveLength(1);
+    expect(w.journal.requests[0]?.headers.Authorization).toBe("Bearer from-saved");
+    expect(w.journal.requests[0]?.body.includes("from-saved")).toBe(false);
+  });
+
+  test("a host env key wins over a saved menu key", async ($, on) => {
+    const w = world(on, { savedKey: "from-saved" });
+    await $.session.start(interactiveStart);
+    await turnEnd($, w);
+    expect(w.journal.requests).toHaveLength(1);
+    expect(w.journal.requests[0]?.headers.Authorization).toBe(`Bearer ${KEY}`);
+    expect(w.journal.requests[0]?.body.includes("from-saved")).toBe(false);
+  });
+
   test("subagent, interrupted, errored, and empty-answer turns are not checkpoints", async ($, on) => {
     const w = world(on);
     await $.session.start(interactiveStart);
@@ -602,7 +625,7 @@ describe("commands", () => {
     await $.command.run(commandRun("status"));
     const line = w.journal.logs.at(-1) ?? "";
     expect(line).toBe(
-      "Mode: hint. Minimum: 40,000 tokens. Context: 60,000 (30% of the window; hint floor 0.90). Key: present. No cooldown; semantic checks still apply. Claude Code auto-compacts at 167,000 tokens. Request log: off. Settings: /config (compact-adviser rows) and /compact-adviser.",
+      "Mode: hint. Minimum: 40,000 tokens. Context: 60,000 (30% of the window; hint floor 0.90). Key: env. No cooldown; semantic checks still apply. Claude Code auto-compacts at 167,000 tokens. Request log: off. Settings: /config (compact-adviser rows) and /compact-adviser.",
     );
     expect(line.includes(KEY)).toBe(false);
   });
@@ -656,11 +679,17 @@ describe("settings pane", () => {
       (e) => e.type === "Select" && e.props.label === "Log TypeSafe requests",
     );
     expect(logging?.props.value).toBe("off");
-    const input = drawn.find((e) => e.type === "Input");
+    const input = drawn.find(
+      (e) => e.type === "Input" && e.props.label === "Minimum context tokens",
+    );
     expect(input?.props.value).toBe("40000");
     expect(input?.props.label).toBe("Minimum context tokens");
+    const keyField = drawn.find((e) => e.type === "Input" && e.props.key === "typesafeApiKey");
+    expect(keyField?.props.value).toBe("");
+    expect(keyField?.props.submitLabel).toBe("set");
     const buttons = drawn.filter((e) => e.type === "Button").map((e) => e.props.label);
     expect(buttons).toEqual(["Reset minimum to 40,000", "Status", "Close"]);
+    expect(text(tree)).toContain("TypeSafe API key: not saved");
     expect(text(tree)).toContain("A token count, not a percentage; no judgment below it.");
   });
 
@@ -679,11 +708,42 @@ describe("settings pane", () => {
     await $.ui.press({ plugin: PLUGIN, key: "status" });
     await drain(w);
     expect(text(await $.ui.render(pane))).toContain(
-      "Mode: off. Minimum: 40,000 tokens. Context: 60,000 (30% of the window; hint floor 0.90). Key: present.",
+      "Mode: off. Minimum: 40,000 tokens. Context: 60,000 (30% of the window; hint floor 0.90). Key: env.",
     );
     expect(text(await $.ui.render(pane))).not.toContain("Sharing:");
     await $.ui.press({ plugin: PLUGIN, key: "close" });
     expect(w.journal.closed).toEqual([PLUGIN]);
+  });
+
+  test("the pane and status never print a saved TypeSafe key, and clear removes it", async ($, on) => {
+    const secret = "tsk-menu-fixture-not-for-display";
+    const w = world(on, { key: undefined, savedKey: secret });
+    await $.session.start(interactiveStart);
+    const tree = await $.ui.render(pane);
+    expect(w.rows.get(`${PLUGIN}.typesafeApiKey`)).toBe(secret);
+    expect(text(tree)).toContain("TypeSafe API key: saved");
+    expect(text(tree)).not.toContain(secret);
+    expect(
+      elements(tree).find((e) => e.type === "Input" && e.props.key === "typesafeApiKey")?.props
+        .value,
+    ).toBe("");
+    await $.command.run(commandRun("status"));
+    expect(w.journal.logs.at(-1)).toContain("Key: saved");
+    expect(w.journal.logs.at(-1)?.includes(secret)).toBe(false);
+    await $.ui.press({ plugin: PLUGIN, key: "clearKey" });
+    await drain(w);
+    expect(w.rows.get(`${PLUGIN}.typesafeApiKey`)).toBe("");
+    expect(w.journal.toasts.at(-1)).toBe(
+      "Saved TypeSafe API key cleared (all sessions). Launch environment and .env still apply.",
+    );
+    expect(w.journal.toasts.every((line) => !line.includes(secret))).toBe(true);
+    const cleared = await $.ui.render(pane);
+    expect(text(cleared)).toContain("TypeSafe API key: not saved");
+    expect(text(cleared)).not.toContain("Clear saved key");
+    expect(text(cleared)).not.toContain(secret);
+    await $.command.run(commandRun("status"));
+    expect(w.journal.logs.at(-1)).toContain("Key: missing");
+    expect(w.journal.logs.at(-1)?.includes(secret)).toBe(false);
   });
 
   test("another plugin's pane is left to it", async ($, on) => {

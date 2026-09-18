@@ -54,7 +54,7 @@ body:
     id: status
     attributes:
       label: /compact-adviser status
-      description: Paste the full status line (mode, minimum, context, key present/missing). Do not paste the API key.
+      description: Paste the full status line (mode, minimum, context, key source). Do not paste the API key.
       render: text
     validations:
       required: true

@@ -1,8 +1,14 @@
 // The pure libraries under the same runtime as the hooks module: settings validation,
 // cooldowns, the bounded judge input, and the Jev client with an injected transport.
 import { describe, expect, test } from "claude-code/testing";
-import { DEFAULT_MINIMUM, parseConsent, parseMinimum, readConfig } from "../lib/config.ts";
-import { parseDotenvKey } from "../lib/env.ts";
+import {
+  DEFAULT_MINIMUM,
+  parseConsent,
+  parseMinimum,
+  parseSavedApiKey,
+  readConfig,
+} from "../lib/config.ts";
+import { parseDotenvKey, resolveTypesafeApiKey } from "../lib/env.ts";
 import {
   ENDPOINT,
   FLOOR_MAX,
@@ -57,6 +63,13 @@ describe("settings", () => {
       );
     }
     expect(DEFAULT_MINIMUM).toBe(40000);
+  });
+
+  test("saved API key parsing trims, rejects empty, overlong, and control characters", () => {
+    expect(parseSavedApiKey("  tsk-ok  ")).toBe("tsk-ok");
+    expect(() => parseSavedApiKey("   ")).toThrow("Enter a TypeSafe API key");
+    expect(() => parseSavedApiKey("x".repeat(1025))).toThrow("too long");
+    expect(() => parseSavedApiKey("tsk\nok")).toThrow("control characters");
   });
 
   test("configuration combines the host rows with stored acknowledgement and ignores legacy sharingConsent", () => {
@@ -124,6 +137,29 @@ describe("cwd .env key", () => {
     expect(
       parseDotenvKey('export TYPESAFE_API_KEY="from-export-quoted"\n', "TYPESAFE_API_KEY"),
     ).toBe("from-export-quoted");
+  });
+
+  test("env wins over saved over .env; empty env falls through", () => {
+    expect(resolveTypesafeApiKey("from-env", "from-saved", "from-dotenv")).toEqual({
+      value: "from-env",
+      source: "env",
+    });
+    expect(resolveTypesafeApiKey("   ", "from-saved", "from-dotenv")).toEqual({
+      value: "from-saved",
+      source: "saved",
+    });
+    expect(resolveTypesafeApiKey(undefined, "from-saved", "from-dotenv")).toEqual({
+      value: "from-saved",
+      source: "saved",
+    });
+    expect(resolveTypesafeApiKey(undefined, "   ", "from-dotenv")).toEqual({
+      value: "from-dotenv",
+      source: ".env",
+    });
+    expect(resolveTypesafeApiKey(undefined, undefined, undefined)).toEqual({
+      value: undefined,
+      source: "missing",
+    });
   });
 });
 

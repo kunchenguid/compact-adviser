@@ -1,8 +1,14 @@
-// TYPESAFE_API_KEY from the host environment, else from a cwd .env file.
+// TYPESAFE_API_KEY from the host environment, else a menu-saved key, else a cwd .env file.
 // KEY=VALUE lines: last assignment wins; comments and blanks are ignored.
 // Optional `export` / `declare -x` prefixes and one matching quote layer.
 
 const PREFIX = /^(?:export|declare\s+-x)\s+/;
+
+export type TypesafeKeySource = "env" | "saved" | ".env" | "missing";
+export interface ResolvedTypesafeApiKey {
+  value: string | undefined;
+  source: TypesafeKeySource;
+}
 
 function unquote(value: string): string {
   if (value.length >= 2) {
@@ -25,4 +31,30 @@ export function parseDotenvKey(text: string, name: string): string | undefined {
     found = unquote(line.slice(eq + 1).trim());
   }
   return found;
+}
+
+function nonempty(value: string | undefined): string | undefined {
+  return value !== undefined && value.trim() !== "" ? value : undefined;
+}
+
+/**
+ * A non-empty host env value wins, then a menu-saved key, then a parsed .env
+ * assignment. Missing pieces are skipped; the value is never logged.
+ */
+export function resolveTypesafeApiKey(
+  envValue: string | undefined,
+  saved?: string,
+  dotenvValue?: string,
+): ResolvedTypesafeApiKey {
+  const fromEnv = nonempty(envValue);
+  if (fromEnv !== undefined) return { value: fromEnv, source: "env" };
+  const fromSaved = nonempty(saved);
+  if (fromSaved !== undefined) return { value: fromSaved, source: "saved" };
+  const fromFile = nonempty(dotenvValue);
+  if (fromFile !== undefined) return { value: fromFile, source: ".env" };
+  return { value: undefined, source: "missing" };
+}
+
+export function formatKeyStatus(source: TypesafeKeySource): string {
+  return `Key: ${source}`;
 }

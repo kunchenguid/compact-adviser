@@ -37,15 +37,17 @@ The underlying model provider can be any provider supported by Pi.
 
 ## First-run setup
 
-1. Supply `TYPESAFE_API_KEY` through Pi's launch environment, or as `TYPESAFE_API_KEY=...` in a `.env` file in the process current working directory.
+1. Supply a [TypeSafe API key](https://console.typesafe.ai/settings/keys) in one of these ways, first match wins:
+   - A non-empty `TYPESAFE_API_KEY` in Pi's launch environment.
+   - A key entered in `/compact-adviser` (stored in `compact-adviser.json`, never shown again after save).
+   - `TYPESAFE_API_KEY=...` in a `.env` file in the process current working directory.
 `export` and `declare -x` prefixes are accepted, and one matching pair of quotes around the value is stripped.
-A non-empty launch-environment value always wins; the file is read only when the variable is unset or empty, and a missing file is ignored.
-Do not paste a key into the settings dialog or commit one to the repository.
+A missing `.env` file is ignored.
+Do not commit a key to the repository.
 2. Run `/compact-adviser` to choose mode and minimum context, or leave the defaults (hints, 40,000 tokens).
 
 Installing this package is consent to send eligible checkpoint context to TypeSafe when a key is available and other product gates pass.
 Without a key, or with mode Off, no TypeSafe request is made.
-No credentials are written to the extension's configuration or session entries.
 
 ## Persistent settings
 
@@ -55,6 +57,7 @@ No credentials are written to the extension's configuration or session entries.
 Mode: hint
 Minimum context: 40,000 tokens
 Log TypeSafe requests: off
+TypeSafe API key: not saved
 Reset minimum to 40,000
 Status
 Close
@@ -70,7 +73,11 @@ The confirmation states the new token count and that it applies to all sessions.
 Blank, zero, negative, fractional, exponential, suffixed (`40k`), nonnumeric, and unsafe-integer inputs are rejected.
 Use whole decimal tokens such as `60000`.
 A value at or above the current model's window is allowed but produces a warning; it is not silently clamped.
-Reset changes only the minimum, not the mode, request logging, or session cooldowns.
+Reset changes only the minimum, not the mode, request logging, the saved TypeSafe key, or session cooldowns.
+
+**TypeSafe API key** shows whether a key is saved, never the value.
+Choose Set key to paste one into a masked field, or Clear saved key to remove it.
+A non-empty launch-environment `TYPESAFE_API_KEY` still wins over the saved key; a cwd `.env` is used only when both are empty.
 
 The configuration lives in `getAgentDir()/compact-adviser.json`, normally `~/.pi/agent/compact-adviser.json`:
 
@@ -84,7 +91,9 @@ The configuration lives in `getAgentDir()/compact-adviser.json`, normally `~/.pi
 }
 ```
 
-Mode, minimum, request logging, and the automatic-mode acknowledgement survive restart, `/new`, `/resume`, compaction, and project changes.
+Mode, minimum, request logging, a saved TypeSafe API key, and the automatic-mode acknowledgement survive restart, `/new`, `/resume`, compaction, and project changes.
+A saved key is written with the rest of this file at mode `0600` and is omitted when cleared.
+`/compact-adviser status` reports the key source as `env`, `saved`, `.env`, or `missing`, never the value.
 A legacy `sharingConsent` field is ignored and dropped on the next save.
 Project files cannot silently override them.
 Atomic writes and a short cross-process lock prevent partial saves and lost concurrent field updates.
@@ -100,7 +109,7 @@ Unreadable, malformed, unsupported-version, oversized, or symlinked settings sup
 | `/compact-adviser auto` | Save automatic mode, with first-use confirmation |
 | `/compact-adviser hint` | Save hints-only mode |
 | `/compact-adviser off` | Save Off: no hints or TypeSafe requests |
-| `/compact-adviser status` | Mode, minimum, context usage, key readiness, cooldown, settings path |
+| `/compact-adviser status` | Mode, minimum, context usage, key source (`env` / `saved` / `.env` / `missing`), cooldown, settings path |
 | `/compact-adviser threshold 60000` | Save an absolute 60,000-token minimum |
 | `/compact-adviser threshold default` | Restore the constant 40,000-token minimum |
 | `/compact-adviser snooze` | Suppress advice for the next three completed exchanges |
