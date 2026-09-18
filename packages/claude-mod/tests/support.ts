@@ -121,6 +121,7 @@ export function world(on: On, options: WorldOptions = {}): World {
   const functionHooks = "functionHooks" in options ? options.functionHooks : "1";
   const key = "key" in options ? options.key : KEY;
   mock.env(on, {
+    // Claude Code rejects host filesystem paths under macOS automounts such as /home.
     HOME: "/tmp/fixture-home",
     ...(functionHooks === undefined ? {} : { CLAUDE_CODE_ENABLE_FUNCTION_HOOKS: functionHooks }),
     ...(key === undefined ? {} : { TYPESAFE_API_KEY: key }),

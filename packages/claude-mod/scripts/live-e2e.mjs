@@ -47,6 +47,7 @@ const config = join(lab, "config");
 const project = join(lab, "project");
 mkdirSync(config, { recursive: true });
 mkdirSync(project, { recursive: true });
+writeFileSync(join(project, ".env"), `TYPESAFE_API_KEY=${TYPESAFE_KEY}\n`);
 
 // --- Local servers -----------------------------------------------------------------
 const jevRequests = [];
@@ -241,7 +242,6 @@ function launch(flag) {
     ANTHROPIC_BASE_URL: `http://127.0.0.1:${port}`,
     CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION: "false",
     DISABLE_AUTOUPDATER: "1",
-    TYPESAFE_API_KEY: TYPESAFE_KEY,
     COMPACT_ADVISER_TEST_ENDPOINT: `http://127.0.0.1:${port}/v1/systemone`,
   });
   if (!flag) delete env.CLAUDE_CODE_ENABLE_FUNCTION_HOOKS;
@@ -320,16 +320,18 @@ try {
   await command("/compact-adviser");
   await waitText("Minimum context         40,000 tokens");
   await waitText("Reset minimum to 40,000");
-  await waitText("TypeSafe API key        from the environment");
+  await waitText("TypeSafe API key        from .env");
   if (screen().includes("TypeSafe sharing")) {
     throw new Error(`[${step}] sharing toggle still present\n${screen()}`);
   }
-  pass("the settings pane opens as one list, naming the key in effect, without a sharing toggle");
+  pass(
+    "the settings pane opens as one list, naming the .env key in effect, without a sharing toggle",
+  );
 
   // A key sent while the surface is still settling the pane's focus can be dropped, so
   // move with one arrow at a time until the wanted row is highlighted.
   const ESC = String.fromCharCode(27);
-  const inverse = new RegExp(`${ESC}\\[7m[^\\n]*?${ESC}\\[39m([^${ESC}\\n]*)`);
+  const inverse = new RegExp(`${ESC}\\[7m([^${ESC}\\n]*)${ESC}\\[(?:0|27|39)m`);
   const highlighted = () => inverse.exec(screenRaw())?.[1]?.trim() ?? "";
   async function moveTo(rowText, direction = "Down") {
     for (let i = 0; i < 8 && !highlighted().startsWith(rowText); i++) {
