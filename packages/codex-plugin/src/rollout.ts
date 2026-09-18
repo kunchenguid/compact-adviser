@@ -174,7 +174,9 @@ function argumentPaths(argumentsJson: string): string[] {
 }
 
 function toolPaths(name: string, input: string): { written: string[]; removed: string[] } {
-  return name === "apply_patch" ? patchChanges(input) : { written: argumentPaths(input), removed: [] };
+  return name === "apply_patch"
+    ? patchChanges(input)
+    : { written: argumentPaths(input), removed: [] };
 }
 
 function processExitCode(value: unknown): number | undefined {
@@ -184,8 +186,7 @@ function processExitCode(value: unknown): number | undefined {
     if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
       try {
         return processExitCode(JSON.parse(trimmed));
-      } catch {
-      }
+      } catch {}
     }
     const match = /^Process exited with code (-?\d+)\b/m.exec(trimmed);
     return match ? Number(match[1]) : undefined;

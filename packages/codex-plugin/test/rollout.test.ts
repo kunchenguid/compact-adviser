@@ -100,11 +100,15 @@ test("an outer compacted record replaces earlier history with its replacement an
   assert.equal(rollout.originator, "codex-tui");
   assert.equal(rollout.tokens, 50000);
   assert.ok(!rollout.messages.some((m) => m.text.includes("old ask")));
-  assert.ok(!rollout.messages.some((m) => m.toolUses.some((use) => use.paths?.includes("src/old.ts"))));
+  assert.ok(
+    !rollout.messages.some((m) => m.toolUses.some((use) => use.paths?.includes("src/old.ts"))),
+  );
   assert.ok(
     rollout.messages.some(
       (m) =>
-        m.role === "user" && m.text.startsWith(SUMMARY_PREFIX) && m.text.includes("parser work so far"),
+        m.role === "user" &&
+        m.text.startsWith(SUMMARY_PREFIX) &&
+        m.text.includes("parser work so far"),
     ),
   );
   assert.deepEqual(
@@ -378,7 +382,8 @@ test("a rollout past the read window keeps its header and its newest records", (
     assert.equal(rollout.messages.at(-1)?.text, "newest");
     assert.ok(!rollout.messages.some((m) => m.text.includes("oldest")));
     assert.equal(rollout.truncated, true);
-    const coverage = snapshot(rollout.messages, [], { truncated: rollout.truncated }).state.coverage;
+    const coverage = snapshot(rollout.messages, [], { truncated: rollout.truncated }).state
+      .coverage;
     assert.equal(coverage.transcriptLimitReached, true);
     assert.ok(coverage.olderMessagesOmitted > 0);
   } finally {

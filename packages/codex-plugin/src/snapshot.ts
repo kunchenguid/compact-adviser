@@ -286,10 +286,7 @@ export function snapshot(
     }),
     coverage: {
       omittedUserMessages: omittedUsers,
-      olderMessagesOmitted: Math.max(
-        truncated ? 1 : 0,
-        messages.length - RECENT_TAIL_MESSAGES,
-      ),
+      olderMessagesOmitted: Math.max(truncated ? 1 : 0, messages.length - RECENT_TAIL_MESSAGES),
       recentTextTruncated: recentTruncated,
       hasImages,
       redacted,

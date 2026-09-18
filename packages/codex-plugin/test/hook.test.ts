@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { readFileSync, writeFileSync } from "node:fs";
 import { test } from "node:test";
 import { ConfigStore } from "../src/config.ts";
-import { HINT, type Environment, type HookPayload, handle } from "../src/hook.ts";
+import { type Environment, HINT, type HookPayload, handle } from "../src/hook.ts";
 import { requestLogPath } from "../src/log.ts";
 import { adviserRoot } from "../src/paths.ts";
 import { SessionStore } from "../src/store.ts";
