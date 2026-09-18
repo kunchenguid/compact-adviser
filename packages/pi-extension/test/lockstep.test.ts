@@ -38,6 +38,7 @@ test("the question set and the floor schedule match", () => {
   assert.equal(claude.FLOOR_MAX, pi.FLOOR_MAX);
   assert.equal(claude.FLOOR_MIN, pi.FLOOR_MIN);
   assert.equal(claude.FLOOR_OFFSET, pi.FLOOR_OFFSET);
+  assert.equal(pi.FLOOR_OFFSET, 1);
   for (let u = -0.1; u <= 1.1; u += 0.01) assert.equal(claude.floorFor(u), pi.floorFor(u));
   assert.equal(claude.floorFor(Number.NaN), pi.floorFor(Number.NaN));
   assert.equal(claude.ENDPOINT, pi.ENDPOINT);

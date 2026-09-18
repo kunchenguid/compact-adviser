@@ -152,7 +152,7 @@ Requests have a two-second deadline, no immediate retry, and capped backoff on l
 The remote call is not awaited by Pi's event dispatcher.
 Input, model/branch/session changes, and native compaction invalidate an outstanding result.
 
-Hint and auto share one floor on that score, and the floor depends on how full the context window is: 0.90 while usage is at most 40 % of the window, then one point lower per point of usage, down to 0.40 from 90 % on (`/compact-adviser status` shows the current floor).
+Hint and auto share one floor on that score, and the floor depends on how full the context window is: 0.90 while usage is at most 10 % of the window, then one point lower per point of usage, down to 0.40 from 60 % on (`/compact-adviser status` shows the current floor).
 A wrong hint costs most while there is room left and least when compaction is imminent anyway.
 Measured on real sessions against what the user actually asked next, this gives about 95 % precision at the strict end and 74 % precision with 91 % recall at the loose end; the eval README under `eval/` has the ladder.
 These are measured starting knobs in code, **not safety guarantees**.

@@ -164,7 +164,7 @@ export const FLOOR_MAX = 0.9;
 /** The loosest hint floor: when the window is nearly full and compaction is imminent anyway. */
 export const FLOOR_MIN = 0.4;
 /** Between the clamps the floor is FLOOR_OFFSET minus usage: one point of floor per point of usage. */
-export const FLOOR_OFFSET = 1.3;
+export const FLOOR_OFFSET = 1.0;
 
 /**
  * The composed score: finished is the gate, hands-on adds up to half again.

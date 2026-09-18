@@ -27,8 +27,8 @@ test("threshold is a constant 40k and requests only run at settlement", async (t
 });
 
 test("the hint floor slides with context usage: a finished coordinating unit hints only once the window is fuller", async (t) => {
-  // finished but coordinating scores about 0.5: below the 0.90 floor at 17 % of the
-  // 272k window, above the 0.42 floor at 88 %. Same judgment, different window fill.
+  // finished but coordinating scores about 0.5: below the 0.83 floor at 17 % of the
+  // 272k window, above the 0.40 floor at 88 %. Same judgment, different window fill.
   const h = harness(t, async () => parseJudgment(apiResponse(0.99, 0.01)));
   h.enable();
   h.tokens = 45000;
