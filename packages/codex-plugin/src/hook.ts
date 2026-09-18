@@ -226,6 +226,7 @@ async function onStop(payload: HookPayload, environment: Environment): Promise<H
   const settled = { ...current, failures: 0, retryAfter: 0, updatedAt: nowAfter };
   if (
     latestConfig.mode === "off" ||
+    tokens < latestConfig.minContextTokens ||
     cooldownReason(current, tokens, nowAfter) !== undefined ||
     !qualifies(result, fraction)
   ) {

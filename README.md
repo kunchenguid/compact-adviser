@@ -145,8 +145,9 @@ produces the hint, as a `↳ Hook ·` line in the scrollback.
 | `/compact-adviser snooze` / `dismiss` | Suppress the next three exchanges, or clear the current hint |
 
 On Codex the same commands are arguments to the plugin's `src/cli.ts` (`status`, `hint`, `off`,
-`threshold`, `log on|off`, `key set|clear|status`, `snooze`, `dismiss`) rather than a slash
-command, because Codex plugins cannot register a command with code behind it.
+`threshold`, `log on|off`, `key set|clear|status`) rather than a slash
+command, because Codex plugins cannot register a command with code behind it. Codex has no
+snooze or dismiss: the CLI cannot tell which session is current.
 
 ## Eval
 

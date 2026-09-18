@@ -41,5 +41,7 @@ The Claude Code mod uses its own `userConfig` options (`mode`, `minContextTokens
 The Codex plugin owns `<CODEX_HOME>/compact-adviser/`: one `settings.json`, one cooldown record
 per session, and the request logs. It does not touch `config.toml`, whose unknown keys are an
 error under `--strict-config`, and it has no `auto` mode or acknowledgement to store.
+Snooze and dismiss are a known gap: Codex gives neither the hook nor the CLI a reliable
+current-session identity, so the CLI could only mutate the most recently written session record.
 No implementation reads or mutates another's records.
 No harness installs or loads another harness's runtime.

@@ -217,29 +217,21 @@ test("a concurrent off after TypeSafe returns is honoured and does not hint", as
   });
 });
 
-test("a concurrent snooze after TypeSafe returns is preserved and does not hint", async () => {
+test("a concurrent threshold increase after TypeSafe returns suppresses the hint", async () => {
   await withLab(async (lab) => {
     writeRollout(lab.transcript, settledRollout());
     const root = adviserRoot({ CODEX_HOME: lab.home });
     const typesafe = fakeTypesafe();
     const fetch: Environment["fetch"] = async (url, init) => {
-      const store = new SessionStore(root);
-      const record = store.read("s1", 1_000_000);
-      store.write("s1", {
-        ...record.state,
-        snoozeUntil: record.state.completed + 4,
-        updatedAt: 1_000_001,
-      });
+      new ConfigStore(root).update({ minContextTokens: 100000 });
       return typesafe.fetch(url, init);
     };
 
     const output = await handle(stop(lab), environment(lab, { fetch }));
-    const state = new SessionStore(root).read("s1", 1_000_000).state;
 
     assert.deepEqual(output, {});
     assert.equal(typesafe.requests.length, 1);
-    assert.equal(state.snoozeUntil, 5);
-    assert.equal(state.lastHintKey, null);
+    assert.equal(new SessionStore(root).read("s1", 0).state.lastHintKey, null);
   });
 });
 

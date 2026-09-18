@@ -1,6 +1,6 @@
 ---
 name: compact-adviser
-description: Read or change compact-adviser settings for Codex - the mode (hint or off), the minimum context before a checkpoint is judged, TypeSafe request logging, the TypeSafe API key, and per-session snooze. Use when the user asks about compaction advice, the /compact hint, compact-adviser status, or wants to turn the adviser on or off.
+description: Read or change compact-adviser settings for Codex - the mode (hint or off), the minimum context before a checkpoint is judged, TypeSafe request logging, and the TypeSafe API key. Use when the user asks about compaction advice, the /compact hint, compact-adviser status, or wants to turn the adviser on or off.
 ---
 
 # compact-adviser settings
@@ -31,8 +31,6 @@ Node 22.18 or newer is required, because the CLI is TypeScript that Node strips 
 | `log <on\|off>` | Log each TypeSafe request and its outcome to a local jsonl file |
 | `key set` | Prompt for a TypeSafe API key and save it; the value is never printed |
 | `key clear` / `key status` | Remove the saved key, or report which source the key in effect came from |
-| `snooze` | Suppress advice for the next three completed exchanges |
-| `dismiss` | Suppress advice until the next completed exchange |
 
 `key set` reads the key from the terminal, so ask the user to run that one themselves rather
 than passing a key on a command line. Never print, echo, or repeat a key value.

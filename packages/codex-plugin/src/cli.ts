@@ -38,8 +38,6 @@ Usage: compact-adviser <command> [value]
   threshold <tokens>        Save an absolute token minimum, or "default" for ${DEFAULT_MINIMUM}
   log <on|off>              Log each TypeSafe request and its outcome to a local jsonl file
   key <set|clear|status>    Save, clear, or report the TypeSafe API key (never printed)
-  snooze                    Suppress advice for the next three completed exchanges
-  dismiss                   Suppress advice until the next completed exchange
 
 Automatic compaction is not available on Codex: nothing outside a session can run /compact.
 A key may also come from TYPESAFE_API_KEY in the environment or a .env file in the session's
@@ -120,22 +118,6 @@ async function changeKey(environment: CliEnvironment, action: string): Promise<s
   return "TypeSafe API key saved (all sessions). Status shows the source, never the value.";
 }
 
-function suppress(environment: CliEnvironment, exchanges: number, message: string): string {
-  const store = new SessionStore(adviserRoot(environment.env));
-  const latest = store.latest();
-  if (latest === undefined) return "No session recorded yet; nothing to suppress.";
-  store.write(
-    latest.id,
-    {
-      ...latest.state,
-      snoozeUntil: latest.state.completed + exchanges,
-      updatedAt: environment.now(),
-    },
-    latest,
-  );
-  return message;
-}
-
 export async function run(argv: readonly string[], environment: CliEnvironment): Promise<string> {
   const [command = "", value = ""] = argv;
   switch (command) {
@@ -153,10 +135,6 @@ export async function run(argv: readonly string[], environment: CliEnvironment):
       return saveLog(environment, value);
     case "key":
       return changeKey(environment, value);
-    case "snooze":
-      return suppress(environment, 4, "Advice snoozed for three completed exchanges.");
-    case "dismiss":
-      return suppress(environment, 1, "Advice suppressed until the next completed exchange.");
     case "":
     case "help":
     case "--help":

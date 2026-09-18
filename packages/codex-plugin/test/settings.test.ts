@@ -211,21 +211,6 @@ test("status names the mode, the key source, and the latest session's cooldown",
   });
 });
 
-test("snooze and dismiss suppress advice for the session that is running", async () => {
-  await withLab(async (lab) => {
-    const store = new SessionStore(adviserRoot({ CODEX_HOME: lab.home }));
-    assert.match(await run(["snooze"], cli(lab)), /No session recorded yet/);
-
-    store.write("s1", { ...initialState(false, 1), completed: 5 }, { tokens: 1, window: 2 });
-    assert.match(await run(["snooze"], cli(lab)), /three completed exchanges/);
-    assert.equal(store.read("s1", 1).state.snoozeUntil, 9);
-    assert.equal(store.read("s1", 1).tokens, 1, "the recorded usage survives a snooze");
-
-    assert.match(await run(["dismiss"], cli(lab)), /next completed exchange/);
-    assert.equal(store.read("s1", 1).state.snoozeUntil, 6);
-  });
-});
-
 test("the CLI explains that automatic mode does not exist on Codex", async () => {
   await withLab(async (lab) => {
     await assert.rejects(run(["auto"], cli(lab)), /not available on Codex/);
