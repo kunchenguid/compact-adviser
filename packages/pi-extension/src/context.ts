@@ -54,8 +54,6 @@ export function clipMiddle(text: string, limit: number): { text: string; truncat
 }
 const sensitivePath =
   /(?:^|[\\/])(?:\.env(?:\.[^\\/]*)?|auth\.json|id_(?:rsa|ed25519)|[^\\/]*\.(?:pem|key))$/i;
-/** Product-owned settings that can hold a menu-saved TypeSafe key. */
-const ownedSettingsPath = /(?:^|[\\/])(?:compact-adviser\.json|settings\.json)$/i;
 
 function fileExists(path: string): boolean {
   try {
@@ -187,10 +185,6 @@ export function snapshot(ctx: ExtensionContext, secrets: readonly (string | unde
       if (m.role === "toolResult" && sensitivePath.test(toolPathName)) {
         raw = "[Sensitive file content excluded]";
         redacted = true;
-      } else if (m.role === "toolResult" && ownedSettingsPath.test(toolPathName)) {
-        const owned = redactOwnedSettings(raw);
-        raw = owned.text;
-        redacted ||= owned.redacted;
       }
     } else if (m.role === "compactionSummary" || m.role === "branchSummary") {
       if (!summary) {

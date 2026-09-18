@@ -68,8 +68,6 @@ export function clipMiddle(text: string, limit: number): { text: string; truncat
 
 const sensitivePath =
   /(?:^|[\\/])(?:\.env(?:\.[^\\/]*)?|auth\.json|id_(?:rsa|ed25519)|[^\\/]*\.(?:pem|key))$/i;
-/** Product-owned settings that can hold a menu-saved TypeSafe key. */
-const ownedSettingsPath = /(?:^|[\\/])(?:compact-adviser\.json|settings\.json)$/i;
 
 function isOwnedSecretField(key: string): boolean {
   return key === "typesafeApiKey" || key.endsWith(".typesafeApiKey");
@@ -245,12 +243,8 @@ export function snapshot(
           excerpt = "[Sensitive file content excluded]";
           redacted = true;
         } else {
-          const source =
-            path && ownedSettingsPath.test(path)
-              ? redactOwnedSettings(use.text ?? "")
-              : { text: use.text ?? "", redacted: false };
-          const r = sanitizeText(source.text, secrets);
-          redacted ||= source.redacted || r.redacted;
+          const r = sanitizeText(use.text ?? "", secrets);
+          redacted ||= r.redacted;
           const c = clipMiddle(r.text, Math.min(tailBudget, TOOL_RESULT_BUDGET));
           recentTruncated ||= c.truncated;
           excerpt = c.text;
