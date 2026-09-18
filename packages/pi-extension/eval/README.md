@@ -9,7 +9,8 @@ minimal fake `ExtensionContext`, and production `judge()` / `qualifies()` from
 
 **This directory ships the harness and the rubric, not a dataset.** Session
 transcripts, checkpoints, worksheets, gold notes, results, and ablation output
-stay in gitignored `eval/local/`. Do not commit them.
+stay in gitignored `eval/local/`. Do not commit them. Aggregate per-stratum
+metrics for the shipped judge are in [`measured-results.md`](measured-results.md).
 
 ## Setup
 
@@ -100,15 +101,19 @@ transcript *after* the checkpoint.
 **`phase_gold`**
 
 - `completed_checkpoint` when the assistant's own latest unit of work is
-  finished and reported. A question or choice the assistant has fully presented
-  and handed to the user does not by itself make the phase unfinished. Work the
-  assistant merely *reports on* (another agent's task, an open pull request, a
-  queued job, a decision that belongs to the user) is not the assistant's own
-  work: a status answer that fully answers what was asked is complete even when
-  everything it describes is still open.
-- `still_in_progress` when the assistant itself still owes the next step:
-  validation it launched is running, it promised a follow-up, it parked with
-  work remaining, or a question is blocking *its own* next action.
+  finished and reported. Completeness follows who must act next: a question,
+  choice, or blocker the assistant has fully stated and handed over is
+  complete, even when the assistant says it will act once the answer arrives.
+  Work the assistant merely *reports on* (another agent's task, an open pull
+  request, a queued job, a decision that belongs to the user) is not the
+  assistant's own work, and naming that work as open, running, parked, or
+  awaited never makes the assistant's own phase unfinished. A status answer
+  that fully answers what was asked is complete even when everything it
+  describes is still open.
+- `still_in_progress` when the assistant itself can take a next step now: its
+  own verification, build, submission, or job is running right now, it promised
+  to continue on its own, it is retrying, or it failed and left the failure
+  unhandled.
 - `unclear` when the transcript does not establish either. On long real
   sessions this class is often empty: the assistant either reports a finished
   unit or visibly owes work.
@@ -168,7 +173,7 @@ and again with pivots excluded.
 ## Gitignore boundary
 
 Tracked: the runner, `eval/tools/` (miners and probes), `corpus.example.json` /
-`corpus.example.ts`, this README, and `eval/local/.gitignore`.
+`corpus.example.ts`, this README, `measured-results.md`, and `eval/local/.gitignore`.
 
 Never commit: `eval/local/**` (except that gitignore file), `checkpoints*.jsonl`,
 `results*.jsonl`, `ablation*.jsonl`, `worksheet/`, or any other session-derived
