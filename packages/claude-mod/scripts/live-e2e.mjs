@@ -434,10 +434,12 @@ try {
   await waitText("Enable automatic mode");
   key("Enter");
   await waitFor(() => pluginOptions().mode === "auto", "the host to store auto mode");
-  // The confirmation reopens the pane with the mode row focused. Use its own Close button;
-  // Escape can be consumed while the host hot-reloads the saved option.
+  // Wait for the option-triggered reload to finish and restore focus to the mode row. From
+  // there, reverse Tab wraps directly to the pane's Close button without racing the redraw.
+  await waitText("compact-adviser: options changed", 20000);
   await waitText("Mode: Automatic (experimental)");
-  for (let i = 0; i < 6; i++) key("Tab");
+  key("BTab");
+  await sleep(300);
   key("Enter");
   await waitFor((s) => !s.includes("Reset minimum to 40,000"), "the pane to close");
   pass("automatic mode chosen in the pane asks first, then persists");
