@@ -381,11 +381,14 @@ try {
   await waitText("Automatic mode saved (all sessions)", 20000);
   await waitFor(() => pluginOptions().mode === "auto", "the host to store auto mode");
   // The pane can return focus to an Input after the confirmation dialog and hot reload.
-  // Its first Escape blurs that input; a second Escape closes the pane.
-  for (let i = 0; i < 2 && screen().includes("Reset minimum to 40,000"); i++) {
-    key("Escape");
-    await sleep(300);
+  // Its first Escape may blur that input or close the pane. Wait for the close to render
+  // before deciding whether to send another Escape; an extra Escape opens Claude's Rewind dialog.
+  key("Escape");
+  const closeDeadline = Date.now() + 3000;
+  while (screen().includes("Reset minimum to 40,000") && Date.now() < closeDeadline) {
+    await sleep(200);
   }
+  if (screen().includes("Reset minimum to 40,000")) key("Escape");
   await waitFor((s) => !s.includes("Reset minimum to 40,000"), "the pane to close");
   pass("automatic mode chosen in the pane asks first, then persists");
 

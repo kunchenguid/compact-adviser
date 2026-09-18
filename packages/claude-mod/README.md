@@ -173,7 +173,7 @@ Use hint mode if another plugin customizes compaction in ways this mod cannot ob
 
 The request includes bounded user requests, up to the last 64 recent visible replies and tool results clipped by existing byte budgets, short tool-result excerpts (long dumps keep a head and tail), a prior compaction summary when present, names of files written by edit tools, and explicit omission markers.
 System prompts, hidden reasoning, images, environment variables, and complete transcripts are not sent.
-Known key patterns and obvious sensitive-file results (`.env`, `*.pem`, `id_rsa`, ...) are filtered, but this is **best-effort**, not comprehensive secret detection.
+The saved-key guarantee is defined in the repository [security policy](../../SECURITY.md). Filtering of other known key patterns and obvious sensitive-file results (`.env`, `*.pem`, `id_rsa`, ...) is **best-effort**, not comprehensive secret detection.
 Installing this package is consent to send eligible checkpoint context to TypeSafe; uninstall it or set mode Off if that is not acceptable.
 
 Optional request logging is off by default. Enable **Log TypeSafe requests** from `/compact-adviser` (or `/config`) to append each judgment body to `~/.claude/compact-adviser-requests.jsonl`. The log is the redacted request body plus questions; it never includes the API key.

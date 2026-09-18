@@ -203,7 +203,12 @@ async function judgeCheckpoint($: EngineInterface, epoch: number): Promise<void>
   judging = true;
   try {
     const initial = await loadConfig($);
-    const view = snapshot(await $.session.messages());
+    const [messages, activeKey, rows] = await Promise.all([
+      $.session.messages(),
+      apiKey($),
+      $.config.list(),
+    ]);
+    const view = snapshot(messages, [activeKey, readSavedApiKey(rows, loadedOptions)]);
     if (view.conversationTokens <= 20000) return;
     const fingerprint = await checkpointKey(view.checkpointText);
     if ((await loadState($)).state.lastHintKey === fingerprint) return;

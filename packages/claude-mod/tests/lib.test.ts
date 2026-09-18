@@ -259,6 +259,58 @@ describe("judge input", () => {
     expect(view.autoCoverage).toBe(false);
   });
 
+  test("a settings.json read keeps non-secret options and drops the saved TypeSafe key", () => {
+    const secret = "tsk-saved-key-must-not-leave";
+    const view = snapshot(
+      [
+        ...longConversation(),
+        {
+          role: "assistant",
+          text: "Saved notes.",
+          toolUses: [
+            {
+              tool_use_id: "write-notes",
+              tool: "Write",
+              input: { file_path: `/tmp/notes-${secret}.md` },
+              text: "ok",
+            },
+          ],
+        },
+        {
+          role: "assistant",
+          text: "Read the plugin settings.",
+          toolUses: [
+            {
+              tool_use_id: "settings",
+              tool: "Read",
+              input: { file_path: "/home/fixture/.claude/settings.json" },
+              text: JSON.stringify({
+                pluginConfigs: {
+                  "compact-adviser@0.1.0": {
+                    options: {
+                      mode: "hint",
+                      minContextTokens: 40000,
+                      logRequests: true,
+                      typesafeApiKey: secret,
+                    },
+                  },
+                },
+              }),
+            },
+          ],
+        },
+      ],
+      [secret],
+    );
+    const body = requestBody(view.state);
+    expect(body.includes(secret)).toBe(false);
+    expect(body).toContain("hint");
+    expect(body).toContain("40000");
+    expect(body).toContain("[REDACTED]");
+    expect(view.state.coverage.redacted).toBe(true);
+    expect(view.state.savedArtifacts).toContain("/tmp/notes-[REDACTED].md");
+  });
+
   test("recent tail keeps the last 64 assistant messages when they fit the byte budget", () => {
     const older = Array.from({ length: 20 }, (_, i) => ({
       role: "assistant" as const,

@@ -119,6 +119,59 @@ test("bounded snapshot excludes system prompt, thinking, images and known secret
   assert.equal(result.autoCoverage, false);
 });
 
+test("a compact-adviser.json read keeps mode diagnostics and drops the saved key from the body", (t) => {
+  const h = harness(t);
+  const secret = "tsk-saved-key-must-not-leave";
+  const artifact = `notes-${secret}.md`;
+  writeFileSync(join(h.dir, artifact), "ok");
+  h.sm.appendMessage({
+    ...assistant(""),
+    content: [
+      {
+        type: "toolCall",
+        id: "write-notes",
+        name: "write",
+        arguments: { path: artifact },
+      },
+    ],
+    stopReason: "toolUse",
+  });
+  h.sm.appendMessage(toolResult("ok", "write", "write-notes"));
+  h.sm.appendMessage({
+    ...assistant(""),
+    content: [
+      {
+        type: "toolCall",
+        id: "read-settings",
+        name: "read",
+        arguments: { path: join(h.dir, "compact-adviser.json") },
+      },
+    ],
+    stopReason: "toolUse",
+  });
+  h.sm.appendMessage(
+    toolResult(
+      `${JSON.stringify({
+        version: 1,
+        mode: "hint",
+        minContextTokens: 40000,
+        logRequests: true,
+        typesafeApiKey: secret,
+      })}\n`,
+      "read",
+      "read-settings",
+    ),
+  );
+  const view = snapshot(h.ctx, [secret]);
+  const body = requestBody(view.state);
+  assert.ok(!body.includes(secret));
+  assert.ok(body.includes("hint"));
+  assert.ok(body.includes("40000"));
+  assert.ok(body.includes("[REDACTED]"));
+  assert.equal(view.state.coverage.redacted, true);
+  assert.deepEqual(view.state.savedArtifacts, ["notes-[REDACTED].md"]);
+});
+
 test("recent tail keeps the last 64 messages and still clips to byte budgets", (t) => {
   const h = harness(t);
   const markers = Array.from({ length: 80 }, (_, i) => `unique-tail-${i}`);

@@ -167,7 +167,7 @@ export function installAdviser(pi: ExtensionAPI, options: Options): void {
       return;
     }
     if (request || eligible(ctx, config, state) === undefined) return;
-    const view = snapshot(ctx);
+    const view = snapshot(ctx, [key(), savedApiKey(store)]);
     if (view.conversationTokens <= 20000 || view.checkpointKey === state.lastHintKey) return;
     if (config.logRequests) {
       try {

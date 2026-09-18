@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import { existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import test from "node:test";
-import { JUDGE_UNAVAILABLE_MESSAGE, parseJudgment } from "../src/judge.ts";
+import { JUDGE_UNAVAILABLE_MESSAGE, parseJudgment, requestBody } from "../src/judge.ts";
 import { requestLogPath } from "../src/log.ts";
 import { restoreState } from "../src/state.ts";
-import { apiResponse, flush, harness, success } from "./helpers.ts";
+import { apiResponse, assistant, flush, harness, success, toolResult } from "./helpers.ts";
 
 test("threshold is a constant 40k and requests only run at settlement", async (t) => {
   const h = harness(t);
@@ -384,4 +384,55 @@ test("TypeSafe request logging is off by default and writes a redacted body with
   assert.ok(logged.includes("jev-latest"));
   assert.ok(logged.includes("Finish and save the report"));
   assert.ok(!logged.includes("test-key"));
+});
+
+test("a saved key in a compact-adviser.json read is absent from the request body and log", async (t) => {
+  const previous = process.env.TYPESAFE_API_KEY;
+  t.after(() => {
+    if (previous === undefined) delete process.env.TYPESAFE_API_KEY;
+    else process.env.TYPESAFE_API_KEY = previous;
+  });
+  delete process.env.TYPESAFE_API_KEY;
+  const h = harness(t);
+  h.install("0.82.0", false);
+  const secret = "tsk-saved-key-must-not-leave";
+  h.store.update({ typesafeApiKey: secret, logRequests: true });
+  h.enable();
+  const artifact = `notes-${secret}.md`;
+  writeFileSync(`${h.dir}/${artifact}`, "ok");
+  h.sm.appendMessage({
+    ...assistant(""),
+    content: [
+      {
+        type: "toolCall",
+        id: "write-notes",
+        name: "write",
+        arguments: { path: artifact },
+      },
+    ],
+    stopReason: "toolUse",
+  });
+  h.sm.appendMessage(toolResult("ok", "write", "write-notes"));
+  h.sm.appendMessage({
+    ...assistant(""),
+    content: [
+      {
+        type: "toolCall",
+        id: "read-settings",
+        name: "read",
+        arguments: { path: h.store.path },
+      },
+    ],
+    stopReason: "toolUse",
+  });
+  h.sm.appendMessage(toolResult(readFileSync(h.store.path, "utf8"), "read", "read-settings"));
+  h.next();
+  await h.fire("agent_settled");
+  assert.equal(h.calls, 1);
+  const body = requestBody(h.payloads[0]);
+  const logged = readFileSync(requestLogPath(h.dir), "utf8");
+  assert.ok(!body.includes(secret));
+  assert.ok(!logged.includes(secret));
+  assert.ok(body.includes("hint"));
+  assert.ok(logged.includes("jev-latest"));
 });

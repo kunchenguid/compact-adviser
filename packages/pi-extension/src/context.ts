@@ -54,6 +54,7 @@ export function clipMiddle(text: string, limit: number): { text: string; truncat
 }
 const sensitivePath =
   /(?:^|[\\/])(?:\.env(?:\.[^\\/]*)?|auth\.json|id_(?:rsa|ed25519)|[^\\/]*\.(?:pem|key))$/i;
+
 function fileExists(path: string): boolean {
   try {
     return statSync(path).isFile();
@@ -61,8 +62,64 @@ function fileExists(path: string): boolean {
     return false;
   }
 }
-function redact(text: string): { text: string; redacted: boolean } {
+
+function isOwnedSecretField(key: string): boolean {
+  return key === "typesafeApiKey" || key.endsWith(".typesafeApiKey");
+}
+
+function redactOwnedSecretFields(value: unknown): { value: unknown; redacted: boolean } {
+  let redacted = false;
+  const walk = (node: unknown): unknown => {
+    if (Array.isArray(node)) return node.map(walk);
+    if (node && typeof node === "object") {
+      const out: Record<string, unknown> = {};
+      for (const [key, child] of Object.entries(node as Record<string, unknown>)) {
+        if (isOwnedSecretField(key) && child !== "" && child != null) {
+          out[key] = "[REDACTED]";
+          redacted = true;
+        } else out[key] = walk(child);
+      }
+      return out;
+    }
+    return node;
+  };
+  return { value: walk(value), redacted };
+}
+
+/** Strip the product's saved-key fields from JSON text; keep non-secret settings. */
+export function redactOwnedSettings(text: string): { text: string; redacted: boolean } {
+  if (!text.includes("typesafeApiKey")) return { text, redacted: false };
+  try {
+    const parsed = JSON.parse(text) as unknown;
+    const walked = redactOwnedSecretFields(parsed);
+    if (walked.redacted) return { text: JSON.stringify(walked.value), redacted: true };
+  } catch {
+    // Clipped or non-JSON tool output still goes through the field regex below.
+  }
   const clean = text
+    .replace(/("(?:[^"\\]*\.)?typesafeApiKey")\s*:\s*"(?:\\.|[^"\\])*"/g, '$1:"[REDACTED]"')
+    .replace(/\b(typesafeApiKey)\s*[=:]\s*["']?[^\s"',}]+/g, "$1=[REDACTED]");
+  return { text: clean, redacted: clean !== text };
+}
+
+export function scrubKnownSecrets(
+  text: string,
+  secrets: readonly (string | undefined)[],
+): { text: string; redacted: boolean } {
+  let clean = text;
+  let redacted = false;
+  for (const secret of secrets) {
+    const value = secret?.trim();
+    if (!value || !clean.includes(value)) continue;
+    clean = clean.split(value).join("[REDACTED]");
+    redacted = true;
+  }
+  return { text: clean, redacted };
+}
+
+export function redact(text: string): { text: string; redacted: boolean } {
+  const fields = redactOwnedSettings(text);
+  const clean = fields.text
     .replace(
       /-----BEGIN [^-]*PRIVATE KEY-----[\s\S]*?(?:-----END [^-]*PRIVATE KEY-----|$)/g,
       "[REDACTED PRIVATE KEY]",
@@ -72,9 +129,19 @@ function redact(text: string): { text: string; redacted: boolean } {
       /\b([A-Z_]*(?:API_KEY|TOKEN|SECRET|PASSWORD))\s*[=:]\s*["']?[^\s"',}]+/g,
       "$1=[REDACTED]",
     );
-  return { text: clean, redacted: clean !== text };
+  return { text: clean, redacted: fields.redacted || clean !== fields.text };
 }
-export function snapshot(ctx: ExtensionContext) {
+
+function sanitizeText(
+  text: string,
+  secrets: readonly (string | undefined)[],
+): { text: string; redacted: boolean } {
+  const cleaned = redact(text);
+  const scrubbed = scrubKnownSecrets(cleaned.text, secrets);
+  return { text: scrubbed.text, redacted: cleaned.redacted || scrubbed.redacted };
+}
+
+export function snapshot(ctx: ExtensionContext, secrets: readonly (string | undefined)[] = []) {
   const messages = buildSessionContext(ctx.sessionManager.buildContextEntries()).messages;
   const conversationTokens = messages.reduce((sum, m) => sum + estimateTokens(m), 0);
   const paths = new Map<string, { path: string; name: string }>();
@@ -114,13 +181,14 @@ export function snapshot(ctx: ExtensionContext) {
           .map((c) => c.text)
           .join("\n");
       }
-      if (m.role === "toolResult" && sensitivePath.test(paths.get(m.toolCallId)?.path ?? "")) {
+      const toolPathName = m.role === "toolResult" ? (paths.get(m.toolCallId)?.path ?? "") : "";
+      if (m.role === "toolResult" && sensitivePath.test(toolPathName)) {
         raw = "[Sensitive file content excluded]";
         redacted = true;
       }
     } else if (m.role === "compactionSummary" || m.role === "branchSummary") {
       if (!summary) {
-        const s = redact(m.summary);
+        const s = sanitizeText(m.summary, secrets);
         summary = clip(s.text, 1500).text;
         redacted ||= s.redacted;
       }
@@ -129,7 +197,7 @@ export function snapshot(ctx: ExtensionContext) {
       unknownContext = true;
       continue;
     }
-    const cleaned = redact(raw);
+    const cleaned = sanitizeText(raw, secrets);
     redacted ||= cleaned.redacted;
     if (m.role === "user") {
       const part = clip(cleaned.text, userBudget);
@@ -156,7 +224,11 @@ export function snapshot(ctx: ExtensionContext) {
     userConstraints: users,
     recent,
     previousSummary: summary,
-    savedArtifacts: [...artifacts].slice(-8).map((p) => clip(p, 256).text),
+    savedArtifacts: [...artifacts].slice(-8).map((p) => {
+      const cleaned = sanitizeText(p, secrets);
+      redacted ||= cleaned.redacted;
+      return clip(cleaned.text, 256).text;
+    }),
     coverage: {
       omittedUserMessages: omittedUsers,
       olderMessagesOmitted: Math.max(0, messages.length - RECENT_TAIL_MESSAGES),
