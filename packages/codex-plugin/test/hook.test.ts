@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { readFileSync, writeFileSync } from "node:fs";
 import { test } from "node:test";
 import { ConfigStore } from "../src/config.ts";
-import { HINT, type HookPayload, handle } from "../src/hook.ts";
+import { HINT, type Environment, type HookPayload, handle } from "../src/hook.ts";
 import { requestLogPath } from "../src/log.ts";
 import { adviserRoot } from "../src/paths.ts";
 import { SessionStore } from "../src/store.ts";
@@ -138,6 +138,13 @@ test("the local gates keep a checkpoint away from TypeSafe", async () => {
     { name: "no key at all", env: { TYPESAFE_API_KEY: undefined } },
     { name: "no usage in the transcript", records: [sessionMeta(), assistantMessage("done")] },
     { name: "not the interactive TUI", records: settledRollout({ originator: "codex_exec" }) },
+    {
+      name: "originator-less source:cli is not the TUI",
+      records: [
+        { type: "session_meta", payload: { session_id: "s1", source: "cli" } },
+        ...settledRollout().slice(1),
+      ],
+    },
     { name: "no final answer", payload: { last_assistant_message: "   " } },
     { name: "re-entered stop", payload: { stop_hook_active: true } },
     { name: "no transcript path", payload: { transcript_path: undefined } },
@@ -160,6 +167,33 @@ test("the local gates keep a checkpoint away from TypeSafe", async () => {
       assert.equal(typesafe.requests.length, 0, `${c.name}: expected no TypeSafe request`);
     });
   }
+});
+
+test("a TypeSafe timeout aborts the in-flight request and stays silent", async () => {
+  await withLab(async (lab) => {
+    writeRollout(lab.transcript, settledRollout());
+    let aborted = false;
+    const fetch = (async (_url: string | URL, init?: RequestInit) => {
+      await new Promise<never>((_, reject) => {
+        const signal = init?.signal;
+        if (signal === undefined) return;
+        const fail = () => {
+          aborted = true;
+          reject(Object.assign(new Error("aborted"), { name: "AbortError" }));
+        };
+        if (signal.aborted) fail();
+        else signal.addEventListener("abort", fail, { once: true });
+      });
+      throw new Error("unreachable");
+    }) as Environment["fetch"];
+
+    const output = await handle(stop(lab), environment(lab, { fetch }));
+
+    assert.deepEqual(output, {}, "a timed-out judgment never hints");
+    assert.equal(aborted, true);
+    const store = new SessionStore(adviserRoot({ CODEX_HOME: lab.home }));
+    assert.equal(store.read("s1", 0).state.failures, 1);
+  });
 });
 
 test("a TypeSafe failure backs off and stays silent", async () => {

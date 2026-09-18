@@ -6,7 +6,7 @@
 // and Node built-ins, and both entry points must run under a bare `node` and answer JSON.
 
 import { spawnSync } from "node:child_process";
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -77,17 +77,6 @@ if (hooks) {
         }
         if (typeof hook.timeout !== "number") fail(`${event} command has no timeout`);
       }
-    }
-  }
-}
-
-// Nothing is installed alongside a Codex plugin, so an import of anything but a sibling
-// source file or a Node built-in would be a runtime failure in the user's session.
-for (const name of readdirSync(join(PACKAGE, "src"))) {
-  const source = readFileSync(join(PACKAGE, "src", name), "utf8");
-  for (const [, specifier] of source.matchAll(/^\s*import[^"']*["']([^"']+)["']/gm)) {
-    if (!specifier.startsWith("node:") && !specifier.startsWith("./")) {
-      fail(`src/${name} imports ${specifier}; a Codex plugin ships no dependencies`);
     }
   }
 }

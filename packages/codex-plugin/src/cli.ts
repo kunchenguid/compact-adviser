@@ -7,6 +7,8 @@
 //
 // It never prints a key: `status` reports only which source the key in effect came from.
 
+import { createInterface } from "node:readline/promises";
+import { Writable } from "node:stream";
 import {
   AUTO_UNAVAILABLE,
   ConfigStore,
@@ -166,11 +168,20 @@ export async function run(argv: readonly string[], environment: CliEnvironment):
 }
 
 async function readSecret(prompt: string): Promise<string> {
-  const { createInterface } = await import("node:readline/promises");
-  const rl = createInterface({ input: process.stdin, output: process.stderr, terminal: true });
+  const rl = createInterface({
+    input: process.stdin,
+    output: new Writable({
+      write(_chunk, _encoding, callback) {
+        callback();
+      },
+    }),
+    terminal: Boolean(process.stdin.isTTY),
+  });
   try {
-    // The prompt goes to stderr and the typed value is never echoed back to stdout.
-    return await rl.question(prompt);
+    process.stderr.write(prompt);
+    const value = await rl.question("");
+    process.stderr.write("\n");
+    return value;
   } finally {
     rl.close();
   }

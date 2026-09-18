@@ -1,9 +1,11 @@
 // The settings file, the per-session records, and the CLI that edits both.
 
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { chmodSync, readFileSync, writeFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { test } from "node:test";
+import { fileURLToPath } from "node:url";
 import { run } from "../src/cli.ts";
 import {
   AUTO_UNAVAILABLE,
@@ -17,6 +19,8 @@ import { adviserRoot, codexHome } from "../src/paths.ts";
 import { initialState } from "../src/state.ts";
 import { SessionStore } from "../src/store.ts";
 import { type Lab, makeLab } from "./support.ts";
+
+const CLI = join(dirname(fileURLToPath(import.meta.url)), "../src/cli.ts");
 
 function cli(lab: Lab, overrides: Partial<{ env: NodeJS.ProcessEnv }> = {}) {
   return {
@@ -167,6 +171,26 @@ test("the CLI saves and clears a key without ever printing it", async () => {
     assert.match(await run(["key", "clear"], cli(lab)), /cleared/);
     assert.equal(store.read().typesafeApiKey, undefined);
     assert.equal(await run(["key", "status"], cli(lab)), "Key: missing");
+  });
+});
+
+test("key set never writes the typed secret to the terminal", async () => {
+  await withLab((lab) => {
+    const secret = "tsk-must-never-echo";
+    const result = spawnSync(process.execPath, [CLI, "key", "set"], {
+      encoding: "utf8",
+      input: `${secret}\n`,
+      env: { ...process.env, CODEX_HOME: lab.home },
+      timeout: 10000,
+    });
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /TypeSafe API key saved/);
+    assert.ok(!result.stdout.includes(secret));
+    assert.ok(!result.stderr.includes(secret));
+    assert.equal(
+      new ConfigStore(adviserRoot({ CODEX_HOME: lab.home })).read().typesafeApiKey,
+      secret,
+    );
   });
 });
 

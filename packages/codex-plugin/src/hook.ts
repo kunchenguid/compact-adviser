@@ -56,9 +56,8 @@ export interface HookOutput {
  * Only the interactive TUI judges. `codex exec` and other scripted runners settle the same
  * way, but a hint no person is watching is only a TypeSafe request nobody asked for.
  */
-export function isInteractive(rollout: Pick<Rollout, "originator" | "source">): boolean {
-  if (rollout.originator !== undefined) return rollout.originator === "codex-tui";
-  return rollout.source === "cli";
+export function isInteractive(rollout: Pick<Rollout, "originator">): boolean {
+  return rollout.originator === "codex-tui";
 }
 
 function testEndpoint(env: NodeJS.ProcessEnv): string | undefined {
@@ -90,6 +89,45 @@ export interface Environment {
   env: NodeJS.ProcessEnv;
   now: () => number;
   fetch: typeof globalThis.fetch;
+}
+
+function cancellableJudgeTransport(fetch: Environment["fetch"]): {
+  fetch: (
+    url: string,
+    init: { method: string; headers: Record<string, string>; body: string },
+  ) => Promise<{ status: number; ok: boolean; text: string }>;
+  sleep: (ms: number) => Promise<void>;
+} {
+  const controller = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const stopTimer = () => {
+    if (timer === undefined) return;
+    clearTimeout(timer);
+    timer = undefined;
+  };
+  return {
+    fetch: async (url, init) => {
+      try {
+        const response = await fetch(url, { ...init, signal: controller.signal });
+        stopTimer();
+        return { status: response.status, ok: response.ok, text: await response.text() };
+      } catch (error) {
+        stopTimer();
+        if (controller.signal.aborted) {
+          return await new Promise<{ status: number; ok: boolean; text: string }>(() => undefined);
+        }
+        throw error;
+      }
+    },
+    sleep: (ms) =>
+      new Promise((resolve) => {
+        timer = setTimeout(() => {
+          timer = undefined;
+          resolve();
+          controller.abort();
+        }, ms);
+      }),
+  };
 }
 
 /**
@@ -146,11 +184,7 @@ async function onStop(payload: HookPayload, environment: Environment): Promise<H
   let result: Awaited<ReturnType<typeof judge>>;
   try {
     result = await judge(view.state, key.value, {
-      fetch: async (url, init) => {
-        const response = await environment.fetch(url, init);
-        return { status: response.status, ok: response.ok, text: await response.text() };
-      },
-      sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+      ...cancellableJudgeTransport(environment.fetch),
       ...(endpoint ? { endpoint } : {}),
     });
   } catch (error) {

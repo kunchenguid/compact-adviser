@@ -32,7 +32,6 @@ const INJECTED_USER_PREFIXES = [
 export interface Rollout {
   /** How this session was started: `codex-tui` is the interactive TUI. */
   originator: string | undefined;
-  source: string | undefined;
   messages: MessageLike[];
   /** Tokens the last model request occupied, or undefined when no usage record was found. */
   tokens: number | undefined;
@@ -42,7 +41,6 @@ export interface Rollout {
 
 export const EMPTY_ROLLOUT: Readonly<Rollout> = Object.freeze({
   originator: undefined,
-  source: undefined,
   messages: [],
   tokens: undefined,
   window: undefined,
@@ -163,7 +161,6 @@ export function mapRecords(records: readonly unknown[]): Rollout {
   const messages: MessageLike[] = [];
   const pending = new Map<string, ToolUseLike>();
   let originator: string | undefined;
-  let source: string | undefined;
   let tokens: number | undefined;
   let window: number | undefined;
 
@@ -174,7 +171,6 @@ export function mapRecords(records: readonly unknown[]): Rollout {
 
     if (entry?.type === "session_meta") {
       if (typeof payload.originator === "string") originator = payload.originator;
-      if (typeof payload.source === "string") source = payload.source;
       continue;
     }
 
@@ -227,7 +223,6 @@ export function mapRecords(records: readonly unknown[]): Rollout {
 
   return {
     originator,
-    source,
     messages: messages.slice(-MESSAGE_LIMIT),
     tokens,
     window,
