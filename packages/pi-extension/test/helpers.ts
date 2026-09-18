@@ -126,7 +126,26 @@ export function harness(
     signal: undefined,
     ui: {
       notify: (text: string) => notifications.push(text),
-      setWidget: (_key: string, lines: string[] | undefined) => widgets.push(lines),
+      setWidget: (
+        _key: string,
+        content:
+          | string[]
+          | undefined
+          | ((
+              tui: unknown,
+              theme: { fg: (color: string, text: string) => string },
+            ) => { render: (width: number) => string[] }),
+      ) => {
+        if (typeof content === "function") {
+          const component = content(
+            {},
+            { fg: (color, text) => (color === "warning" ? `warning:${text}` : text) },
+          );
+          widgets.push(component.render(80));
+          return;
+        }
+        widgets.push(content);
+      },
       setStatus: (_key: string, text: string | undefined) => statuses.push(text),
       select: async (_title: string, options: string[]) => {
         selectOptions.push(options);

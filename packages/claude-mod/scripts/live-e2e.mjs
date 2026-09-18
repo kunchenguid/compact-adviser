@@ -34,7 +34,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CLAUDE, claudeEnv, claudeVersion, PACKAGE } from "./common.mjs";
 
-const HINT = "Potential session boundary detected. Run /compact to save tokens.";
+const HINT = "Compact adviser: Run /compact to save tokens.";
 const API_KEY = "sk-ant-fixture-not-a-real-key-0000000000";
 const TYPESAFE_KEY = "tsk-live-fixture-key";
 const SOCKET = `compact-adviser-e2e-${process.pid}`;

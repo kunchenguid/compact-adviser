@@ -2,7 +2,7 @@
 
 A standalone Claude Code mod that suggests a useful checkpoint for `/compact`, rather than compacting merely because the context is large.
 
-> Potential session boundary detected. **Run /compact to save tokens.**
+> Compact adviser: **Run /compact to save tokens.**
 
 Hints are the default.
 Automatic mode is an explicit, persistent, experimental opt-in.
@@ -155,8 +155,8 @@ Hint and auto share one floor on that score, and the floor depends on how full t
 A wrong hint costs most while there is room left and least when compaction is imminent anyway.
 These are measured starting knobs, **not safety guarantees**; the Pi package's `eval/README.md` has the ladder.
 
-A hint pins the line `compact-adviser: Potential session boundary detected. Run /compact to save tokens.` under the prompt until your next turn, shows it briefly as a notice, and proposes `/compact` as the prompt box's dim suggestion (Tab to take it).
-Claude Code drops a plugin notice that follows another within two seconds; the pinned line is the reliable signal.
+A hint pins the yellow line `Compact adviser: Run /compact to save tokens.` under the prompt until your next turn, and proposes `/compact` as the prompt box's dim suggestion (Tab to take it).
+The pinned status is the only hint surface; there is no matching toast.
 
 Automatic mode still requires the first-use acknowledgement to turn auto on.
 Once enabled, it fires on the same qualifying judgment a hint would.
@@ -189,12 +189,12 @@ Pricing and limits can change.
 | `compact-adviser.json` in Pi's agent directory holds mode, minimum, request logging, a saved TypeSafe key, and the auto acknowledgement | `mode`, `minContextTokens`, and `logRequests` are host-stored `userConfig` options (also in `/config`); `typesafeApiKey` is the same settings path but hidden from `/config`; the auto acknowledgement is in the plugin store | Claude Code gives plugins a declared, validated configuration surface; `/config` must not display the API key, and a `/config` toggle must not bypass the auto confirmation |
 | Menu from Pi's select and input dialogs | One settings pane with a picker, a prefilled field, and buttons; confirmations in Claude Code's own question dialog | Same rows and flow on Claude Code's elements |
 | Judges at `agent_settled` | Judges at `turn.complete` for the main loop | Claude Code's turn end is already the settled point |
-| Hint as notice plus widget | Brief notice, a Tab-to-take `/compact` suggestion, and a hint pinned until the next turn | Claude Code's hint surfaces; the pinned line is only for actual advice |
+| Yellow sticky widget above the editor | Yellow status line until the next turn, plus a Tab-to-take `/compact` suggestion | One hint surface per host; Claude Code still offers Tab-to-take |
 | Cooldowns in Pi session entries | Cooldowns in the plugin store by session id | Plugins cannot write session entries |
 | Compaction retains Pi's ~20k recent tokens; auto cancels if configured lower | Claude Code's summary plus a few recent messages; the judge is told so | Claude Code exposes no retained-tail setting to check |
 | Stable public extension API | Early-access mods API behind `CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1` | Platform status |
 
-The hint line uses "Potential session boundary detected." as its lead-in; the call to action is the shared "Run /compact to save tokens."
+Both hosts prefix the shared call to action as `Compact adviser: Run /compact to save tokens.`
 
 ## Verification
 

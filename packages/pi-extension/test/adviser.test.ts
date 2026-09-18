@@ -12,6 +12,21 @@ import { requestLogPath } from "../src/log.ts";
 import { restoreState } from "../src/state.ts";
 import { apiResponse, assistant, flush, harness, success, toolResult } from "./helpers.ts";
 
+const HINT = "Compact adviser: Run /compact to save tokens.";
+const HINT_LINE = `warning:${HINT}`;
+function lastWidget(h: ReturnType<typeof harness>) {
+  return h.widgets.at(-1);
+}
+function showedHint(h: ReturnType<typeof harness>) {
+  const lines = lastWidget(h);
+  return Array.isArray(lines) && lines.length === 1 && lines[0]?.trim() === HINT_LINE;
+}
+function leakedHintNotify(h: ReturnType<typeof harness>) {
+  return h.notifications.some(
+    (x) => x.includes(HINT) || x.endsWith("Run /compact to save tokens."),
+  );
+}
+
 test("threshold is a constant 40k and requests only run at settlement", async (t) => {
   const h = harness(t);
   h.enable();
@@ -27,7 +42,8 @@ test("threshold is a constant 40k and requests only run at settlement", async (t
   await h.fire("agent_settled");
   assert.equal(h.calls, 1);
   assert.equal(h.compactions.length, 0);
-  assert.ok(h.notifications.some((x) => x.endsWith("Run /compact to save tokens.")));
+  assert.ok(showedHint(h));
+  assert.ok(!leakedHintNotify(h));
   await h.fire("agent_settled");
   assert.equal(h.calls, 1);
 });
@@ -40,12 +56,14 @@ test("the hint floor slides with context usage: a finished coordinating unit hin
   h.tokens = 45000;
   await h.fire("agent_settled");
   assert.equal(h.calls, 1);
-  assert.ok(!h.notifications.some((x) => x.endsWith("Run /compact to save tokens.")));
+  assert.ok(!showedHint(h));
+  assert.ok(!leakedHintNotify(h));
   h.next("and now the window is nearly full");
   h.tokens = 245000;
   await h.fire("agent_settled");
   assert.equal(h.calls, 2);
-  assert.ok(h.notifications.some((x) => x.endsWith("Run /compact to save tokens.")));
+  assert.ok(showedHint(h));
+  assert.ok(!leakedHintNotify(h));
 });
 
 test("unknown usage, missing key, off, busy, pending, error and non-TUI never call Jev", async (t) => {
@@ -415,7 +433,8 @@ test("a silent no-qualify turn still logs the Jev response", async (t) => {
   h.tokens = 45000;
   await h.fire("agent_settled");
   assert.equal(h.calls, 1);
-  assert.ok(!h.notifications.some((x) => x.endsWith("Run /compact to save tokens.")));
+  assert.ok(!showedHint(h));
+  assert.ok(!leakedHintNotify(h));
   const lines = readFileSync(requestLogPath(h.dir), "utf8")
     .trim()
     .split("\n")

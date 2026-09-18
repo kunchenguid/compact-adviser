@@ -2,9 +2,10 @@
 
 A standalone Pi extension that suggests a useful checkpoint for `/compact`, rather than compacting merely because the context is large.
 
-> Good checkpoint: completed work appears recorded. **Run /compact to save tokens.**
+> Compact adviser: **Run /compact to save tokens.**
 
 Hints are the default.
+A qualifying checkpoint shows one yellow sticky widget above the editor: `Compact adviser: Run /compact to save tokens.` Snooze and dismiss stay as commands, not a second widget line or a matching notify.
 Automatic mode is an explicit, persistent, experimental opt-in.
 No other host's runtime, service, or session records are required.
 

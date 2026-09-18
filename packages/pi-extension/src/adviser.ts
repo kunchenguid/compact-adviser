@@ -3,6 +3,7 @@ import type {
   ExtensionCommandContext,
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
+import { Text } from "@earendil-works/pi-tui";
 import {
   type Config,
   ConfigStore,
@@ -34,7 +35,7 @@ import {
 } from "./state.ts";
 
 const LABEL = "compact-adviser";
-const HINT = "Good checkpoint: completed work appears recorded. Run /compact to save tokens.";
+const HINT = "Compact adviser: Run /compact to save tokens.";
 const USAGE =
   "Use /compact-adviser, auto, hint, off, status, threshold <tokens|default>, snooze or dismiss.";
 interface Options {
@@ -218,8 +219,7 @@ export function installAdviser(pi: ExtensionAPI, options: Options): void {
       if (!auto) {
         state = { ...state, lastHintAt: state.completed, lastHintKey: view.checkpointKey };
         persist(state);
-        ctx.ui.notify(HINT, "info");
-        ctx.ui.setWidget(LABEL, [HINT, "/compact-adviser snooze · /compact-adviser dismiss"]);
+        ctx.ui.setWidget(LABEL, (_tui, theme) => new Text(theme.fg("warning", HINT), 0, 0));
         hintVisible = true;
       } else {
         compacting = true;
