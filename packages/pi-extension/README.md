@@ -177,7 +177,7 @@ The separate summarization request costs tokens and can reduce prompt-cache reus
 
 The request includes bounded user constraints, up to the last 64 recent visible replies and tool results clipped by existing byte budgets, short tool-result excerpts (long dumps keep a head and tail), an existing summary when present, saved-artifact names, and explicit omission markers.
 System prompts, hidden reasoning, images, raw environment variables, and complete transcripts are not sent by default.
-Known key patterns, the product's own saved TypeSafe key, and obvious sensitive-file results are filtered, but this is **best-effort**, not comprehensive secret detection.
+The saved-key guarantee is defined in the repository [security policy](../../SECURITY.md). Filtering of other known key patterns and obvious sensitive-file results is **best-effort**, not comprehensive secret detection.
 Installing this package is consent to send eligible checkpoint context to TypeSafe; uninstall it or set mode Off if that is not acceptable.
 
 Optional request logging is off by default. Enable **Log TypeSafe requests** from `/compact-adviser` to append each judgment body to `getAgentDir()/compact-adviser-requests.jsonl` (normally `~/.pi/agent/compact-adviser-requests.jsonl`). The log is the redacted request body plus questions; it never includes the API key.
