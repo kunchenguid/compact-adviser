@@ -264,7 +264,9 @@ async function ask(prompt) {
     await sleep(300);
     if (modelRequests > requestsBefore) return;
   }
-  throw new Error(`[${step}] the composer never submitted ${JSON.stringify(prompt)}\n--- screen ---\n${screen()}`);
+  throw new Error(
+    `[${step}] the composer never submitted ${JSON.stringify(prompt)}\n--- screen ---\n${screen()}`,
+  );
 }
 
 function hintLines(shot) {
