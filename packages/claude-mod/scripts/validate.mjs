@@ -7,7 +7,7 @@ const version = claudeVersion();
 const { status, output } = run(["plugin", "validate", "--strict", PACKAGE]);
 const expected = [
   "hooks: session.start, turn.start, turn.complete, session.compact, command.run{command=compact-adviser}, config.describe{key=compact-adviser.typesafeApiKey}, ui.close{id=compact-adviser}, ui.render{component=Pane}",
-  "env reads: CLAUDE_CODE_ENABLE_FUNCTION_HOOKS, COMPACT_ADVISER_TEST_ENDPOINT, HOME, TYPESAFE_API_KEY",
+  "env reads: CLAUDE_CODE_ENABLE_FUNCTION_HOOKS, COMPACT_ADVISER_DISABLE, COMPACT_ADVISER_TEST_ENDPOINT, HOME, TYPESAFE_API_KEY",
   "env writes: nothing",
   "$.fs.read (via appendTypeSafeLog, resolvedKey)",
   "$.fs.write (via appendTypeSafeLog)",

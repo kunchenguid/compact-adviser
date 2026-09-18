@@ -72,6 +72,17 @@ Then `/compact-adviser`.
 | Command exists, no hint | Context is below the constant 40,000-token minimum, the session is not idle, or the last turn was not a settled final answer |
 | Claude Code: "nonessential traffic" | `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` blocks plugin network requests |
 | Pi print / RPC / JSON, or Claude `-p` | Non-interactive sessions never judge |
+| Nothing at all, in either host | `COMPACT_ADVISER_DISABLE` is set to a truthy value |
+
+## Environment variables
+
+| Variable | Effect |
+| --- | --- |
+| `TYPESAFE_API_KEY` | The Jev key, unless one is saved in `/compact-adviser` or `./.env` |
+| `COMPACT_ADVISER_DISABLE` | `1`, `true`, `yes` or `on` (any case) makes the session inert: no TypeSafe request, no hint, no automatic compaction, no command. It wins over a saved `hint` or `auto` mode |
+| `CLAUDE_CODE_ENABLE_FUNCTION_HOOKS` | Claude Code only; must be exactly `1` for the mod to load |
+
+Export `COMPACT_ADVISER_DISABLE=1` for unattended agent sessions, where advice has nobody to read it.
 
 ## What is sent to TypeSafe
 

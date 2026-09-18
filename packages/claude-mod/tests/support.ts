@@ -77,6 +77,8 @@ export type World = {
 
 export type WorldOptions = {
   functionHooks?: string | undefined;
+  /** The `COMPACT_ADVISER_DISABLE` kill switch; omit to leave the variable unset. */
+  disable?: string;
   key?: string | undefined;
   endpoint?: string;
   consent?: { autoAcknowledged: boolean } | "absent" | unknown;
@@ -126,6 +128,7 @@ export function world(on: On, options: WorldOptions = {}): World {
     ...(functionHooks === undefined ? {} : { CLAUDE_CODE_ENABLE_FUNCTION_HOOKS: functionHooks }),
     ...(key === undefined ? {} : { TYPESAFE_API_KEY: key }),
     ...(options.endpoint === undefined ? {} : { COMPACT_ADVISER_TEST_ENDPOINT: options.endpoint }),
+    ...(options.disable === undefined ? {} : { COMPACT_ADVISER_DISABLE: options.disable }),
   });
   const consent = "consent" in options ? options.consent : "absent";
   // The plugin store, in memory and visible to the test.

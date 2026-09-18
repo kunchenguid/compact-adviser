@@ -87,6 +87,37 @@ describe("activation", () => {
   });
 });
 
+describe("the COMPACT_ADVISER_DISABLE kill switch", () => {
+  for (const value of ["1", "true", "TRUE", "yes", "on", " on "]) {
+    test(`takes no product action when it is ${JSON.stringify(value)}`, async ($, on) => {
+      // Automatic mode plus consent is the most enabled configuration there is; the
+      // override still has to win over it.
+      const w = world(on, {
+        disable: value,
+        mode: "auto",
+        consent: { autoAcknowledged: true },
+      });
+      await $.session.start(interactiveStart);
+      await turnEnd($, w);
+      await $.session.compact({ trigger: "manual", messages: MESSAGES });
+      expect(w.journal.commands).toHaveLength(0);
+      expect(w.journal.statuses).toHaveLength(0);
+      expect(w.journal.toasts).toHaveLength(0);
+      expect(w.journal.requests).toHaveLength(0);
+      expect(w.journal.compactions).toHaveLength(0);
+      expect(w.journal.messageReads).toBe(0);
+    });
+  }
+
+  for (const value of ["0", "false", "no", "off", "", " "]) {
+    test(`stays enabled when it is ${JSON.stringify(value)}`, async ($, on) => {
+      const w = world(on, { disable: value });
+      await $.session.start(interactiveStart);
+      expect(w.journal.commands).toEqual([PLUGIN]);
+    });
+  }
+});
+
 describe("turn-end gates", () => {
   test("a qualifying settled checkpoint shows the hint once, without blocking the turn", async ($, on) => {
     const w = world(on);

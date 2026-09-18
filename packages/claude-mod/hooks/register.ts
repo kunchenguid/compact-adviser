@@ -34,6 +34,7 @@ import {
   readConfig,
   readSavedApiKey,
 } from "../lib/config.ts";
+import { disabledByEnv } from "../lib/disable.ts";
 import {
   formatKeyStatus,
   parseDotenvKey,
@@ -102,12 +103,22 @@ let minimumDraft: { text: string; error?: string } | undefined;
 let keyDraft: { text: string; error?: string } | undefined;
 let statusDetails: string | undefined;
 
+/**
+ * Both environment gates, resolved once per module environment and cached: function
+ * hooks must be on, and `COMPACT_ADVISER_DISABLE` must not be set to a truthy value.
+ * Every hook goes through here, so a disabled session registers no command, shows no
+ * status, and never reaches TypeSafe.
+ */
 function isActivated($: EngineInterface): Promise<boolean> {
   if (activation === undefined) {
-    activation = $.env.get("CLAUDE_CODE_ENABLE_FUNCTION_HOOKS").then(
-      (value) => value === "1",
-      () => false,
-    );
+    activation = Promise.all([
+      $.env.get("CLAUDE_CODE_ENABLE_FUNCTION_HOOKS").then(
+        (value) => value === "1",
+        () => false,
+      ),
+      // `$.env.get` takes a literal name, so `DISABLE_ENV` cannot be spelled here.
+      $.env.get("COMPACT_ADVISER_DISABLE").then(disabledByEnv, () => false),
+    ]).then(([hooks, disabled]) => hooks && !disabled);
   }
   return activation;
 }

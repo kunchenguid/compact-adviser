@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
-import test from "node:test";
+import test, { type TestContext } from "node:test";
 import {
   JUDGE_UNAVAILABLE_MESSAGE,
   JudgeError,
@@ -543,4 +543,48 @@ test("a saved key in a compact-adviser.json read is absent from the request body
   assert.ok(!logged.includes(secret));
   assert.ok(body.includes("hint"));
   assert.ok(logged.includes("jev-latest"));
+});
+
+/** Sets `COMPACT_ADVISER_DISABLE` for one test and restores the launch environment after. */
+function disableEnv(t: TestContext, value: string | undefined) {
+  const previous = process.env.COMPACT_ADVISER_DISABLE;
+  if (value === undefined) delete process.env.COMPACT_ADVISER_DISABLE;
+  else process.env.COMPACT_ADVISER_DISABLE = value;
+  t.after(() => {
+    if (previous === undefined) delete process.env.COMPACT_ADVISER_DISABLE;
+    else process.env.COMPACT_ADVISER_DISABLE = previous;
+  });
+}
+
+test("COMPACT_ADVISER_DISABLE takes every product action out of the session", async (t) => {
+  for (const value of ["1", "true", "TRUE", "yes", "on", " on "]) {
+    const h = harness(t);
+    // Automatic mode with consent is the most enabled configuration; the override wins.
+    h.enable("auto");
+    disableEnv(t, value);
+    h.install();
+    await h.fire("session_start");
+    await h.fire("agent_settled");
+    await h.command("status");
+    assert.equal(h.calls, 0, value);
+    assert.equal(h.compactions.length, 0, value);
+    assert.deepEqual(h.widgets, [], value);
+    assert.deepEqual(h.notifications, [], value);
+    assert.ok(
+      h.statuses.every((s) => s === undefined),
+      value,
+    );
+  }
+});
+
+test("COMPACT_ADVISER_DISABLE leaves the session alone when it is falsy or unset", async (t) => {
+  for (const value of ["0", "false", "no", "off", "", " ", undefined]) {
+    const h = harness(t);
+    h.enable();
+    disableEnv(t, value);
+    h.install();
+    await h.fire("agent_settled");
+    assert.equal(h.calls, 1, String(value));
+    assert.ok(showedHint(h), String(value));
+  }
 });

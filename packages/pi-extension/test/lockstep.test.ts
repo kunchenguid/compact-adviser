@@ -8,11 +8,13 @@
  */
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import * as claudeDisable from "../../claude-mod/lib/disable.ts";
 import * as claude from "../../claude-mod/lib/judge.ts";
 import * as claudeLog from "../../claude-mod/lib/log.ts";
 import * as claudeSnapshot from "../../claude-mod/lib/snapshot.ts";
 import * as claudeState from "../../claude-mod/lib/state.ts";
 import * as piContext from "../src/context.ts";
+import * as piDisable from "../src/disable.ts";
 import * as pi from "../src/judge.ts";
 import * as piLog from "../src/log.ts";
 import * as piState from "../src/state.ts";
@@ -254,4 +256,20 @@ test("both packages apply the same cooldownReason gates", () => {
     assert.equal(piState.cooldownReason(pi, c.tokens, c.now), c.reason, `pi ${c.name}`);
     assert.equal(claudeState.cooldownReason(claude, c.tokens, c.now), c.reason, `claude ${c.name}`);
   }
+});
+
+test("both packages read the same COMPACT_ADVISER_DISABLE values the same way", () => {
+  assert.equal(claudeDisable.DISABLE_ENV, piDisable.DISABLE_ENV);
+  assert.equal(piDisable.DISABLE_ENV, "COMPACT_ADVISER_DISABLE");
+  const truthy = ["1", "true", "TRUE", "True", "yes", "YES", "on", "ON", " on ", "\ttrue\n"];
+  const falsy = ["0", "false", "no", "off", "", " ", "2", "1 0", "enabled", undefined];
+  for (const value of [...truthy, ...falsy]) {
+    assert.equal(
+      claudeDisable.disabledByEnv(value),
+      piDisable.disabledByEnv(value),
+      `disagreed at ${JSON.stringify(value)}`,
+    );
+  }
+  for (const value of truthy) assert.equal(piDisable.disabledByEnv(value), true, value);
+  for (const value of falsy) assert.equal(piDisable.disabledByEnv(value), false, String(value));
 });
