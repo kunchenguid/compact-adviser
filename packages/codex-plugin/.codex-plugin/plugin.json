@@ -2,7 +2,7 @@
   "name": "compact-adviser",
   "version": "0.1.0",
   "license": "MIT",
-  "description": "Suggests /compact at a completed checkpoint, judged by TypeSafe Jev. Hint-only on Codex: nothing outside a session can run /compact, so there is no automatic mode.",
+  "description": "Suggests /compact at a completed checkpoint, judged by TypeSafe Jev. Hint-only on Codex (macOS and Linux): nothing outside a session can run /compact, so there is no automatic mode.",
   "author": {
     "name": "Kun Chen",
     "url": "https://github.com/kunchenguid"

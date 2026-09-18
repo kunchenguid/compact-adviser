@@ -18,7 +18,7 @@ Settings live in a small CLI inside this plugin. From the directory that holds t
 node "<this skill's directory>/../../src/cli.ts" <command>
 ```
 
-Node 22.18 or newer is required, because the CLI is TypeScript that Node strips types from.
+macOS or Linux and Node 22.18 or newer are required, because the CLI is TypeScript that Node strips types from and the hooks run through POSIX `sh`.
 
 ## Commands
 

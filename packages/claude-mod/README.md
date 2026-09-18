@@ -65,6 +65,9 @@ Then `/compact-adviser`.
 
 ### Codex CLI
 
+Codex support is **macOS and Linux only**. The plugin's hooks run through POSIX `sh`, matching
+this repository's platform badge; Windows is not supported this ship.
+
 ```sh
 codex plugin marketplace add kunchenguid/compact-adviser
 codex plugin add compact-adviser@compact-adviser
