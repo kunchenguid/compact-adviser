@@ -61,7 +61,7 @@ API key.
 | `eval/build.ts` | Spread-sample checkpoints and write worksheets |
 | `eval/build-targeted.ts` | Add minority-class rows marked `sampling=targeted-hard` |
 | `eval/score.ts` | Live Jev through shipped `judge()` / `qualifies()` |
-| `eval/metrics.py` | Per-class precision/recall vs gold |
+| `eval/metrics.py` | Per-class precision/recall vs gold, both gold definitions per stratum, task-boundary recall |
 | `eval/compare.py` | Side-by-side two result files |
 | `eval/fidelity.ts` | Replay vs a compact-adviser request log |
 | `eval/verify-tokens.ts` | Fast usage total vs replayed context tokens |
@@ -85,6 +85,7 @@ One JSON object per checkpoint in `labels.jsonl`:
 | `safe_to_compact` | boolean | Hindsight product truth: would compacting *exactly here* have cost the work that actually followed |
 | `pivot` | boolean | The next user turn introduced work unforeseeable at checkpoint time |
 | `note` | string | Evidence. Describe structure; do not paste transcript quotes into anything that might be published |
+| `task_boundary` | boolean | The checkpoint sits where one task ends and the next begins. Reported on its own because a judge can look healthy overall and still miss exactly these |
 | `sampling` | `spread` / `targeted-hard` | On the checkpoint row. Targeted-hard is enriched: per-class recall is unbiased, precision is not |
 
 Worksheets in `eval/local/worksheet/` show, per row, the judge's view (user
@@ -136,6 +137,25 @@ would compacting here have cost the user anything? On long rounds that restate
 their own instructions every turn, those two answers can come apart. Report
 both. Native `[COMPACTION]` events that land soon after a checkpoint and after
 which the work continues are strong hindsight evidence for `safe_to_compact`.
+
+## The two gold definitions
+
+`metrics.py` reports both, per stratum, because they disagree and the
+disagreement is the finding:
+
+- **Product truth** - gold is `safe_to_compact`. A hint at a harmless moment
+  counts as a hit even if the assistant was mid-task. This is the hindsight
+  question: would compacting here have cost the user anything?
+- **Contract** - should-hint is `completed_checkpoint` + safe; should-NOT-hint
+  is `still_in_progress`. This is the judge's own stated question, and it is
+  the only definition with a real negative class on the coding strata.
+
+A stratum of mid-round checkpoints can score well under product truth purely
+because a harness re-injects its instructions every turn, so nothing is lost by
+compacting there. Read the contract table beside it before claiming the judge
+recognises finished work. **Task-boundary recall is reported separately under
+both definitions** and is the metric to watch: it measures the moments the
+product exists to catch.
 
 **`pivot`**
 

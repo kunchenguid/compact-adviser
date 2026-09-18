@@ -70,12 +70,14 @@ test("metrics.py scores synthetic labels without a live session", (t) => {
       continuation_gold: "recoverable",
       safe_to_compact: true,
       pivot: false,
+      task_boundary: true,
     })}\n${JSON.stringify({
       id: "cp002",
       phase_gold: "still_in_progress",
       continuation_gold: "needs_older_details",
       safe_to_compact: false,
       pivot: false,
+      task_boundary: false,
     })}\n`,
   );
   writeFileSync(
@@ -120,4 +122,14 @@ test("metrics.py scores synthetic labels without a live session", (t) => {
   assert.match(result.stdout, /scored 2 checkpoints/);
   assert.match(result.stdout, /overall agreement: 2\/2/);
   assert.match(result.stdout, /TP=1 FP=0 FN=0 TN=1/);
+  // Both gold definitions are reported side by side, and task-boundary recall
+  // is its own section: a judge can look healthy overall and still miss the
+  // moments the product exists to catch.
+  assert.match(result.stdout, /=== product truth: gold is safe_to_compact ===/);
+  assert.match(result.stdout, /=== contract: should-hint = completed \+ safe/);
+  assert.match(result.stdout, /^ALL\s+2\s+1\s+0\s+100%\s+100%\s+0$/m);
+  assert.match(result.stdout, /^ALL\s+2\s+1\s+0\s+1\s+100%\s+100%\s+1\s+1$/m);
+  assert.match(result.stdout, /=== task-boundary recall/);
+  assert.match(result.stdout, /^product truth\s+1\/1 = 100%\s+0\/0 = -$/m);
+  assert.match(result.stdout, /^contract\s+1\/1 = 100%\s+0\/0 = -$/m);
 });

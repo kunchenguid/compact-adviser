@@ -110,3 +110,78 @@ for arm in ("spread", "targeted-hard"):
         caught = sum(1 for i in nonrec if R[i]["continuation"] != "recoverable")
         line += f"  continuation {co}/{len(sub)}  non-recoverable caught {caught}/{len(nonrec)}"
     print(line)
+
+
+# --- The two gold definitions, reported side by side -------------------------
+# They disagree, and the disagreement is the finding. `product` asks the
+# hindsight question (would compacting here have cost anything); `contract`
+# asks the judge's own question (was the assistant's unit finished), and it is
+# the only definition with a real negative class on the coding strata.
+
+
+def rate(n, d):
+    return f"{n/d:.0%}" if d else "-"
+
+
+def product_truth(sub):
+    """Gold is safe_to_compact. A hint at a harmless moment counts."""
+    tp = sum(1 for i in sub if R[i]["hint"] and L[i]["safe_to_compact"])
+    fp = sum(1 for i in sub if R[i]["hint"] and not L[i]["safe_to_compact"])
+    fn = sum(1 for i in sub if not R[i]["hint"] and L[i]["safe_to_compact"])
+    auto = sum(1 for i in sub if R[i]["auto"])
+    return tp, fp, rate(tp, tp + fp), rate(tp, tp + fn), auto
+
+
+def contract(sub):
+    """Should-hint is completed+safe; should-NOT-hint is still_in_progress."""
+    yes = [i for i in sub if L[i]["phase_gold"] == "completed_checkpoint" and L[i]["safe_to_compact"]]
+    no = [i for i in sub if L[i]["phase_gold"] == "still_in_progress"]
+    tp = sum(1 for i in yes if R[i]["hint"])
+    fp = sum(1 for i in no if R[i]["hint"])
+    tn = len(no) - fp
+    return tp, fp, tn, rate(tp, tp + fp), rate(tp, len(yes)), len(yes), len(no)
+
+
+strata = sorted({C[i].get("stratum", "?") for i in ids})
+groups = [("ALL", ids)] + [(s, [i for i in ids if C[i].get("stratum") == s]) for s in strata]
+
+if all("safe_to_compact" in L[i] for i in ids):
+    print("=== product truth: gold is safe_to_compact ===")
+    print(f"{'set':<22}{'n':>5}{'TP':>5}{'FP':>5}{'prec':>7}{'recall':>8}{'auto':>6}")
+    for name, sub in groups:
+        if not sub:
+            continue
+        tp, fp, prec, rec, auto = product_truth(sub)
+        print(f"{name:<22}{len(sub):>5}{tp:>5}{fp:>5}{prec:>7}{rec:>8}{auto:>6}")
+    print()
+
+    print("=== contract: should-hint = completed + safe; should-NOT = still_in_progress ===")
+    print(f"{'set':<22}{'n':>5}{'TP':>5}{'FP':>5}{'TN':>5}{'prec':>7}{'recall':>8}{'+n':>4}{'-n':>4}")
+    for name, sub in groups:
+        if not sub:
+            continue
+        tp, fp, tn, prec, rec, yes, no = contract(sub)
+        print(f"{name:<22}{len(sub):>5}{tp:>5}{fp:>5}{tn:>5}{prec:>7}{rec:>8}{yes:>4}{no:>4}")
+    print()
+
+# --- Task-boundary recall, a first-class metric -----------------------------
+# A checkpoint the product exists to catch: the moment one task ends and the
+# next begins. Recall here is reported separately because a judge can look
+# healthy overall while missing exactly these.
+
+if all("task_boundary" in L[i] for i in ids):
+    print("=== task-boundary recall (the moments the product exists to catch) ===")
+    print(f"{'gold':<16}{'boundary':>18}{'non-boundary':>18}")
+    for gold_name, positive in (
+        ("product truth", lambda i: L[i]["safe_to_compact"]),
+        ("contract", lambda i: L[i]["phase_gold"] == "completed_checkpoint" and L[i]["safe_to_compact"]),
+    ):
+        cells = []
+        for want_boundary in (True, False):
+            sub = [i for i in ids if bool(L[i]["task_boundary"]) is want_boundary and positive(i)]
+            hit = sum(1 for i in sub if R[i]["hint"])
+            cells.append(f"{hit}/{len(sub)} = {rate(hit, len(sub))}")
+        print(f"{gold_name:<16}{cells[0]:>18}{cells[1]:>18}")
+    print()
+else:
+    print("=== task-boundary recall skipped (no task_boundary on these labels) ===\n")
