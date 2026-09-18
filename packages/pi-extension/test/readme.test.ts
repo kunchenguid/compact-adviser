@@ -1,7 +1,8 @@
-// The npm tarball must ship the root README, not this package's own file on disk,
-// because that's exactly what `npm publish` (CI trusted-publish or manual) and
-// `npm pack` produce via the `prepack` script. Assert against the real packed
-// artifact rather than the generator's output in isolation.
+// The committed package README must already match the transformed root README.
+// Check that first: `prepack` overwrites the file, so inspecting only the packed
+// artifact would mask a stale committed copy. Then assert the npm tarball ships
+// the same README, because that's what `npm publish` (CI trusted-publish or
+// manual) and `npm pack` produce via the `prepack` script.
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
@@ -12,7 +13,15 @@ import { generatePackageReadme } from "../../../scripts/generate-package-readme.
 
 const PACKAGE_ROOT = join(import.meta.dirname, "..");
 
-test("npm pack ships a README equal to the transformed root README, with no broken relative refs", (t) => {
+test("committed and packed READMEs equal the transformed root README, with no broken relative refs", (t) => {
+  const expected = generatePackageReadme();
+  const committedReadme = readFileSync(join(PACKAGE_ROOT, "README.md"), "utf8");
+  assert.equal(
+    committedReadme,
+    expected,
+    "packages/pi-extension/README.md has drifted from the root README. Run `npm run sync-readmes` from the repo root and commit the result.",
+  );
+
   const destination = mkdtempSync(join(tmpdir(), "compact-adviser-pack-"));
   t.after(() => rmSync(destination, { recursive: true, force: true }));
 
@@ -24,7 +33,7 @@ test("npm pack ships a README equal to the transformed root README, with no brok
   execFileSync("tar", ["-xzf", tarball, "-C", destination], { cwd: destination });
 
   const packedReadme = readFileSync(join(destination, "package", "README.md"), "utf8");
-  assert.equal(packedReadme, generatePackageReadme());
+  assert.equal(packedReadme, expected);
 
   // Every relative Markdown/HTML reference the root README makes (a sibling package
   // README, SECURITY.md, the eval guide, the usage-floor image) must have become an
