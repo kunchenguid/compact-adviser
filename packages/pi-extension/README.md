@@ -26,6 +26,8 @@
 
 **compact-adviser** is an agent plugin that answers a single question: should I /compact now?
 
+![Compact adviser status line: "Compact adviser: work appears completed or recorded. Run /compact to save tokens." shown above a terminal prompt](https://raw.githubusercontent.com/kunchenguid/compact-adviser/main/docs/hint-status-line.png)
+
 It uses [Jev](https://typesafe.ai) to instantly judge whether the current session is likely at a boundary that's safe to compact.
 
 It can give you a hint to run `/compact` - or, if you opt in, it can run it for you at the right time automatically.
