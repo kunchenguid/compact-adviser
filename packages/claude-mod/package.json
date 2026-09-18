@@ -11,8 +11,9 @@
     "lint": "biome check .",
     "format": "biome check --write .",
     "validate": "node scripts/validate.mjs",
+    "check-readme": "node scripts/check-readme.mjs",
     "test": "node scripts/plugin-test.mjs",
-    "check": "npm run typecheck && npm run lint && npm run validate && npm test",
+    "check": "npm run typecheck && npm run lint && npm run validate && npm run check-readme && npm test",
     "test:e2e": "node scripts/live-e2e.mjs"
   },
   "devDependencies": {

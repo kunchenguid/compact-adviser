@@ -1,210 +1,120 @@
-# compact-adviser for Pi
+<h1 align="center">compact-adviser</h1>
 
-A standalone Pi extension that suggests a useful checkpoint for `/compact`, rather than compacting merely because the context is large.
+<p align="center">
+  <a href="https://github.com/kunchenguid/compact-adviser/blob/main/LICENSE"
+    ><img
+      alt="License"
+      src="https://img.shields.io/badge/license-MIT-green?style=flat-square"
+  /></a>
+  <a
+    href="https://img.shields.io/badge/platform-macOS%20%7C%20Linux-blue?style=flat-square"
+    ><img
+      alt="Platform"
+      src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux-blue?style=flat-square"
+  /></a>
+  <a href="https://x.com/kunchenguid"
+    ><img
+      alt="X"
+      src="https://img.shields.io/badge/X-@kunchenguid-black?style=flat-square"
+  /></a>
+  <a href="https://discord.gg/Wsy2NpnZDu"
+    ><img
+      alt="Discord"
+      src="https://img.shields.io/discord/1439901831038763092?style=flat-square&label=discord"
+  /></a>
+</p>
 
-> Compact adviser: work appears completed or recorded. **Run /compact to save tokens.**
+**compact-adviser** is an agent plugin that answers a single question: should I /compact now?
 
-Hints are the default.
-A qualifying checkpoint shows one yellow sticky widget above the editor: `Compact adviser: work appears completed or recorded. Run /compact to save tokens.` Snooze and dismiss stay as commands, not a second widget line or a matching notify.
-Automatic mode is an explicit, persistent, experimental opt-in.
-No other host's runtime, service, or session records are required.
+It uses [Jev](https://typesafe.ai) to instantly judge whether the current session is likely at a boundary that's safe to compact.
 
-## Install this package only
+It can give you a hint to run `/compact` - or, if you opt in, it can run it for you at the right time automatically.
 
-From the monorepo root (the fool-proof path; this also works as `pi install git:github.com/kunchenguid/compact-adviser`):
+Judgment is two one-sentence Jev questions in one request (is the unit finished; is this hands-on work or coordination), composed in code into one score. The hint floor is 0.90 while the context window is mostly empty (through about 10%) and relaxes toward 0.50 by about 90% full - a wrong hint costs most when there is still room. Automatic mode is the same gate, plus a first-use confirmation.
+
+## Quick Start
+
+Prerequisites: Node 22+, [Pi](https://pi.dev) 0.82.0 or newer (verified on **0.85.1**) or Claude Code 2.1.274 or newer (verified on **2.1.275**), and a [TypeSafe API key](https://console.typesafe.ai/settings/keys). Supply it as `TYPESAFE_API_KEY` in the launch environment, enter it in `/compact-adviser`, or put it in `./.env`. Jev is TypeSafe's structured decision model; this package asks it two one-sentence classification questions and never asks it to write a summary.
+
+Installing the package is consent to send eligible checkpoint context to TypeSafe when a key is available and the other product gates pass.
+
+### Pi
 
 ```sh
-npm install
-pi install "$PWD"
+pi install npm:compact-adviser
 ```
 
-To install only this package directory:
+Restart Pi or run `/reload`, then `/compact-adviser`.
+`/compact-adviser status` should say `Key: env`, `Key: saved`, or `Key: .env`.
+
+To install from git: `pi install git:github.com/kunchenguid/compact-adviser` (add `-l` for project-local).
+
+### Claude Code
+
+This plugin uses Claude Mod which is an experimental feature that requires `CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1` in your environment.
 
 ```sh
-npm --prefix packages/pi-extension ci --omit=dev --omit=peer --ignore-scripts
-pi install "$PWD/packages/pi-extension"
+claude plugin marketplace add kunchenguid/compact-adviser
+claude plugin install compact-adviser@compact-adviser
+CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1 claude
 ```
 
-Restart Pi or run `/reload`.
-Do not install the reserved Claude-mod directory as a Pi extension.
-The monorepo root is the git-install shape; `packages/pi-extension` is the npm package.
-Pi supplies its own core and TUI modules; the package's only additional runtime dependency is `proper-lockfile`.
-For a one-run trial, use `pi -e /absolute/path/to/packages/pi-extension` instead of `pi install`.
+Then `/compact-adviser`.
 
-Requires Node 22+ and the Pi 0.82.0 extension API.
-Verified with the actual signed Pi **0.85.1** runtime; 0.82.0 remains the API floor.
-Only interactive TUI mode acts; RPC, JSON, and print modes do not make advice requests or compact.
-The underlying model provider can be any provider supported by Pi.
+See the [Pi guide](https://github.com/kunchenguid/compact-adviser/blob/main/packages/pi-extension/README.md) and the [Claude Code guide](https://github.com/kunchenguid/compact-adviser/blob/main/packages/claude-mod/README.md) for settings, commands, privacy, and tests.
 
-## First-run setup
+## If it does nothing
 
-1. Supply a [TypeSafe API key](https://console.typesafe.ai/settings/keys) in one of these ways, first match wins:
-   - A non-empty `TYPESAFE_API_KEY` in Pi's launch environment.
-   - A key entered in `/compact-adviser` (stored in `compact-adviser.json`, never shown again after save).
-   - `TYPESAFE_API_KEY=...` in a `.env` file in the process current working directory.
-`export` and `declare -x` prefixes are accepted, and one matching pair of quotes around the value is stripped.
-A missing `.env` file is ignored.
-Do not commit a key to the repository.
-2. Run `/compact-adviser` to choose mode and minimum context, or leave the defaults (hints, 40,000 tokens).
+| Symptom | Cause |
+| --- | --- |
+| `Key: missing` in `/compact-adviser status` | No `TYPESAFE_API_KEY` in the launch environment, saved settings, or `./.env` |
+| No `/compact-adviser` command in Claude Code | `CLAUDE_CODE_ENABLE_FUNCTION_HOOKS` is not exactly `1` |
+| Command exists, no hint | Context is below the constant 40,000-token minimum, the session is not idle, or the last turn was not a settled final answer |
+| Claude Code: "nonessential traffic" | `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` blocks plugin network requests |
+| Pi print / RPC / JSON, or Claude `-p` | Non-interactive sessions never judge |
 
-Installing this package is consent to send eligible checkpoint context to TypeSafe when a key is available and other product gates pass.
-Without a key, or with mode Off, no TypeSafe request is made.
+## What is sent to TypeSafe
 
-## Persistent settings
+| Included | Not sent |
+| --- | --- |
+| Bounded user constraints, up to the last 64 visible replies and tool results (clipped), short tool-result excerpts, an existing summary, saved-artifact names, omission markers | System prompts, hidden reasoning, images, environment variables, the API key, complete transcripts |
+| Best-effort redaction of known key patterns and obvious sensitive-file results | A guarantee. Uninstall or set mode Off for material that must not leave the machine |
 
-`/compact-adviser` opens a native Pi menu:
+Requests go to `https://api.typesafe.ai/v1/systemone`, are capped at 32,000 serialized UTF-8 bytes, and never treat an error as an affirmative judgment.
+Details: [SECURITY.md](https://github.com/kunchenguid/compact-adviser/blob/main/SECURITY.md).
 
-```text
-Mode: hint
-Minimum context: 40,000 tokens
-Log TypeSafe requests: off
-TypeSafe API key: not saved
-Reset minimum to 40,000
-Status
-Close
+## How It Works
+
+```
+settled turn
+      │
+      ▼
+┌───────────────────┐
+│ cheap local gates │  mode, 40k minimum, idle session, key, cooldowns
+└─────────┬─────────┘
+          ▼
+┌───────────────────┐
+│ TypeSafe Jev      │  done × shape score, floor slides 0.90→0.50 with usage
+└─────────┬─────────┘
+          ▼
+ hint: run /compact     or, with explicit auto, native compaction
 ```
 
-**Mode** offers Hints only, Automatic, and Off.
-The first Automatic selection requires confirmation about lossy compaction and its across-project scope.
-Selecting Automatic does not compact immediately.
-
-**Minimum context** opens a prefilled input containing the saved number, initially `40000`.
-Edit it and press Enter to validate and save; Escape preserves the previous value.
-The confirmation states the new token count and that it applies to all sessions.
-Blank, zero, negative, fractional, exponential, suffixed (`40k`), nonnumeric, and unsafe-integer inputs are rejected.
-Use whole decimal tokens such as `60000`.
-A value at or above the current model's window is allowed but produces a warning; it is not silently clamped.
-Reset changes only the minimum, not the mode, request logging, the saved TypeSafe key, or session cooldowns.
-
-**TypeSafe API key** shows whether a key is saved, never the value.
-Choose Set key to paste one into a masked field, or Clear saved key to remove it.
-A non-empty launch-environment `TYPESAFE_API_KEY` still wins over the saved key; a cwd `.env` is used only when both are empty.
-
-The configuration lives in `getAgentDir()/compact-adviser.json`, normally `~/.pi/agent/compact-adviser.json`:
-
-```json
-{
-  "version": 1,
-  "mode": "hint",
-  "minContextTokens": 40000,
-  "autoAcknowledged": false,
-  "logRequests": false
-}
-```
-
-Mode, minimum, request logging, a saved TypeSafe API key, and the automatic-mode acknowledgement survive restart, `/new`, `/resume`, compaction, and project changes.
-A saved key is written with the rest of this file at mode `0600` and is omitted when cleared.
-`/compact-adviser status` reports the key source as `env`, `saved`, `.env`, or `missing`, never the value.
-A legacy `sharingConsent` field is ignored and dropped on the next save.
-Project files cannot silently override them.
-Atomic writes and a short cross-process lock prevent partial saves and lost concurrent field updates.
-A busy lock or failed save is reported instead of claiming success.
-Other open sessions reread preferences before acting.
-Unreadable, malformed, unsupported-version, oversized, or symlinked settings suppress action and display an error; repair that file rather than expecting a silent reset.
-
-### Direct commands
+## Usage
 
 | Command | Effect |
 | --- | --- |
-| `/compact-adviser` | Settings menu |
-| `/compact-adviser auto` | Save automatic mode, with first-use confirmation |
-| `/compact-adviser hint` | Save hints-only mode |
-| `/compact-adviser off` | Save Off: no hints or TypeSafe requests |
-| `/compact-adviser status` | Mode, minimum, context usage, key source (`env` / `saved` / `.env` / `missing`), cooldown, settings path |
-| `/compact-adviser threshold 60000` | Save an absolute 60,000-token minimum |
-| `/compact-adviser threshold default` | Restore the constant 40,000-token minimum |
-| `/compact-adviser snooze` | Suppress advice for the next three completed exchanges |
-| `/compact-adviser dismiss` | Clear the current hint |
+| `/compact-adviser` | Settings (mode, minimum, request log, TypeSafe API key) |
+| `/compact-adviser auto` / `hint` / `off` | Save that mode; auto asks for first-use confirmation |
+| `/compact-adviser status` | Mode, minimum, context, key source (`env` / `saved` / `.env` / `missing`), cooldown |
+| `/compact-adviser threshold 60000` | Save an absolute token minimum |
+| `/compact-adviser snooze` / `dismiss` | Suppress the next three exchanges, or clear the current hint |
 
-Turning this extension off does **not** disable Pi's built-in near-limit or overflow compaction.
-Leaving auto invalidates outstanding judgments; a compaction already running remains under Pi's normal controls.
+## Eval
 
-## When it judges
+Local judgment eval uses real session checkpoints to score when the adviser should suggest `/compact`. The curve below is from a follow-up-aware gold set (96 checkpoints, 40 sessions): as the context window fills, the score threshold loosens from **0.90** (≤10% used) to **0.50** (≥90% used) so **recall rises** while precision stays high - favoring token savings when compaction is about to be forced anyway.
 
-The extension cheaply observes internal turn ends, but makes a request only at `agent_settled` after a successful final response.
-A tool return, unfinished tool loop, error, interruption, or length-limited response is not a positive checkpoint.
+![Use Jev to answer "should I /compact now?" — precision stays high while recall rises as context used goes from ≤10% to ≥90%](https://raw.githubusercontent.com/kunchenguid/compact-adviser/main/docs/eval-usage-floor-curve.png)
 
-Before any request it requires:
+The judgment-eval harness lives in [packages/pi-extension/eval/](https://github.com/kunchenguid/compact-adviser/blob/main/packages/pi-extension/eval/README.md). It is not a published dataset: point it at your own sessions and keep transcripts local.
 
-- A known active model and context estimate, with at least the configured minimum tokens.
-There is **no percentage threshold**.
-Cached input counts toward context; cumulative spending does not determine eligibility.
-- An idle session, no pending messages or unsent editor text, and no judgment or compaction already in flight.
-- More than approximately 20k tokens of actual conversation history, so a large static system prompt alone does not justify compaction.
-- A key, and no error backoff or snooze.
-- After successful compaction: fresh usage, at least 20k growth from the first post-compaction usage, and three completed exchanges.
-- A materially different current-user/final-reply checkpoint fingerprint than the last hint.
-
-Cooldown facts persist as small Pi custom entries on the active branch and are restored on reload/navigation.
-They do not enter model context.
-Pi deliberately reports unknown usage immediately after compaction; the extension waits rather than reusing pre-compaction counts.
-
-## The judgment and its limits
-
-One HTTPS request to `https://api.typesafe.ai/v1/systemone` uses `jev-latest` and two typed factors, each a one-sentence question:
-
-1. `done`: is the assistant's own latest unit of work finished, not finished, or unclear. Waiting for a person or another party counts as finished.
-2. `shape`: did the assistant mostly do the work itself (hands-on) or mostly coordinate others.
-
-Local code composes them into one score, P(finished) x (0.5 + 0.5 x P(hands_on)), and renders the reason.
-Jev does not generate an explanatory paragraph.
-Malformed responses, contradictory factors, API failures, timeouts, and stale results never trigger compaction.
-Requests have a two-second deadline, no immediate retry, and capped backoff on later eligible exchanges.
-The remote call is not awaited by Pi's event dispatcher.
-Input, model/branch/session changes, and native compaction invalidate an outstanding result.
-
-Hint and auto share one floor on that score, and the floor depends on how full the context window is: 0.90 while usage is at most 10 % of the window, then a linear ramp down to 0.50 from 90 % on (`/compact-adviser status` shows the current floor).
-A wrong hint costs most while there is room left and least when compaction is imminent anyway.
-Measured on real sessions against what the user actually asked next, this gives about 95 % precision at the strict end and 74 % precision with 91 % recall at the loose end; the eval README under `eval/` has the ladder.
-These are measured starting knobs in code, **not safety guarantees**.
-Do not interpret a concentrated probability distribution as proof that a summary will preserve every useful fact.
-
-Automatic mode still requires the first-use acknowledgement to turn auto on.
-Once enabled, it fires on the same qualifying judgment a hint would.
-Older omitted messages are explicitly disclosed to the judge; they remain a source of uncertainty.
-Immediately before action, the extension rereads saved preferences and checks the same session, branch, model, idle state, pending input, and cooldown.
-It then calls Pi's native `ctx.compact()` without substituting a custom summary.
-If Pi's actual preparation retains fewer than the assumed 20k recent tokens, automatic compaction is cancelled before summary generation; manual and native automatic compaction are not blocked.
-Other extensions can still customize or cancel native compaction.
-Use hint mode if another extension changes compaction semantics in ways this adviser cannot observe.
-
-Compaction keeps a lossy summary plus a recent tail, not every exact older detail.
-Pi's default summary serialization truncates tool results to 2,000 characters.
-Old constraints, long-log tails, hidden dependencies, and unknown future user requests can defeat a timing judgment.
-Full transcript recovery is possible, but those details are no longer automatically in the next model context.
-The separate summarization request costs tokens and can reduce prompt-cache reuse: the hint is not a promise of net billing savings in every case.
-
-## Privacy and costs
-
-The request includes bounded user constraints, up to the last 64 recent visible replies and tool results clipped by existing byte budgets, short tool-result excerpts (long dumps keep a head and tail), an existing summary when present, saved-artifact names, and explicit omission markers.
-System prompts, hidden reasoning, images, raw environment variables, and complete transcripts are not sent by default.
-The saved-key guarantee is defined in the repository [security policy](../../SECURITY.md). Filtering of other known key patterns and obvious sensitive-file results is **best-effort**, not comprehensive secret detection.
-Installing this package is consent to send eligible checkpoint context to TypeSafe; uninstall it or set mode Off if that is not acceptable.
-
-Optional request logging is off by default. Enable **Log TypeSafe requests** from `/compact-adviser` to append each judgment request and its Jev outcome to `getAgentDir()/compact-adviser-requests.jsonl` (normally `~/.pi/agent/compact-adviser-requests.jsonl`). Successful outcome records contain answers, score, usage, floor, and qualifies; failures contain only a sanitized error kind. Concurrent sessions keep every line. The log never includes the TypeSafe API key used for the request. Redaction of other known key patterns and sensitive-file results remains best-effort, as described above.
-
-Requests are capped at 32,000 serialized UTF-8 bytes, approximately an 8k-token budget for typical English input; Jev's tokenizer can differ.
-Oversized requests are refused locally rather than sent.
-Published Jev pricing during development was $0.042 per million input tokens, with free output; an 8k-token request is approximately $0.000336.
-Pricing, account limits, and actual billed token counts can change.
-
-## Verification
-
-From the monorepo root:
-
-```sh
-npm --prefix packages/pi-extension ci --ignore-scripts
-npm run check
-COMPACT_TEST_PI_BIN="$(command -v pi)" npm run test:e2e
-```
-
-`check` performs TypeScript checking, Biome lint/format checking, and behavioral tests.
-The separate E2E suite requires Python 3 and the **actual Pi 0.82.0 or newer executable** (verified on 0.85.1), resolved before npm prepends local binaries to PATH.
-It drives a real pseudo-terminal, package installation in an isolated agent directory, the native settings UI, settled events, hint rendering, and native compaction.
-All model/TypeSafe responses in those integration tests are deterministic local fixtures; they do not spend provider quota or read account credentials.
-No shared Pi installation or real user configuration is modified.
-
-The tests establish integration and safety behavior, **not Jev's classification accuracy**.
-A real continuation-quality evaluation with consented transcripts and an authenticated Jev account remains necessary before automatic timing can be called reliable.
-The judgment-eval harness, label schema, and gold rubric live in [eval/](eval/README.md). Session transcripts, checkpoints, worksheets, and results stay gitignored under `eval/local/`.
-See [SECURITY.md](../../SECURITY.md) for development dependency audit notes.

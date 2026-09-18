@@ -12,6 +12,7 @@
     "extensions": ["./packages/pi-extension/src/index.ts"]
   },
   "scripts": {
+    "sync-readmes": "node scripts/generate-package-readme.mjs packages/pi-extension/README.md && node scripts/generate-package-readme.mjs packages/claude-mod/README.md",
     "check": "npm --prefix packages/pi-extension run check",
     "test": "npm --prefix packages/pi-extension test",
     "test:e2e": "npm --prefix packages/pi-extension run test:e2e",

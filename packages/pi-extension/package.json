@@ -30,7 +30,8 @@
     ]
   },
   "scripts": {
-    "test": "node --import tsx --test test/adviser.test.ts test/core.test.ts test/eval-harness.test.ts test/lockstep.test.ts",
+    "prepack": "node ../../scripts/generate-package-readme.mjs README.md",
+    "test": "node --import tsx --test test/adviser.test.ts test/core.test.ts test/eval-harness.test.ts test/lockstep.test.ts test/readme.test.ts",
     "typecheck": "tsc --noEmit",
     "lint": "biome check .",
     "format": "biome check --write .",
