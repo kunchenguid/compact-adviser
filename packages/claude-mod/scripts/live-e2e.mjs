@@ -11,10 +11,10 @@
 //      /compact-adviser command.
 //   2. With the flag on: the settings pane (an invalid minimum is refused and kept for editing,
 //      a valid one is saved to the host's plugin options), and Escape closing the pane.
-//   3. A large settled exchange is judged (a bearer-authenticated jev-latest request) and
-//      the hint is shown; the next turn clears it without restoring ambient chrome.
-//   4. Automatic mode chosen in the pane asks for confirmation, then compacts exactly once
-//      at the next eligible checkpoint through Claude Code's own compaction.
+//   3. Two materially different settled exchanges are judged back-to-back and each shows
+//      a hint, proving there is no notification cooldown between new checkpoints.
+//   4. Automatic mode chosen in the pane asks for confirmation, then compacts at the next
+//      eligible checkpoint; the first post-compaction exchange is still gated.
 //
 // COMPACT_TEST_KEEP_LAB=1 keeps the lab directory and, after a failure, the tmux session
 // for ten minutes so the screen can be inspected.
@@ -406,16 +406,16 @@ try {
     "a settled 70,000-token exchange is judged once, shows the hint, and logs its complete Jev decision without the key",
   );
 
-  step = "hint clears";
+  step = "back-to-back hints";
   await command("E2E-PROMPT-2 run the tests");
   await waitFor(
-    (s) => !statusLine(s).includes(HINT) && !statusLine(s).includes("HINT · min"),
-    "the hint to clear without restoring a status strip",
+    (s) => jevRequests.length === 2 && statusLine(s).includes(HINT),
+    "a second immediate judgment and hint at the new checkpoint",
     60000,
   );
-  pass("the next turn clears the hint without restoring ambient chrome");
+  pass("a materially different next checkpoint is judged immediately and shows another hint");
 
-  // 4. Automatic mode through the pane, then one compaction.
+  // 4. Automatic mode through the pane, then one compaction and its retained wait gate.
   step = "auto";
   await command("/compact-adviser");
   await waitText("Mode: Hints only (default)");
@@ -449,20 +449,21 @@ try {
   pass("automatic mode chosen in the pane asks first, then persists");
 
   await command("E2E-PROMPT-3 add docs");
-  await waitFor(
-    () => jevRequests.length === 1 && screen().includes("Done: step 3"),
-    "the third exchange",
-    60000,
-  );
-  await command("E2E-PROMPT-4 final check");
   await waitText("compact-adviser: automatic compaction completed:", 90000);
+  if (jevRequests.length !== 3)
+    throw new Error(`[${step}] expected the new checkpoint to be judged immediately`);
   if (summaries.length !== 1)
     throw new Error(`[${step}] expected one summarization, saw ${summaries.length}`);
-  pass(
-    "automatic mode compacts exactly once at the next eligible checkpoint through Claude Code's compaction",
-  );
+  pass("automatic mode compacts at the next eligible checkpoint through Claude Code's compaction");
+
+  step = "post-compaction wait";
+  await command("E2E-PROMPT-4 final check");
+  await waitText("Done: step 4", 60000);
   await sleep(3000);
+  if (jevRequests.length !== 3)
+    throw new Error(`[${step}] post-compaction exchange bypassed the retained wait gate`);
   if (summaries.length !== 1) throw new Error(`[${step}] a second compaction ran`);
+  pass("the first post-compaction exchange remains gated and does not judge or compact again");
   console.log(`\n${results.length} live checks passed on Claude Code ${version}.`);
 } catch (error) {
   console.error(error instanceof Error ? error.message : error);

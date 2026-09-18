@@ -37,7 +37,12 @@ function run(
   mode: "hint" | "auto",
   actions: { send: string; wait?: string }[],
   installed = false,
-  fixture: { inputTokens?: number; coordinating?: boolean; logRequests?: boolean } = {},
+  fixture: {
+    inputTokens?: number;
+    coordinating?: boolean;
+    logRequests?: boolean;
+    jevFailure?: boolean;
+  } = {},
 ) {
   const dir = temp(t),
     store = new ConfigStore(dir);
@@ -107,6 +112,7 @@ function run(
       COMPACT_TEST_LOG: log,
       COMPACT_TEST_INPUT_TOKENS: String(fixture.inputTokens ?? 45000),
       COMPACT_TEST_COORDINATING: fixture.coordinating ? "1" : "0",
+      COMPACT_TEST_JEV_FAILURE: fixture.jevFailure ? "1" : "0",
     },
     actions,
     output: join(dir, "terminal.log"),
@@ -176,6 +182,60 @@ test("signed Pi: real settled event produces the hint and a complete Jev decisio
   if (process.env.COMPACT_TEST_LOG_EVIDENCE) {
     cpSync(r.requestLog, process.env.COMPACT_TEST_LOG_EVIDENCE);
   }
+});
+
+test("signed Pi: materially different consecutive checkpoints each produce a hint", (t) => {
+  const r = run(t, "hint", [
+    { send: "Finish the first fixture report.\r", wait: "Run /compact to save tokens." },
+    { send: "Finish a different fixture report.\r", wait: "Run /compact to save tokens." },
+  ]);
+  assert.equal(r.events.filter((e) => e.event === "jev").length, 2);
+  assert.ok(r.result.tail.includes("Run /compact to save tokens."));
+  if (process.env.COMPACT_TEST_TUI_EVIDENCE) {
+    cpSync(join(r.dir, "terminal.log"), process.env.COMPACT_TEST_TUI_EVIDENCE);
+  }
+});
+
+test("signed Pi: repeating the same checkpoint is skipped", (t) => {
+  const r = run(t, "hint", [
+    { send: "Repeat this checkpoint.\r", wait: "Run /compact to save tokens." },
+    { send: "Repeat this checkpoint.\r", wait: "This phase is complete" },
+  ]);
+  assert.equal(r.events.filter((e) => e.event === "jev").length, 1);
+});
+
+test("signed Pi: snooze still suppresses the next three completed exchanges", (t) => {
+  const r = run(t, "hint", [
+    { send: "/compact-adviser snooze\r", wait: "Advice snoozed for three completed exchanges." },
+    { send: "Snoozed exchange one.\r", wait: "This phase is complete" },
+    { send: "Snoozed exchange two.\r", wait: "This phase is complete" },
+    { send: "Snoozed exchange three.\r", wait: "This phase is complete" },
+    { send: "Advice can resume now.\r", wait: "Run /compact to save tokens." },
+  ]);
+  assert.equal(r.events.filter((e) => e.event === "jev").length, 1);
+});
+
+test("signed Pi: minimum tokens and TypeSafe error backoff still suppress judgments", (t) => {
+  const belowMinimum = run(
+    t,
+    "hint",
+    [{ send: "Finish below the minimum.\r", wait: "This phase is complete" }],
+    false,
+    { inputTokens: 39900 },
+  );
+  assert.equal(belowMinimum.events.filter((e) => e.event === "jev").length, 0);
+
+  const backedOff = run(
+    t,
+    "hint",
+    [
+      { send: "Trigger the temporary failure.\r", wait: "the adviser will try again later" },
+      { send: "Try again immediately.\r", wait: "This phase is complete" },
+    ],
+    false,
+    { jevFailure: true },
+  );
+  assert.equal(backedOff.events.filter((e) => e.event === "jev").length, 1);
 });
 
 test("signed Pi: knee floor withholds a coordinating hint until 90% usage", (t) => {
