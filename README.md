@@ -30,7 +30,7 @@ It uses [Jev](https://typesafe.ai) to instantly judge whether the current sessio
 
 It can give you a hint to run `/compact` - or, if you opt in, it can run it for you at the right time automatically.
 
-Judgment is two one-sentence Jev questions in one request (is the unit finished; is this hands-on work or coordination), composed in code into one score. The hint floor is 0.90 while the context window is mostly empty and relaxes toward 0.40 as it fills - a wrong hint costs most when there is still room. Automatic mode is the same gate, plus a first-use confirmation.
+Judgment is two one-sentence Jev questions in one request (is the unit finished; is this hands-on work or coordination), composed in code into one score. The hint floor is 0.90 while the context window is mostly empty (through about 10%) and relaxes toward 0.50 by about 90% full - a wrong hint costs most when there is still room. Automatic mode is the same gate, plus a first-use confirmation.
 
 ## Quick Start
 
@@ -94,7 +94,7 @@ settled turn
 └─────────┬─────────┘
           ▼
 ┌───────────────────┐
-│ TypeSafe Jev      │  done × shape score, floor slides 0.90→0.40 with usage
+│ TypeSafe Jev      │  done × shape score, floor slides 0.90→0.50 with usage
 └─────────┬─────────┘
           ▼
  hint: run /compact     or, with explicit auto, native compaction
@@ -112,9 +112,9 @@ settled turn
 
 ## Eval
 
-Local judgment eval uses real session checkpoints to score when the adviser should suggest `/compact`. The curve below is from a follow-up-aware gold set (96 checkpoints, 40 sessions): as the context window fills, the score threshold loosens so **recall rises** while precision stays high—favoring token savings when compaction is about to be forced anyway.
+Local judgment eval uses real session checkpoints to score when the adviser should suggest `/compact`. The curve below is from a follow-up-aware gold set (96 checkpoints, 40 sessions): as the context window fills, the score threshold loosens from **0.90** (≤10% used) to **0.50** (≥90% used) so **recall rises** while precision stays high - favoring token savings when compaction is about to be forced anyway.
 
-![Use Jev to answer "should I /compact now?" — precision stays high while recall rises as context used goes from ≤40% to ≥90%](docs/eval-usage-floor-curve.png)
+![Use Jev to answer "should I /compact now?" — precision stays high while recall rises as context used goes from ≤10% to ≥90%](docs/eval-usage-floor-curve.png)
 
 The judgment-eval harness lives in [packages/pi-extension/eval/](packages/pi-extension/eval/README.md). It is not a published dataset: point it at your own sessions and keep transcripts local.
 
