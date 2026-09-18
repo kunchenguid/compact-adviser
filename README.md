@@ -107,3 +107,12 @@ settled turn
 | `/compact-adviser status` | Mode, minimum, context, key readiness, cooldown |
 | `/compact-adviser threshold 60000` | Save an absolute token minimum |
 | `/compact-adviser snooze` / `dismiss` | Suppress the next three exchanges, or clear the current hint |
+
+## Eval
+
+Local judgment eval uses real session checkpoints to score when the adviser should suggest `/compact`. The curve below is from a follow-up-aware gold set (96 checkpoints, 40 sessions): as the context window fills, the score threshold loosens so **recall rises** while precision stays high—favoring token savings when compaction is about to be forced anyway.
+
+![Use Jev to answer "should I /compact now?" — precision stays high while recall rises as context used goes from ≤40% to ≥90%](docs/eval-usage-floor-curve.png)
+
+The judgment-eval harness lives in [packages/pi-extension/eval/](packages/pi-extension/eval/README.md). It is not a published dataset: point it at your own sessions and keep transcripts local.
+
