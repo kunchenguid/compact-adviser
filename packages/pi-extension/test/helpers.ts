@@ -206,6 +206,7 @@ export function harness(
   const signals: AbortSignal[] = [];
   const install = (version = "0.82.0", credential: string | undefined | false = "test-key") => {
     handlers.clear();
+    command = undefined;
     installAdviser(api, {
       agentDir: dir,
       version,

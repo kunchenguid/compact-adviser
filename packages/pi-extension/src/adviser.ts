@@ -54,6 +54,9 @@ function savedApiKey(store: ConfigStore): string | undefined {
   }
 }
 export function installAdviser(pi: ExtensionAPI, options: Options): void {
+  // `COMPACT_ADVISER_DISABLE` is read once per install: a session's environment is fixed,
+  // and re-reading it per event would only invite a mid-session half-disabled state.
+  if (disabledByEnv(process.env[DISABLE_ENV])) return;
   const store = new ConfigStore(options.agentDir);
   const resolvedKey = (): ResolvedTypesafeApiKey => {
     if (options.key) {
@@ -76,11 +79,7 @@ export function installAdviser(pi: ExtensionAPI, options: Options): void {
   let automaticCompaction = false;
   let hintVisible = false;
   let diagnostic = "";
-  // `COMPACT_ADVISER_DISABLE` is read once per install: a session's environment is fixed,
-  // and re-reading it per event would only invite a mid-session half-disabled state.
-  const disabled = disabledByEnv(process.env[DISABLE_ENV]);
-  /** Every product action requires an interactive TUI and no disable override. */
-  const active = (ctx: ExtensionContext) => !disabled && ctx.mode === "tui" && ctx.hasUI;
+  const active = (ctx: ExtensionContext) => ctx.mode === "tui" && ctx.hasUI;
   function persist(state: SessionState) {
     pi.appendEntry(STATE_TYPE, state);
   }

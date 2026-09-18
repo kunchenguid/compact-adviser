@@ -1,7 +1,8 @@
 // The `COMPACT_ADVISER_DISABLE` session kill switch.
 //
 // A truthy value makes compact-adviser take no product action for that process: no
-// TypeSafe judgment, no hint, no automatic compaction, no status-line product output.
+// TypeSafe judgment, no hint, no automatic compaction, no command, no status-line
+// product output.
 // It wins over every saved mode and every other enablement path.
 //
 // Keep this file byte-identical across host packages; `lockstep.test.ts` compares the

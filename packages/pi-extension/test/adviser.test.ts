@@ -565,7 +565,7 @@ test("COMPACT_ADVISER_DISABLE takes every product action out of the session", as
     h.install();
     await h.fire("session_start");
     await h.fire("agent_settled");
-    await h.command("status");
+    await assert.rejects(() => h.command("status"), { message: "command missing" });
     assert.equal(h.calls, 0, value);
     assert.equal(h.compactions.length, 0, value);
     assert.deepEqual(h.widgets, [], value);

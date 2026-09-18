@@ -668,6 +668,7 @@ export const register: Register = (on, options) => {
   on("session.start", async ($, e, next) => {
     if (!(await isActivated($))) return next(e);
     interactive = e.isInteractive;
+    if (!interactive) return next(e);
     generation++;
     judging = false;
     compacting = false;
@@ -715,7 +716,7 @@ export const register: Register = (on, options) => {
   // session's cooldown; a precompute installs nothing and a subagent's is its own.
   on("session.compact", async ($, e, next) => {
     const result = await next(e);
-    if (!(await isActivated($))) return result;
+    if (!(await isActivated($)) || !interactive) return result;
     if (e.trigger === "precompute" || e.agentId !== undefined || result.skip !== undefined) {
       return result;
     }
