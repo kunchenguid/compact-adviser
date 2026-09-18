@@ -334,12 +334,14 @@ try {
   const inverse = new RegExp(`${ESC}\\[7m([^${ESC}\\n]*)${ESC}\\[(?:0|27|39)m`);
   const highlighted = () => inverse.exec(screenRaw())?.[1]?.trim() ?? "";
   async function moveTo(rowText, direction = "Down") {
-    for (let i = 0; i < 8 && !highlighted().startsWith(rowText); i++) {
-      key(direction);
-      await sleep(400);
+    for (let i = 0; i <= 8; i++) {
+      if (highlighted().startsWith(rowText)) return;
+      if (i < 8) {
+        key(direction);
+        await sleep(400);
+      }
     }
-    if (!highlighted().startsWith(rowText))
-      throw new Error(`[${step}] never highlighted ${JSON.stringify(rowText)}\n${screen()}`);
+    throw new Error(`[${step}] never highlighted ${JSON.stringify(rowText)}\n${screen()}`);
   }
 
   step = "request logging";
