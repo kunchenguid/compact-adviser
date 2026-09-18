@@ -6,7 +6,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { floorFor, judge, qualifies, score } from "../../src/judge.ts";
 import { continuationOf } from "../continuation.ts";
-import { typesafeKeyFromEnv } from "../key.ts";
+import { openrouterKeyFromEnv } from "../key.ts";
 
 const [dir, id, usageArg] = process.argv.slice(2);
 const usage = Number(usageArg ?? 0.5);
@@ -14,7 +14,7 @@ if (!dir || !id) {
   console.error("usage: node --import tsx eval/tools/retry.ts <dataDir> <id> [usage]");
   process.exit(1);
 }
-const key = typesafeKeyFromEnv();
+const key = openrouterKeyFromEnv();
 const cps = readFileSync(join(dir, "checkpoints.jsonl"), "utf8")
   .split("\n")
   .filter(Boolean)

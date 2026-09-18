@@ -26,7 +26,7 @@
 
 **compact-adviser** is an agent plugin that answers a single question: should I /compact now?
 
-It uses [Jev](https://typesafe.ai) to instantly judge whether the current session is likely at a boundary that's safe to compact.
+It uses [Jev](https://openrouter.ai/typesafe/jev-1.13) to instantly judge whether the current session is likely at a boundary that's safe to compact.
 
 It can give you a hint to run `/compact` - or, if you opt in, it can run it for you at the right time automatically.
 
@@ -34,9 +34,9 @@ Judgment is two one-sentence Jev questions in one request (is the unit finished;
 
 ## Quick Start
 
-Prerequisites: Node 22+, [Pi](https://pi.dev) 0.82.0 or newer (verified on **0.85.1**) or Claude Code 2.1.274 or newer (verified on **2.1.275**), and a [TypeSafe API key](https://console.typesafe.ai/settings/keys). Supply it as `TYPESAFE_API_KEY` in the launch environment, enter it in `/compact-adviser`, or put it in `./.env`. Jev is TypeSafe's structured decision model; this package asks it two one-sentence classification questions and never asks it to write a summary.
+Prerequisites: Node 22+, [Pi](https://pi.dev) 0.82.0 or newer (verified on **0.85.1**) or Claude Code 2.1.274 or newer (verified on **2.1.275**), and an [OpenRouter API key](https://openrouter.ai/settings/keys). Supply it as `OPENROUTER_API_KEY` in the launch environment, enter it in `/compact-adviser`, or put it in `./.env`. Jev is TypeSafe's structured decision model, reached here through OpenRouter. This package asks it two one-sentence classification questions and never asks it to write a summary.
 
-Installing the package is consent to send eligible checkpoint context to TypeSafe when a key is available and the other product gates pass.
+Installing the package is consent to send eligible checkpoint context to OpenRouter when a key is available and the other product gates pass.
 
 ### Pi
 
@@ -65,20 +65,20 @@ Then `/compact-adviser`.
 
 | Symptom | Cause |
 | --- | --- |
-| `Key: missing` in `/compact-adviser status` | No `TYPESAFE_API_KEY` in the launch environment, saved settings, or `./.env` |
+| `Key: missing` in `/compact-adviser status` | No `OPENROUTER_API_KEY` in the launch environment, saved settings, or `./.env` |
 | No `/compact-adviser` command in Claude Code | `CLAUDE_CODE_ENABLE_FUNCTION_HOOKS` is not exactly `1` |
 | Command exists, no hint | Context is below the constant 40,000-token minimum, the session is not idle, or the last turn was not a settled final answer |
 | Claude Code: "nonessential traffic" | `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` blocks plugin network requests |
 | Pi print / RPC / JSON, or Claude `-p` | Non-interactive sessions never judge |
 
-## What is sent to TypeSafe
+## What is sent to OpenRouter
 
 | Included | Not sent |
 | --- | --- |
 | Bounded user constraints, up to the last 64 visible replies and tool results (clipped), short tool-result excerpts, an existing summary, saved-artifact names, omission markers | System prompts, hidden reasoning, images, environment variables, the API key, complete transcripts |
 | Best-effort redaction of known key patterns and obvious sensitive-file results | A guarantee. Uninstall or set mode Off for material that must not leave the machine |
 
-Requests go to `https://api.typesafe.ai/v1/systemone`, are capped at 32,000 serialized UTF-8 bytes, and never treat an error as an affirmative judgment.
+Requests go to `https://openrouter.ai/api/alpha/decisions`, are capped at 32,000 serialized UTF-8 bytes, and never treat an error as an affirmative judgment.
 Details: [SECURITY.md](SECURITY.md).
 
 ## How It Works
@@ -92,7 +92,7 @@ settled turn
 └─────────┬─────────┘
           ▼
 ┌───────────────────┐
-│ TypeSafe Jev      │  done × shape score, floor slides 0.90→0.50 with usage
+│ Jev on OpenRouter │  done × shape score, floor slides 0.90→0.50 with usage
 └─────────┬─────────┘
           ▼
  hint: run /compact     or, with explicit auto, native compaction
@@ -102,7 +102,7 @@ settled turn
 
 | Command | Effect |
 | --- | --- |
-| `/compact-adviser` | Settings (mode, minimum, request log, TypeSafe API key) |
+| `/compact-adviser` | Settings (mode, minimum, request log, OpenRouter API key) |
 | `/compact-adviser auto` / `hint` / `off` | Save that mode; auto asks for first-use confirmation |
 | `/compact-adviser status` | Mode, minimum, context, key source (`env` / `saved` / `.env` / `missing`), cooldown |
 | `/compact-adviser threshold 60000` | Save an absolute token minimum |

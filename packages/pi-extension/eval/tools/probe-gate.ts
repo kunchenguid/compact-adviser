@@ -6,14 +6,14 @@
  */
 import { readFileSync, writeFileSync } from "node:fs";
 import { ENDPOINT, QUESTIONS } from "../../src/judge.ts";
-import { typesafeKeyFromEnv } from "../key.ts";
+import { openrouterKeyFromEnv } from "../key.ts";
 
 const [dir, qpath, out, flag] = process.argv.slice(2);
 if (!dir || !qpath || !out) {
   console.error("usage: node --import tsx eval/tools/probe-gate.ts <dir> <questions.json> <out.jsonl> [--with-shipped]");
   process.exit(1);
 }
-const key = typesafeKeyFromEnv();
+const key = openrouterKeyFromEnv();
 const extra = JSON.parse(readFileSync(qpath, "utf8"));
 const questions = flag === "--with-shipped" ? { ...QUESTIONS, ...extra } : extra;
 const rows = readFileSync(`${dir}/checkpoints.jsonl`, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l));
@@ -25,7 +25,7 @@ for (const r of rows) {
     const rsp = await fetch(ENDPOINT, {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
-      body: JSON.stringify({ model: "jev-latest", state: r.state, questions }),
+      body: JSON.stringify({ model: "typesafe/jev-1.13", state: r.state, questions }),
       signal: AbortSignal.timeout(60000),
     });
     const j = (await rsp.json()) as { answers?: Record<string, { choice?: string; probabilities?: Record<string, number> }>; model?: string; usage?: unknown };

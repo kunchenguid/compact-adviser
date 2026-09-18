@@ -1,7 +1,7 @@
 # compact-adviser judgment eval
 
 Offline replay of the shipped compact-adviser checkpoint pipeline against your
-own Pi session transcripts, plus a label rubric and a live TypeSafe Jev scorer.
+own Pi session transcripts, plus a label rubric and a live Jev scorer (OpenRouter).
 
 The harness drives production `snapshot()` from `src/context.ts` through a
 minimal fake `ExtensionContext`, and production `judge()` / `qualifies()` from
@@ -36,7 +36,7 @@ node --import tsx eval/build.ts eval/local
 `build.ts` writes `eval/local/checkpoints.jsonl` and `eval/local/worksheet/`.
 Those files contain transcript text. Keep them local.
 
-3. Score with a live TypeSafe key **from the environment only**. Do not pass the
+3. Score with a live OpenRouter key **from the environment only**. Do not pass the
 key as argv, do not `export` it in the shell you type in, and do not print it.
 
 ```sh
@@ -49,7 +49,7 @@ python3 eval/tools/schedule.py eval/local/labels.jsonl eval/local/results.jsonl 
   "p['done']['finished']*(0.5+0.5*p['shape']['hands_on'])" 0.4 0.5 0.6 0.7 0.8 0.9
 ```
 
-`score.ts` reads `TYPESAFE_API_KEY` from the environment. It uses a 60s timeout
+`score.ts` reads `OPENROUTER_API_KEY` from the environment. It uses a 60s timeout
 so a slow call is measured rather than counted as a failure; production uses
 2000ms. Latency is recorded per row so that gap is visible. Each result row
 carries both answers (`doneP`, `shapeP`) and the composed `score`; `hint` and

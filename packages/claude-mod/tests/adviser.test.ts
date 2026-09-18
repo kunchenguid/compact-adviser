@@ -97,10 +97,10 @@ describe("turn-end gates", () => {
     await drain(w);
     expect(w.journal.requests).toHaveLength(1);
     const request = w.journal.requests[0] ?? { url: "", headers: {}, body: "" };
-    expect(request.url).toBe("https://api.typesafe.ai/v1/systemone");
+    expect(request.url).toBe("https://openrouter.ai/api/alpha/decisions");
     expect(request.headers.Authorization).toBe(`Bearer ${KEY}`);
     expect(request.body.includes(KEY)).toBe(false);
-    expect(JSON.parse(request.body).model).toBe("jev-latest");
+    expect(JSON.parse(request.body).model).toBe("typesafe/jev-1.13");
     expect(w.journal.statuses.at(-1)).toBe(HINT);
     expect(w.journal.toasts.includes(HINT)).toBe(false);
     expect(w.journal.suggestions).toEqual([]);
@@ -108,7 +108,7 @@ describe("turn-end gates", () => {
     expect(w.journal.fsWrites).toHaveLength(0);
   });
 
-  test("optional request logging writes the TypeSafe body and never the key", async ($, on) => {
+  test("optional request logging writes the OpenRouter body and never the key", async ($, on) => {
     const w = world(on, { logRequests: true });
     await $.session.start(interactiveStart);
     await turnEnd($, w);
@@ -118,7 +118,7 @@ describe("turn-end gates", () => {
     const responseLine = lastJsonl(w.journal.fsWrites[1]);
     expect(w.journal.fsWrites[1]?.text.trim().split("\n")).toHaveLength(2);
     expect(requestLine.kind).toBe("request");
-    expect(requestLine.body.model).toBe("jev-latest");
+    expect(requestLine.body.model).toBe("typesafe/jev-1.13");
     expect(responseLine.kind).toBe("response");
     expect(responseLine.id).toBe(requestLine.id);
     expect(responseLine.answers.done.choice).toBe("finished");
@@ -147,8 +147,8 @@ describe("turn-end gates", () => {
     expect(paths[1]?.endsWith("compact-adviser-requests-session-2.jsonl")).toBe(true);
   });
 
-  test("a saved key in a settings.json read is absent from the TypeSafe body and request log", async ($, on) => {
-    const secret = "tsk-saved-key-must-not-leave";
+  test("a saved key in a settings.json read is absent from the OpenRouter body and request log", async ($, on) => {
+    const secret = "sk-or-v1-saved-key-must-not-leave";
     const w = world(on, { key: undefined, savedKey: secret, logRequests: true });
     w.messages = [
       ...w.messages,
@@ -175,7 +175,7 @@ describe("turn-end gates", () => {
             text: JSON.stringify({
               pluginConfigs: {
                 "compact-adviser@0.1.0": {
-                  options: { mode: "hint", typesafeApiKey: secret },
+                  options: { mode: "hint", openrouterApiKey: secret },
                 },
               },
             }),
@@ -192,7 +192,7 @@ describe("turn-end gates", () => {
     expect(request.body).toContain("hint");
     const logged = w.journal.fsWrites.map((write) => write.text).join("");
     expect(logged.includes(secret)).toBe(false);
-    expect(logged.includes("jev-latest")).toBe(true);
+    expect(logged.includes("typesafe/jev-1.13")).toBe(true);
   });
 
   test("a silent no-qualify turn still logs the Jev response", async ($, on) => {
@@ -236,7 +236,7 @@ describe("turn-end gates", () => {
     expect(w.journal.statuses.at(-1)).toBeUndefined();
   });
 
-  test("below the constant minimum no transcript is read and TypeSafe is not called", async ($, on) => {
+  test("below the constant minimum no transcript is read and OpenRouter is not called", async ($, on) => {
     const w = world(on, { minimum: 60001 });
     w.usage.tokens = 60000;
     await $.session.start(interactiveStart);
@@ -288,7 +288,7 @@ describe("turn-end gates", () => {
     const w = world(on, {
       key: undefined,
       dotenv:
-        '# ignore\nOTHER=nope\nTYPESAFE_API_KEY=from-dotenv\ndeclare -x TYPESAFE_API_KEY="from-dotenv-last"\n',
+        '# ignore\nOTHER=nope\nOPENROUTER_API_KEY=from-dotenv\ndeclare -x OPENROUTER_API_KEY="from-dotenv-last"\n',
     });
     await $.session.start(interactiveStart);
     await turnEnd($, w);
@@ -299,7 +299,7 @@ describe("turn-end gates", () => {
   });
 
   test("a host env key wins over cwd .env", async ($, on) => {
-    const w = world(on, { dotenv: "TYPESAFE_API_KEY=from-dotenv\n" });
+    const w = world(on, { dotenv: "OPENROUTER_API_KEY=from-dotenv\n" });
     await $.session.start(interactiveStart);
     await turnEnd($, w);
     expect(w.journal.fsReads).toEqual([]);
@@ -312,7 +312,7 @@ describe("turn-end gates", () => {
     const w = world(on, {
       key: undefined,
       savedKey: "from-saved",
-      dotenv: "TYPESAFE_API_KEY=from-dotenv\n",
+      dotenv: "OPENROUTER_API_KEY=from-dotenv\n",
     });
     await $.session.start(interactiveStart);
     await turnEnd($, w);
@@ -369,7 +369,7 @@ describe("turn-end gates", () => {
     expect(hinted(w)).toBe(false);
   });
 
-  test("a turn that starts while TypeSafe answers discards the verdict", async ($, on) => {
+  test("a turn that starts while OpenRouter answers discards the verdict", async ($, on) => {
     const w = world(on);
     let markRequestStarted: () => void = () => undefined;
     const requestStarted = new Promise<void>((resolve) => {
@@ -491,7 +491,7 @@ describe("turn-end gates", () => {
     expect(hinted(w)).toBe(false);
   });
 
-  test("a two-second TypeSafe timeout leaves context alone", async ($, on) => {
+  test("a two-second OpenRouter timeout leaves context alone", async ($, on) => {
     const w = world(on);
     w.respond = () => new Promise(() => undefined);
     await $.session.start(interactiveStart);
@@ -512,7 +512,7 @@ describe("turn-end gates", () => {
     const w = world(on, { endpoint: "https://collector.example/v1" });
     await $.session.start(interactiveStart);
     await turnEnd($, w);
-    expect(w.journal.requests[0]?.url).toBe("https://api.typesafe.ai/v1/systemone");
+    expect(w.journal.requests[0]?.url).toBe("https://openrouter.ai/api/alpha/decisions");
   });
 });
 
@@ -714,7 +714,7 @@ describe("commands", () => {
     expect(w.journal.asks).toHaveLength(3);
     expect(w.journal.asks[0]).toContain("Compaction is lossy");
     expect(w.journal.toasts.at(-1)).toBe(
-      "Automatic mode saved (all sessions). A TypeSafe key is still required.",
+      "Automatic mode saved (all sessions). An OpenRouter key is still required.",
     );
     await $.command.run(commandRun("hint"));
     await $.command.run(commandRun("auto"));
@@ -811,8 +811,8 @@ describe("settings pane", () => {
     expect(rows(tree)).toEqual([
       "Mode Hints only (default)",
       "Minimum context 40,000 tokens",
-      "Log TypeSafe requests Off",
-      "TypeSafe API key from the environment",
+      "Log OpenRouter requests Off",
+      "OpenRouter API key from the environment",
       "Reset minimum to 40,000",
       "Status",
       "Close",
@@ -842,15 +842,15 @@ describe("settings pane", () => {
     await $.ui.press({ plugin: PLUGIN, key: "menu:logRequests" });
     await drain(w);
     let tree = await $.ui.render(pane);
-    expect(text(tree)).toContain("› Log TypeSafe requests");
+    expect(text(tree)).toContain("› Log OpenRouter requests");
     expect(rows(tree)).toEqual(["● Off (default)", "On", "Back"]);
     expect(autoFocused(tree)).toBe("logging:off");
     await $.ui.press({ plugin: PLUGIN, key: "logging:on" });
     await drain(w);
     expect(w.rows.get(`${PLUGIN}.logRequests`)).toBe(true);
-    expect(w.journal.toasts.at(-1)).toContain("TypeSafe request logging on (all sessions).");
+    expect(w.journal.toasts.at(-1)).toContain("OpenRouter request logging on (all sessions).");
     tree = await $.ui.render(pane);
-    expect(rows(tree)[2]).toBe("Log TypeSafe requests On");
+    expect(rows(tree)[2]).toBe("Log OpenRouter requests On");
     // The ring goes back to the row that was opened, so the arrows continue from there.
     expect(autoFocused(tree)).toBe("menu:logRequests");
 
@@ -912,7 +912,7 @@ describe("settings pane", () => {
     await drain(w);
     expect(w.rows.get(`${PLUGIN}.mode`)).toBe("auto");
     expect(w.journal.toasts.at(-1)).toBe(
-      "Automatic mode saved (all sessions). A TypeSafe key is still required.",
+      "Automatic mode saved (all sessions). An OpenRouter key is still required.",
     );
     expect(rows(await $.ui.render(pane))[0]).toBe("Mode Automatic (experimental)");
   });
@@ -938,22 +938,22 @@ describe("settings pane", () => {
   });
 
   test("the key row names the key in effect and its source, never the value", async ($, on) => {
-    const secret = "tsk-menu-fixture-not-for-display";
+    const secret = "sk-or-v1-menu-fixture-not-for-display";
     const w = world(on, {
       key: undefined,
       savedKey: secret,
-      dotenv: "TYPESAFE_API_KEY=tsk-dotenv-fixture-not-for-display\n",
+      dotenv: "OPENROUTER_API_KEY=sk-or-v1-dotenv-fixture-not-for-display\n",
     });
     await $.session.start(interactiveStart);
     let tree = await $.ui.render(pane);
-    expect(rows(tree)[3]).toBe("TypeSafe API key saved");
+    expect(rows(tree)[3]).toBe("OpenRouter API key saved");
     expect(text(tree)).not.toContain(secret);
-    await $.ui.press({ plugin: PLUGIN, key: "menu:typesafeApiKey" });
+    await $.ui.press({ plugin: PLUGIN, key: "menu:openrouterApiKey" });
     tree = await $.ui.render(pane);
-    expect(text(tree)).toContain("› TypeSafe API key");
+    expect(text(tree)).toContain("› OpenRouter API key");
     expect(text(tree)).toContain("In effect: the key saved here, for all sessions.");
     const field = elements(tree).find((e) => e.type === "Input");
-    expect(field?.props.key).toBe("typesafeApiKey");
+    expect(field?.props.key).toBe("openrouterApiKey");
     expect(field?.props.value).toBe("");
     expect(field?.props.placeholder).toBe("paste a key to replace the saved one");
     expect(field?.props.autoFocus).toBe(true);
@@ -964,20 +964,20 @@ describe("settings pane", () => {
     expect(w.journal.logs.at(-1)?.includes(secret)).toBe(false);
     await $.ui.press({ plugin: PLUGIN, key: "clearKey" });
     await drain(w);
-    expect(w.rows.get(`${PLUGIN}.typesafeApiKey`)).toBe("");
+    expect(w.rows.get(`${PLUGIN}.openrouterApiKey`)).toBe("");
     expect(w.journal.toasts.at(-1)).toBe(
-      "Saved TypeSafe API key cleared (all sessions). Launch environment and .env still apply.",
+      "Saved OpenRouter API key cleared (all sessions). Launch environment and .env still apply.",
     );
     expect(w.journal.toasts.every((line) => !line.includes(secret))).toBe(true);
     // Clearing removes only the saved key: the .env one now applies, and the list says so.
     tree = await $.ui.render(pane);
-    expect(rows(tree)[3]).toBe("TypeSafe API key from .env");
+    expect(rows(tree)[3]).toBe("OpenRouter API key from .env");
     expect(text(tree)).not.toContain(secret);
-    expect(text(tree)).not.toContain("tsk-dotenv");
-    await $.ui.press({ plugin: PLUGIN, key: "menu:typesafeApiKey" });
+    expect(text(tree)).not.toContain("sk-or-v1-dotenv");
+    await $.ui.press({ plugin: PLUGIN, key: "menu:openrouterApiKey" });
     tree = await $.ui.render(pane);
     expect(text(tree)).toContain(
-      "In effect: TYPESAFE_API_KEY from the .env file in the working directory.",
+      "In effect: OPENROUTER_API_KEY from the .env file in the working directory.",
     );
     expect(elements(tree).find((e) => e.type === "Input")?.props.placeholder).toBe(
       "paste a key to save it",
@@ -988,50 +988,50 @@ describe("settings pane", () => {
   });
 
   test("an environment key wins over a saved one, and the pane says so", async ($, on) => {
-    const secret = "tsk-menu-fixture-not-for-display";
+    const secret = "sk-or-v1-menu-fixture-not-for-display";
     const w = world(on, { savedKey: secret });
     await $.session.start(interactiveStart);
     let tree = await $.ui.render(pane);
-    expect(rows(tree)[3]).toBe("TypeSafe API key from the environment");
-    await $.ui.press({ plugin: PLUGIN, key: "menu:typesafeApiKey" });
+    expect(rows(tree)[3]).toBe("OpenRouter API key from the environment");
+    await $.ui.press({ plugin: PLUGIN, key: "menu:openrouterApiKey" });
     tree = await $.ui.render(pane);
     expect(text(tree)).toContain(
-      "In effect: TYPESAFE_API_KEY from the launch environment, which wins over the key saved here.",
+      "In effect: OPENROUTER_API_KEY from the launch environment, which wins over the key saved here.",
     );
     expect(rows(tree)).toEqual(["Clear saved key", "Back"]);
     expect(text(tree)).not.toContain(secret);
     expect(text(tree)).not.toContain(KEY);
     await $.ui.press({ plugin: PLUGIN, key: "clearKey" });
     await drain(w);
-    expect(w.rows.get(`${PLUGIN}.typesafeApiKey`)).toBe("");
-    expect(rows(await $.ui.render(pane))[3]).toBe("TypeSafe API key from the environment");
+    expect(w.rows.get(`${PLUGIN}.openrouterApiKey`)).toBe("");
+    expect(rows(await $.ui.render(pane))[3]).toBe("OpenRouter API key from the environment");
   });
 
   test("a denied clear keeps the key view and the saved key", async ($, on) => {
-    const secret = "tsk-menu-fixture-not-for-display";
+    const secret = "sk-or-v1-menu-fixture-not-for-display";
     const w = world(on, { key: undefined, savedKey: secret });
     await $.session.start(interactiveStart);
     await $.ui.render(pane);
-    await $.ui.press({ plugin: PLUGIN, key: "menu:typesafeApiKey" });
+    await $.ui.press({ plugin: PLUGIN, key: "menu:openrouterApiKey" });
     await $.ui.render(pane);
     w.denyConfig("a managed setting owns this row");
     await $.ui.press({ plugin: PLUGIN, key: "clearKey" });
     await drain(w);
-    expect(w.rows.get(`${PLUGIN}.typesafeApiKey`)).toBe(secret);
+    expect(w.rows.get(`${PLUGIN}.openrouterApiKey`)).toBe(secret);
     expect(w.journal.toasts.at(-1)).toBe("Not saved: a managed setting owns this row");
     const tree = await $.ui.render(pane);
     expect(rows(tree)).toEqual(["Clear saved key", "Back"]);
-    expect(elements(tree).find((e) => e.type === "Input")?.props.key).toBe("typesafeApiKey");
+    expect(elements(tree).find((e) => e.type === "Input")?.props.key).toBe("openrouterApiKey");
   });
 
   test("without any key the list says so and the view explains where one can come from", async ($, on) => {
     world(on, { key: undefined });
     await $.session.start(interactiveStart);
-    expect(rows(await $.ui.render(pane))[3]).toBe("TypeSafe API key missing");
-    await $.ui.press({ plugin: PLUGIN, key: "menu:typesafeApiKey" });
+    expect(rows(await $.ui.render(pane))[3]).toBe("OpenRouter API key missing");
+    await $.ui.press({ plugin: PLUGIN, key: "menu:openrouterApiKey" });
     const tree = await $.ui.render(pane);
     expect(text(tree)).toContain(
-      "No key in effect. Save one here, or set TYPESAFE_API_KEY in the environment or a .env file.",
+      "No key in effect. Save one here, or set OPENROUTER_API_KEY in the environment or a .env file.",
     );
     expect(rows(tree)).toEqual(["Back"]);
   });

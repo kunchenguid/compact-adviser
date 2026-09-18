@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { judge, score } from "../src/judge.ts";
 import { continuationOf } from "./continuation.ts";
-import { typesafeKeyFromEnv } from "./key.ts";
+import { openrouterKeyFromEnv } from "./key.ts";
 
 const dir = process.argv[2];
 const reps = Number(process.argv[3] ?? 3);
@@ -12,7 +12,7 @@ if (!dir || ids.length === 0) {
   console.error("usage: node --import tsx eval/stability.ts <dataDir> [reps] <id...>");
   process.exit(1);
 }
-const key = typesafeKeyFromEnv();
+const key = openrouterKeyFromEnv();
 const rows = readFileSync(join(dir, "checkpoints.jsonl"), "utf8")
   .split("\n")
   .filter(Boolean)

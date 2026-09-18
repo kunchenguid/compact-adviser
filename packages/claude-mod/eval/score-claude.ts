@@ -1,7 +1,7 @@
 /**
- * Score Claude Code checkpoints against live TypeSafe Jev through the shipped
+ * Score Claude Code checkpoints against live Jev (on OpenRouter) through the shipped
  * claude-mod judge() and qualifies().
- *   TYPESAFE_API_KEY=... node --import tsx eval/score-claude.ts <dataDir> [repeats]
+ *   OPENROUTER_API_KEY=... node --import tsx eval/score-claude.ts <dataDir> [repeats]
  * The key is read from the environment only and is never printed or stored.
  */
 import { readFileSync, writeFileSync } from "node:fs";
@@ -10,9 +10,9 @@ import { floorFor, type Judgment, judge, qualifies, score } from "../lib/judge.t
 
 const dir = process.argv[2];
 const repeats = Number(process.argv[3] ?? 1);
-const key = process.env.TYPESAFE_API_KEY?.trim();
+const key = process.env.OPENROUTER_API_KEY?.trim();
 if (!key) {
-  console.error("TYPESAFE_API_KEY missing");
+  console.error("OPENROUTER_API_KEY missing");
   process.exit(1);
 }
 

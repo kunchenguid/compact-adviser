@@ -8,7 +8,7 @@ import {
   parseSavedApiKey,
   readConfig,
 } from "../lib/config.ts";
-import { parseDotenvKey, resolveTypesafeApiKey } from "../lib/env.ts";
+import { parseDotenvKey, resolveOpenRouterApiKey } from "../lib/env.ts";
 import {
   ENDPOINT,
   FLOOR_MAX,
@@ -77,8 +77,8 @@ describe("settings", () => {
   });
 
   test("saved API key parsing trims, rejects empty, overlong, and control characters", () => {
-    expect(parseSavedApiKey("  tsk-ok  ")).toBe("tsk-ok");
-    expect(() => parseSavedApiKey("   ")).toThrow("Enter a TypeSafe API key");
+    expect(parseSavedApiKey("  sk-or-v1-ok  ")).toBe("sk-or-v1-ok");
+    expect(() => parseSavedApiKey("   ")).toThrow("Enter an OpenRouter API key");
     expect(() => parseSavedApiKey("x".repeat(1025))).toThrow("too long");
     expect(() => parseSavedApiKey("tsk\nok")).toThrow("control characters");
   });
@@ -122,52 +122,52 @@ describe("settings", () => {
 });
 
 describe("cwd .env key", () => {
-  test("last TYPESAFE_API_KEY assignment wins; comments and blanks are ignored", () => {
+  test("last OPENROUTER_API_KEY assignment wins; comments and blanks are ignored", () => {
     expect(
       parseDotenvKey(
-        "# TYPESAFE_API_KEY=commented\n\nOTHER=nope\nTYPESAFE_API_KEY=first\nTYPESAFE_API_KEY=second\n",
-        "TYPESAFE_API_KEY",
+        "# OPENROUTER_API_KEY=commented\n\nOTHER=nope\nOPENROUTER_API_KEY=first\nOPENROUTER_API_KEY=second\n",
+        "OPENROUTER_API_KEY",
       ),
     ).toBe("second");
-    expect(parseDotenvKey("", "TYPESAFE_API_KEY")).toBeUndefined();
+    expect(parseDotenvKey("", "OPENROUTER_API_KEY")).toBeUndefined();
   });
 
   test("export and declare -x prefixes and one matching quote layer are stripped", () => {
-    expect(parseDotenvKey("export TYPESAFE_API_KEY=from-export\n", "TYPESAFE_API_KEY")).toBe(
+    expect(parseDotenvKey("export OPENROUTER_API_KEY=from-export\n", "OPENROUTER_API_KEY")).toBe(
       "from-export",
     );
-    expect(parseDotenvKey('declare -x TYPESAFE_API_KEY="from-declare"\n', "TYPESAFE_API_KEY")).toBe(
-      "from-declare",
-    );
-    expect(parseDotenvKey("TYPESAFE_API_KEY='from-single'\n", "TYPESAFE_API_KEY")).toBe(
+    expect(
+      parseDotenvKey('declare -x OPENROUTER_API_KEY="from-declare"\n', "OPENROUTER_API_KEY"),
+    ).toBe("from-declare");
+    expect(parseDotenvKey("OPENROUTER_API_KEY='from-single'\n", "OPENROUTER_API_KEY")).toBe(
       "from-single",
     );
-    expect(parseDotenvKey('TYPESAFE_API_KEY="from-double"\n', "TYPESAFE_API_KEY")).toBe(
+    expect(parseDotenvKey('OPENROUTER_API_KEY="from-double"\n', "OPENROUTER_API_KEY")).toBe(
       "from-double",
     );
     expect(
-      parseDotenvKey('export TYPESAFE_API_KEY="from-export-quoted"\n', "TYPESAFE_API_KEY"),
+      parseDotenvKey('export OPENROUTER_API_KEY="from-export-quoted"\n', "OPENROUTER_API_KEY"),
     ).toBe("from-export-quoted");
   });
 
   test("env wins over saved over .env; empty env falls through", () => {
-    expect(resolveTypesafeApiKey("from-env", "from-saved", "from-dotenv")).toEqual({
+    expect(resolveOpenRouterApiKey("from-env", "from-saved", "from-dotenv")).toEqual({
       value: "from-env",
       source: "env",
     });
-    expect(resolveTypesafeApiKey("   ", "from-saved", "from-dotenv")).toEqual({
+    expect(resolveOpenRouterApiKey("   ", "from-saved", "from-dotenv")).toEqual({
       value: "from-saved",
       source: "saved",
     });
-    expect(resolveTypesafeApiKey(undefined, "from-saved", "from-dotenv")).toEqual({
+    expect(resolveOpenRouterApiKey(undefined, "from-saved", "from-dotenv")).toEqual({
       value: "from-saved",
       source: "saved",
     });
-    expect(resolveTypesafeApiKey(undefined, "   ", "from-dotenv")).toEqual({
+    expect(resolveOpenRouterApiKey(undefined, "   ", "from-dotenv")).toEqual({
       value: "from-dotenv",
       source: ".env",
     });
-    expect(resolveTypesafeApiKey(undefined, undefined, undefined)).toEqual({
+    expect(resolveOpenRouterApiKey(undefined, undefined, undefined)).toEqual({
       value: undefined,
       source: "missing",
     });
@@ -204,7 +204,7 @@ describe("session cooldowns", () => {
     expect(cooldownReason({ ...hinted, completed: 5 }, 60000, 0)).toBeUndefined();
     const failed = backoff(initialState(false, 0), 1000);
     expect(failed.retryAfter).toBe(11000);
-    expect(cooldownReason(failed, 60000, 10999)).toBe("TypeSafe backoff");
+    expect(cooldownReason(failed, 60000, 10999)).toBe("OpenRouter backoff");
     let many = initialState(false, 0);
     for (let i = 0; i < 10; i++) many = backoff(many, 0);
     expect(many.failures).toBe(6);
@@ -270,8 +270,8 @@ describe("judge input", () => {
     expect(view.autoCoverage).toBe(false);
   });
 
-  test("a settings.json read keeps non-secret options and drops the saved TypeSafe key", () => {
-    const secret = "tsk-saved-key-must-not-leave";
+  test("a settings.json read keeps non-secret options and drops the saved OpenRouter key", () => {
+    const secret = "sk-or-v1-saved-key-must-not-leave";
     const view = snapshot(
       [
         ...longConversation(),
@@ -302,7 +302,7 @@ describe("judge input", () => {
                       mode: "hint",
                       minContextTokens: 40000,
                       logRequests: true,
-                      typesafeApiKey: secret,
+                      openrouterApiKey: secret,
                     },
                   },
                 },
@@ -412,9 +412,9 @@ describe("jev client", () => {
   });
   const never = () => new Promise<never>(() => undefined);
 
-  test("posts jev-latest with the bearer key in a header and the phase question", async () => {
+  test("posts typesafe/jev-1.13 with the bearer key in a header and the phase question", async () => {
     const calls: { url: string; init: { headers: Record<string, string>; body: string } }[] = [];
-    const result = await judge({ recent: [] }, "tsk-secret", {
+    const result = await judge({ recent: [] }, "sk-or-v1-secret", {
       fetch: async (url, init) => {
         calls.push({ url, init });
         return { status: 200, ok: true, text: JSON.stringify(jevAnswer()) };
@@ -423,11 +423,11 @@ describe("jev client", () => {
     });
     expect(calls).toHaveLength(1);
     expect(calls[0]?.url).toBe(ENDPOINT);
-    expect(calls[0]?.init.headers.Authorization).toBe("Bearer tsk-secret");
+    expect(calls[0]?.init.headers.Authorization).toBe("Bearer sk-or-v1-secret");
     const body = JSON.parse(calls[0]?.init.body ?? "{}");
-    expect(body.model).toBe("jev-latest");
+    expect(body.model).toBe("typesafe/jev-1.13");
     expect(Object.keys(body.questions)).toEqual(["done", "shape"]);
-    expect(calls[0]?.init.body.includes("tsk-secret")).toBe(false);
+    expect(calls[0]?.init.body.includes("sk-or-v1-secret")).toBe(false);
     expect(result.done.choice).toBe("finished");
     expect(result.shape.choice).toBe("hands_on");
   });
@@ -444,6 +444,7 @@ describe("jev client", () => {
     const status = (code: number) => async () => ({ status: code, ok: false, text: "" });
     expect(await kind({ fetch: status(401), sleep: never })).toBe("authentication");
     expect(await kind({ fetch: status(403), sleep: never })).toBe("authentication");
+    expect(await kind({ fetch: status(402), sleep: never })).toBe("credits");
     expect(await kind({ fetch: status(429), sleep: never })).toBe("rate-limit");
     expect(await kind({ fetch: status(529), sleep: never })).toBe("server");
     expect(await kind({ fetch: async () => Promise.reject(new Error("down")), sleep: never })).toBe(
@@ -514,22 +515,23 @@ describe("jev client", () => {
   test("judgment-failure notices explain the skip and which kinds can be temporary", () => {
     for (const kind of ["timeout", "network", "rate-limit", "server", "response"] as const) {
       const message = judgeErrorMessage(kind);
-      expect(message).toContain("asked TypeSafe (Jev)");
+      expect(message).toContain("asked Jev via OpenRouter");
       expect(message).toContain("left unchanged on purpose");
       expect(message).toContain("compact or hint cannot come from a bad answer");
       expect(message).toContain("can be temporary");
       expect(message).toContain("try again later");
       expect(message).toContain("unless it keeps repeating");
     }
-    for (const kind of ["authentication", "input"] as const) {
+    for (const kind of ["authentication", "credits", "input"] as const) {
       const message = judgeErrorMessage(kind);
-      expect(message).toContain("asked TypeSafe (Jev)");
+      expect(message).toContain("asked Jev via OpenRouter");
       expect(message).toContain("left unchanged on purpose");
       expect(message.includes("can be temporary")).toBe(false);
       expect(message.includes("try again later")).toBe(false);
       expect(message).toContain("not a temporary glitch");
     }
-    expect(judgeErrorMessage("authentication")).toContain("TypeSafe key configuration");
+    expect(judgeErrorMessage("authentication")).toContain("OpenRouter key configuration");
+    expect(judgeErrorMessage("credits")).toContain("OpenRouter account is out of credits");
     expect(judgeErrorMessage("input")).toContain("size limit");
     expect(JUDGE_UNAVAILABLE_MESSAGE).toContain("can be temporary");
     expect(JUDGE_DISABLED_NETWORK_MESSAGE).toContain("nonessential network traffic disabled");
@@ -566,8 +568,8 @@ describe("jev client", () => {
     expect(qualifies(j({ completed: 0.2, handsOn: 1 }), 1)).toBe(false);
   });
 
-  test("TypeSafe log lines record the gate decision without secrets", () => {
-    const secret = "tsk-fixture-must-not-leave";
+  test("OpenRouter log lines record the gate decision without secrets", () => {
+    const secret = "sk-or-v1-fixture-must-not-leave";
     const body = requestBody({ note: "ok" });
     const judgment = parseJudgment(jevAnswer({ completed: 0.93, handsOn: 0.97 }));
     const at = "2026-09-18T00:00:00.000Z";
@@ -577,7 +579,7 @@ describe("jev client", () => {
     const failure = JSON.parse(errorLogLine("timeout", body, at));
     expect(request.kind).toBe("request");
     expect(request.id).toBe(requestLogId(body));
-    expect(request.body.model).toBe("jev-latest");
+    expect(request.body.model).toBe("typesafe/jev-1.13");
     expect(response.kind).toBe("response");
     expect(response.id).toBe(request.id);
     expect(response.answers.done.choice).toBe("finished");
@@ -611,7 +613,7 @@ describe("jev client", () => {
     }
   });
 
-  test("TypeSafe request logs are per session and stay under ~/.claude", () => {
+  test("OpenRouter request logs are per session and stay under ~/.claude", () => {
     expect(requestLogName("session-1")).toBe("compact-adviser-requests-session-1.jsonl");
     expect(requestLogPath("/home/fixture", "session-1")).toBe(
       "/home/fixture/.claude/compact-adviser-requests-session-1.jsonl",

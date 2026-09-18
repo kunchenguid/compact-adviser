@@ -2,13 +2,13 @@
 //
 // Each test mocks the world beneath the plugin noun by noun: the environment, the
 // plugin store and clock (the kit's own mocks), the `/config` rows the manifest declares,
-// the session's usage and transcript, TypeSafe behind `$.http.fetch`, and a journal of
+// the session's usage and transcript, OpenRouter behind `$.http.fetch`, and a journal of
 // every visible call the mod makes (status, toasts, logs, dialogs, suggestions).
 import type { On, SessionMessage } from "claude-code";
 import { type MockClock, mock } from "claude-code/testing";
 
 export const PLUGIN = "compact-adviser";
-export const KEY = "tsk-fixture-key-1234567890";
+export const KEY = "sk-or-v1-fixture-key-1234567890";
 export const SESSION = "session-1";
 export const START = 1_000_000;
 
@@ -66,7 +66,7 @@ export type World = {
   answers: (string | undefined)[];
   usage: { tokens?: number; window: number; autoCompactThreshold?: number };
   messages: SessionMessage[];
-  /** What TypeSafe answers; the default is a confident checkpoint. */
+  /** What Jev answers; the default is a confident checkpoint. */
   respond: (body: string) => Promise<{ status: number; text: string } | { deny: string }>;
   /** What the engine's compaction answers for this mod's own request. */
   compact: () => Promise<
@@ -124,7 +124,7 @@ export function world(on: On, options: WorldOptions = {}): World {
     // Claude Code rejects host filesystem paths under macOS automounts such as /home.
     HOME: "/tmp/fixture-home",
     ...(functionHooks === undefined ? {} : { CLAUDE_CODE_ENABLE_FUNCTION_HOOKS: functionHooks }),
-    ...(key === undefined ? {} : { TYPESAFE_API_KEY: key }),
+    ...(key === undefined ? {} : { OPENROUTER_API_KEY: key }),
     ...(options.endpoint === undefined ? {} : { COMPACT_ADVISER_TEST_ENDPOINT: options.endpoint }),
   });
   const consent = "consent" in options ? options.consent : "absent";
@@ -168,7 +168,7 @@ export function world(on: On, options: WorldOptions = {}): World {
     [`${PLUGIN}.mode`, options.mode ?? "hint"],
     [`${PLUGIN}.minContextTokens`, options.minimum ?? 40000],
     [`${PLUGIN}.logRequests`, options.logRequests ?? false],
-    [`${PLUGIN}.typesafeApiKey`, options.savedKey ?? ""],
+    [`${PLUGIN}.openrouterApiKey`, options.savedKey ?? ""],
   ]);
   let configDenial: string | undefined;
   const w: World = {

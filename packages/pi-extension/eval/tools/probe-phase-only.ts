@@ -6,7 +6,7 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { ENDPOINT, QUESTIONS } from "../../src/judge.ts";
-import { typesafeKeyFromEnv } from "../key.ts";
+import { openrouterKeyFromEnv } from "../key.ts";
 
 const dir = process.argv[2];
 const which = (process.argv[3] ?? "done") as keyof typeof QUESTIONS;
@@ -14,7 +14,7 @@ if (!dir || !(which in QUESTIONS)) {
   console.error("usage: node --import tsx eval/tools/probe-phase-only.ts <dir> [done|shape]");
   process.exit(1);
 }
-const key = typesafeKeyFromEnv();
+const key = openrouterKeyFromEnv();
 const rows = readFileSync(join(dir, "checkpoints.jsonl"), "utf8")
   .split("\n")
   .filter(Boolean)
@@ -22,7 +22,7 @@ const rows = readFileSync(join(dir, "checkpoints.jsonl"), "utf8")
 const out: unknown[] = [];
 let maxBody = 0;
 for (const r of rows) {
-  const body = JSON.stringify({ model: "jev-latest", state: r.state, questions: { [which]: QUESTIONS[which] } });
+  const body = JSON.stringify({ model: "typesafe/jev-1.13", state: r.state, questions: { [which]: QUESTIONS[which] } });
   maxBody = Math.max(maxBody, Buffer.byteLength(body));
   try {
     const res = await fetch(ENDPOINT, {

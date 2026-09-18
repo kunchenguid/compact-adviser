@@ -7,7 +7,7 @@ export default function fixture(pi: ExtensionAPI) {
   const coordinating = process.env.COMPACT_TEST_COORDINATING === "1";
   const inputTokens = Number(process.env.COMPACT_TEST_INPUT_TOKENS ?? 45000);
   globalThis.fetch=async(input,init)=>{
-    if(String(input)!=="https://api.typesafe.ai/v1/systemone")throw new Error("Unexpected network request in isolated smoke test");
+    if(String(input)!=="https://openrouter.ai/api/alpha/decisions")throw new Error("Unexpected network request in isolated smoke test");
     log({event:"jev",body:JSON.parse(String(init?.body))});
     if(process.env.COMPACT_TEST_JEV_FAILURE==="1")return new Response("",{status:500});
     return new Response(JSON.stringify({model:"jev-fixture",usage:{input_tokens:2000,output_tokens:60},answers:{

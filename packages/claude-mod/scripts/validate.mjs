@@ -6,11 +6,11 @@ import { claudeVersion, PACKAGE, run } from "./common.mjs";
 const version = claudeVersion();
 const { status, output } = run(["plugin", "validate", "--strict", PACKAGE]);
 const expected = [
-  "hooks: session.start, turn.start, turn.complete, session.compact, command.run{command=compact-adviser}, config.describe{key=compact-adviser.typesafeApiKey}, ui.close{id=compact-adviser}, ui.render{component=Pane}",
-  "env reads: CLAUDE_CODE_ENABLE_FUNCTION_HOOKS, COMPACT_ADVISER_TEST_ENDPOINT, HOME, TYPESAFE_API_KEY",
+  "hooks: session.start, turn.start, turn.complete, session.compact, command.run{command=compact-adviser}, config.describe{key=compact-adviser.openrouterApiKey}, ui.close{id=compact-adviser}, ui.render{component=Pane}",
+  "env reads: CLAUDE_CODE_ENABLE_FUNCTION_HOOKS, COMPACT_ADVISER_TEST_ENDPOINT, HOME, OPENROUTER_API_KEY",
   "env writes: nothing",
-  "$.fs.read (via appendTypeSafeLog, resolvedKey)",
-  "$.fs.write (via appendTypeSafeLog)",
+  "$.fs.read (via appendLogLine, resolvedKey)",
+  "$.fs.write (via appendLogLine)",
   "Validation passed",
 ];
 const forbidden = ["process.run", "env.set", "prompt.submit", "prompt.fill", "tool.call", "model."];

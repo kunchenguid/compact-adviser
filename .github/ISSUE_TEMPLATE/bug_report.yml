@@ -24,7 +24,7 @@ body:
       description: Include the install path, the prompt or turn that should have triggered advice, and any relevant steps.
       placeholder: |
         1. Install with `pi install npm:compact-adviser` (or the Claude marketplace path).
-        2. Set TYPESAFE_API_KEY and start the host.
+        2. Set OPENROUTER_API_KEY and start the host.
         3. Run `/compact-adviser status`.
         4. Continue until context is above 40,000 tokens and the session is idle.
     validations:
@@ -73,7 +73,7 @@ body:
     attributes:
       label: Redacted request log (optional)
       description: |
-        If **Log TypeSafe requests** is on, paste a redacted excerpt from the log.
+        If **Log OpenRouter requests** is on, paste a redacted excerpt from the log.
         Pi writes `~/.pi/agent/compact-adviser-requests.jsonl`.
         Claude Code writes `~/.claude/compact-adviser-requests-<session-id>.jsonl` (one file per session).
         The log is the redacted request body plus sanitized Jev outcome fields and never includes the API key; still strip anything you do not want in a public issue.

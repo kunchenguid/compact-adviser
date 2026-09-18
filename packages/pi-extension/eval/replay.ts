@@ -123,7 +123,7 @@ export function replayAt(s: LoadedSession, entry: SessionEntry, ordinal: number)
   };
 }
 
-/** The production size/dedup gates that must pass before a TypeSafe request is made. */
+/** The production size/dedup gates that must pass before an OpenRouter request is made. */
 export const MIN_CONTEXT_TOKENS = 40000;
 export function passesSizeGates(c: Checkpoint): boolean {
   return c.contextTokens >= MIN_CONTEXT_TOKENS && c.conversationTokens > 20000;

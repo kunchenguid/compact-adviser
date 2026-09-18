@@ -5,7 +5,7 @@ import test from "node:test";
 import { lockSync } from "proper-lockfile";
 import { ConfigStore, DEFAULT_CONFIG, parseMinimum, parseSavedApiKey } from "../src/config.ts";
 import { RECENT_TAIL_MESSAGES, snapshot } from "../src/context.ts";
-import { parseDotenvKey, resolveTypesafeApiKey } from "../src/env.ts";
+import { parseDotenvKey, resolveOpenRouterApiKey } from "../src/env.ts";
 import {
   ENDPOINT,
   FLOOR_MAX,
@@ -81,11 +81,11 @@ test("config defaults, atomic persistence, field merging, contention and invalid
   });
   a.update({ mode: "hint" });
   assert.equal("sharingConsent" in JSON.parse(readFileSync(a.path, "utf8")), false);
-  a.update({ typesafeApiKey: "tsk-store-fixture" });
-  assert.equal(a.read().typesafeApiKey, "tsk-store-fixture");
+  a.update({ openrouterApiKey: "sk-or-v1-store-fixture" });
+  assert.equal(a.read().openrouterApiKey, "sk-or-v1-store-fixture");
   assert.equal(statSync(a.path).mode & 0o777, 0o600);
-  a.update({ typesafeApiKey: "" });
-  assert.equal("typesafeApiKey" in JSON.parse(readFileSync(a.path, "utf8")), false);
+  a.update({ openrouterApiKey: "" });
+  assert.equal("openrouterApiKey" in JSON.parse(readFileSync(a.path, "utf8")), false);
 });
 
 test("minimum parsing rejects ambiguous, nonpositive or unsafe values", () => {
@@ -95,10 +95,10 @@ test("minimum parsing rejects ambiguous, nonpositive or unsafe values", () => {
 });
 
 test("saved API key parsing trims, rejects empty, overlong, and control characters", () => {
-  assert.equal(parseSavedApiKey("  tsk-ok  "), "tsk-ok");
+  assert.equal(parseSavedApiKey("  sk-or-v1-ok  "), "sk-or-v1-ok");
   assert.throws(() => parseSavedApiKey("   "));
   assert.throws(() => parseSavedApiKey("x".repeat(1025)));
-  assert.throws(() => parseSavedApiKey("tsk\nok"));
+  assert.throws(() => parseSavedApiKey("sk-or-v1\nok"));
 });
 
 test("bounded snapshot excludes system prompt, thinking, images and known secrets", (t) => {
@@ -115,7 +115,7 @@ test("bounded snapshot excludes system prompt, thinking, images and known secret
     ...assistant("Saved"),
     content: [
       { type: "thinking", thinking: "INTERNALSECRET" },
-      { type: "text", text: "Saved. Bearer fixtureSecretToken" },
+      { type: "text", text: "Saved. Bearer fixtureSecretToken sk-or-v1-abcdef0123456789abcdef" },
     ],
   });
   const result = snapshot(h.ctx),
@@ -124,6 +124,7 @@ test("bounded snapshot excludes system prompt, thinking, images and known secret
   assert.ok(!body.includes("SYSTEM_SECRET_NOT_EXPORTED"));
   assert.ok(!body.includes("secretvalue123"));
   assert.ok(!body.includes("fixtureSecretToken"));
+  assert.ok(!body.includes("sk-or-v1-abcdef0123456789abcdef"));
   assert.ok(!body.includes("IMAGESECRET"));
   assert.ok(!body.includes("INTERNALSECRET"));
   assert.equal(result.state.coverage.hasImages, true);
@@ -132,7 +133,7 @@ test("bounded snapshot excludes system prompt, thinking, images and known secret
 
 test("a compact-adviser.json read keeps mode diagnostics and drops the saved key from the body", (t) => {
   const h = harness(t);
-  const secret = "tsk-saved-key-must-not-leave";
+  const secret = "sk-or-v1-saved-key-must-not-leave";
   const artifact = `notes-${secret}.md`;
   writeFileSync(join(h.dir, artifact), "ok");
   h.sm.appendMessage({
@@ -167,7 +168,7 @@ test("a compact-adviser.json read keeps mode diagnostics and drops the saved key
         mode: "hint",
         minContextTokens: 40000,
         logRequests: true,
-        typesafeApiKey: secret,
+        openrouterApiKey: secret,
       })}\n`,
       "read",
       "read-settings",
@@ -286,10 +287,11 @@ test("HTTP contract, output bound, status classification, and cancellation", asy
   assert.equal(headers.Authorization, "Bearer fake-test-key");
   assert.ok(!String(seen?.body).includes("fake-test-key"));
   const body = JSON.parse(String(seen?.body));
-  assert.equal(body.model, "jev-latest");
+  assert.equal(body.model, "typesafe/jev-1.13");
   assert.deepEqual(Object.keys(body.questions), ["done", "shape"]);
   for (const [status, kind] of [
     [401, "authentication"],
+    [402, "credits"],
     [429, "rate-limit"],
     [529, "server"],
   ] as const) {
@@ -335,94 +337,95 @@ test("HTTP contract, output bound, status classification, and cancellation", asy
 test("judgment-failure notices explain the skip and which kinds can be temporary", () => {
   for (const kind of ["timeout", "network", "rate-limit", "server", "response"] as const) {
     const message = judgeErrorMessage(kind);
-    assert.match(message, /asked TypeSafe \(Jev\)/);
+    assert.match(message, /asked Jev via OpenRouter/);
     assert.match(message, /left unchanged on purpose/);
     assert.match(message, /compact or hint cannot come from a bad answer/);
     assert.match(message, /can be temporary/);
     assert.match(message, /try again later/);
     assert.match(message, /unless it keeps repeating/);
   }
-  for (const kind of ["authentication", "input"] as const) {
+  for (const kind of ["authentication", "credits", "input"] as const) {
     const message = judgeErrorMessage(kind);
-    assert.match(message, /asked TypeSafe \(Jev\)/);
+    assert.match(message, /asked Jev via OpenRouter/);
     assert.match(message, /left unchanged on purpose/);
     assert.doesNotMatch(message, /can be temporary/);
     assert.doesNotMatch(message, /try again later/);
     assert.match(message, /not a temporary glitch/);
   }
-  assert.match(judgeErrorMessage("authentication"), /TypeSafe key configuration/);
+  assert.match(judgeErrorMessage("authentication"), /OpenRouter key configuration/);
+  assert.match(judgeErrorMessage("credits"), /OpenRouter account is out of credits/);
   assert.match(judgeErrorMessage("input"), /size limit/);
   assert.match(JUDGE_UNAVAILABLE_MESSAGE, /can be temporary/);
 });
 
-test("cwd .env supplies TYPESAFE_API_KEY when process env is empty and is ignored when env is set", (t) => {
+test("cwd .env supplies OPENROUTER_API_KEY when process env is empty and is ignored when env is set", (t) => {
   const dir = temp(t);
   writeFileSync(
     join(dir, ".env"),
-    "# TYPESAFE_API_KEY=commented\n\nOTHER=nope\nTYPESAFE_API_KEY=from-dotenv\nTYPESAFE_API_KEY=from-dotenv-last\n",
+    "# OPENROUTER_API_KEY=commented\n\nOTHER=nope\nOPENROUTER_API_KEY=from-dotenv\nOPENROUTER_API_KEY=from-dotenv-last\n",
   );
-  assert.deepEqual(resolveTypesafeApiKey({ TYPESAFE_API_KEY: "" }, dir), {
+  assert.deepEqual(resolveOpenRouterApiKey({ OPENROUTER_API_KEY: "" }, dir), {
     value: "from-dotenv-last",
     source: ".env",
   });
-  assert.deepEqual(resolveTypesafeApiKey({}, dir), { value: "from-dotenv-last", source: ".env" });
-  assert.deepEqual(resolveTypesafeApiKey({ TYPESAFE_API_KEY: "from-env" }, dir), {
+  assert.deepEqual(resolveOpenRouterApiKey({}, dir), { value: "from-dotenv-last", source: ".env" });
+  assert.deepEqual(resolveOpenRouterApiKey({ OPENROUTER_API_KEY: "from-env" }, dir), {
     value: "from-env",
     source: "env",
   });
-  assert.deepEqual(resolveTypesafeApiKey({ TYPESAFE_API_KEY: "   " }, dir), {
+  assert.deepEqual(resolveOpenRouterApiKey({ OPENROUTER_API_KEY: "   " }, dir), {
     value: "from-dotenv-last",
     source: ".env",
   });
-  assert.deepEqual(resolveTypesafeApiKey({}, temp(t)), { value: undefined, source: "missing" });
-  assert.equal(parseDotenvKey("TYPESAFE_API_KEY=only\n", "TYPESAFE_API_KEY"), "only");
+  assert.deepEqual(resolveOpenRouterApiKey({}, temp(t)), { value: undefined, source: "missing" });
+  assert.equal(parseDotenvKey("OPENROUTER_API_KEY=only\n", "OPENROUTER_API_KEY"), "only");
 });
 
 test("cwd .env accepts export, declare -x, and one matching quote layer", (t) => {
   const dir = temp(t);
-  writeFileSync(join(dir, ".env"), 'declare -x TYPESAFE_API_KEY="from-declare"\n');
-  assert.deepEqual(resolveTypesafeApiKey({}, dir), { value: "from-declare", source: ".env" });
-  writeFileSync(join(dir, ".env"), "export TYPESAFE_API_KEY='from-export'\n");
-  assert.deepEqual(resolveTypesafeApiKey({}, dir), { value: "from-export", source: ".env" });
-  writeFileSync(join(dir, ".env"), "export TYPESAFE_API_KEY=from-export-plain\n");
-  assert.deepEqual(resolveTypesafeApiKey({ TYPESAFE_API_KEY: "from-env" }, dir), {
+  writeFileSync(join(dir, ".env"), 'declare -x OPENROUTER_API_KEY="from-declare"\n');
+  assert.deepEqual(resolveOpenRouterApiKey({}, dir), { value: "from-declare", source: ".env" });
+  writeFileSync(join(dir, ".env"), "export OPENROUTER_API_KEY='from-export'\n");
+  assert.deepEqual(resolveOpenRouterApiKey({}, dir), { value: "from-export", source: ".env" });
+  writeFileSync(join(dir, ".env"), "export OPENROUTER_API_KEY=from-export-plain\n");
+  assert.deepEqual(resolveOpenRouterApiKey({ OPENROUTER_API_KEY: "from-env" }, dir), {
     value: "from-env",
     source: "env",
   });
   assert.equal(
-    parseDotenvKey('TYPESAFE_API_KEY="from-double"\n', "TYPESAFE_API_KEY"),
+    parseDotenvKey('OPENROUTER_API_KEY="from-double"\n', "OPENROUTER_API_KEY"),
     "from-double",
   );
   assert.equal(
-    parseDotenvKey("TYPESAFE_API_KEY='from-single'\n", "TYPESAFE_API_KEY"),
+    parseDotenvKey("OPENROUTER_API_KEY='from-single'\n", "OPENROUTER_API_KEY"),
     "from-single",
   );
   assert.equal(
-    parseDotenvKey('export TYPESAFE_API_KEY="from-export-quoted"\n', "TYPESAFE_API_KEY"),
+    parseDotenvKey('export OPENROUTER_API_KEY="from-export-quoted"\n', "OPENROUTER_API_KEY"),
     "from-export-quoted",
   );
 });
 
 test("a saved menu key sits between process env and cwd .env", (t) => {
   const dir = temp(t);
-  writeFileSync(join(dir, ".env"), "TYPESAFE_API_KEY=from-dotenv\n");
-  assert.deepEqual(resolveTypesafeApiKey({}, dir, "from-saved"), {
+  writeFileSync(join(dir, ".env"), "OPENROUTER_API_KEY=from-dotenv\n");
+  assert.deepEqual(resolveOpenRouterApiKey({}, dir, "from-saved"), {
     value: "from-saved",
     source: "saved",
   });
-  assert.deepEqual(resolveTypesafeApiKey({ TYPESAFE_API_KEY: "from-env" }, dir, "from-saved"), {
+  assert.deepEqual(resolveOpenRouterApiKey({ OPENROUTER_API_KEY: "from-env" }, dir, "from-saved"), {
     value: "from-env",
     source: "env",
   });
-  assert.deepEqual(resolveTypesafeApiKey({ TYPESAFE_API_KEY: "   " }, dir, "from-saved"), {
+  assert.deepEqual(resolveOpenRouterApiKey({ OPENROUTER_API_KEY: "   " }, dir, "from-saved"), {
     value: "from-saved",
     source: "saved",
   });
-  assert.deepEqual(resolveTypesafeApiKey({}, dir, "   "), {
+  assert.deepEqual(resolveOpenRouterApiKey({}, dir, "   "), {
     value: "from-dotenv",
     source: ".env",
   });
-  assert.deepEqual(resolveTypesafeApiKey({}, temp(t), undefined), {
+  assert.deepEqual(resolveOpenRouterApiKey({}, temp(t), undefined), {
     value: undefined,
     source: "missing",
   });
@@ -450,8 +453,8 @@ test("the request deadline aborts work instead of delaying the next turn", async
   assert.equal(aborted, true);
 });
 
-test("TypeSafe log lines record the gate decision without secrets", () => {
-  const secret = "tsk-fixture-must-not-leave";
+test("OpenRouter log lines record the gate decision without secrets", () => {
+  const secret = "sk-or-v1-fixture-must-not-leave";
   const body = requestBody({ note: "ok" });
   const judgment = parseJudgment(apiResponse(0.93, 0.97));
   const at = "2026-09-18T00:00:00.000Z";
@@ -462,7 +465,7 @@ test("TypeSafe log lines record the gate decision without secrets", () => {
   assert.equal(request.kind, "request");
   assert.equal(request.id, requestLogId(body));
   assert.equal(request.at, at);
-  assert.equal(request.body.model, "jev-latest");
+  assert.equal(request.body.model, "typesafe/jev-1.13");
   assert.equal(response.kind, "response");
   assert.equal(response.id, request.id);
   assert.equal(response.answers.done.choice, "finished");
@@ -496,7 +499,7 @@ test("TypeSafe log lines record the gate decision without secrets", () => {
   }
 });
 
-test("TypeSafe log append keeps prior lines", (t) => {
+test("OpenRouter log append keeps prior lines", (t) => {
   const dir = temp(t);
   const prior = requestBody({ note: "prior-session" });
   const body = requestBody({ note: "ok" });

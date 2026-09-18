@@ -141,24 +141,24 @@ test("persistent settings menu prefills, validates, saves, cancels and resets on
   assert.ok(!h.notifications.at(-1)?.includes("Sharing:"));
 });
 
-test("settings menu saves and clears a TypeSafe key without printing it", async (t) => {
-  const previous = process.env.TYPESAFE_API_KEY;
+test("settings menu saves and clears an OpenRouter key without printing it", async (t) => {
+  const previous = process.env.OPENROUTER_API_KEY;
   t.after(() => {
-    if (previous === undefined) delete process.env.TYPESAFE_API_KEY;
-    else process.env.TYPESAFE_API_KEY = previous;
+    if (previous === undefined) delete process.env.OPENROUTER_API_KEY;
+    else process.env.OPENROUTER_API_KEY = previous;
   });
-  delete process.env.TYPESAFE_API_KEY;
+  delete process.env.OPENROUTER_API_KEY;
   const h = harness(t);
   h.install("0.82.0", false);
-  const secret = "tsk-menu-fixture-not-for-display";
-  h.selects.push("TypeSafe API key: not saved", "Set key", "Close");
+  const secret = "sk-or-v1-menu-fixture-not-for-display";
+  h.selects.push("OpenRouter API key: not saved", "Set key", "Close");
   h.inputs.push(secret);
   await h.command("");
-  assert.equal(h.store.read().typesafeApiKey, secret);
+  assert.equal(h.store.read().openrouterApiKey, secret);
   assert.equal(statSync(h.store.path).mode & 0o777, 0o600);
   assert.ok(
     h.notifications.includes(
-      "TypeSafe API key saved (all sessions). Status shows the source, never the value.",
+      "OpenRouter API key saved (all sessions). Status shows the source, never the value.",
     ),
   );
   assert.ok(h.notifications.every((n) => !n.includes(secret)));
@@ -170,9 +170,9 @@ test("settings menu saves and clears a TypeSafe key without printing it", async 
   await h.command("status");
   assert.ok(h.notifications.at(-1)?.includes("Key: saved"));
   assert.ok(!h.notifications.at(-1)?.includes(secret));
-  h.selects.push("TypeSafe API key: saved", "Clear saved key", "Close");
+  h.selects.push("OpenRouter API key: saved", "Clear saved key", "Close");
   await h.command("");
-  assert.equal(h.store.read().typesafeApiKey, undefined);
+  assert.equal(h.store.read().openrouterApiKey, undefined);
   assert.ok(h.notifications.every((n) => !n.includes(secret)));
   await h.command("status");
   assert.ok(h.notifications.at(-1)?.includes("Key: missing"));
@@ -402,7 +402,7 @@ test("draft input and an absent active model suppress judgment", async (t) => {
   assert.equal(h.calls, 0);
 });
 
-test("TypeSafe request logging is off by default and writes a redacted body without the key", async (t) => {
+test("OpenRouter request logging is off by default and writes a redacted body without the key", async (t) => {
   const off = harness(t);
   off.enable();
   await off.fire("agent_settled");
@@ -410,7 +410,7 @@ test("TypeSafe request logging is off by default and writes a redacted body with
   assert.equal(existsSync(requestLogPath(off.dir)), false);
   const on = harness(t);
   on.enable();
-  on.selects.push("Log TypeSafe requests: off", "On", "Close");
+  on.selects.push("Log OpenRouter requests: off", "On", "Close");
   await on.command("");
   assert.equal(on.store.read().logRequests, true);
   assert.ok(on.notifications.at(-1)?.includes(requestLogPath(on.dir)));
@@ -423,7 +423,7 @@ test("TypeSafe request logging is off by default and writes a redacted body with
     .map((line) => JSON.parse(line));
   assert.equal(lines.length, 2);
   assert.equal(lines[0].kind, "request");
-  assert.equal(lines[0].body.model, "jev-latest");
+  assert.equal(lines[0].body.model, "typesafe/jev-1.13");
   assert.equal(lines[1].kind, "response");
   assert.equal(lines[1].id, lines[0].id);
   assert.equal(lines[1].answers.done.choice, "finished");
@@ -458,9 +458,9 @@ test("a silent no-qualify turn still logs the Jev response", async (t) => {
 });
 
 test("a judgment failure logs the error kind without the key", async (t) => {
-  const secret = "tsk-error-must-not-leave";
+  const secret = "sk-or-v1-error-must-not-leave";
   const h = harness(t, async () => {
-    throw new Error(`TypeSafe exploded ${secret}`);
+    throw new Error(`OpenRouter exploded ${secret}`);
   });
   h.install("0.82.0", secret);
   h.enable();
@@ -495,16 +495,16 @@ test("a JudgeError logs its kind and not its message", async (t) => {
 });
 
 test("a saved key in a compact-adviser.json read is absent from the request body and log", async (t) => {
-  const previous = process.env.TYPESAFE_API_KEY;
+  const previous = process.env.OPENROUTER_API_KEY;
   t.after(() => {
-    if (previous === undefined) delete process.env.TYPESAFE_API_KEY;
-    else process.env.TYPESAFE_API_KEY = previous;
+    if (previous === undefined) delete process.env.OPENROUTER_API_KEY;
+    else process.env.OPENROUTER_API_KEY = previous;
   });
-  delete process.env.TYPESAFE_API_KEY;
+  delete process.env.OPENROUTER_API_KEY;
   const h = harness(t);
   h.install("0.82.0", false);
-  const secret = "tsk-saved-key-must-not-leave";
-  h.store.update({ typesafeApiKey: secret, logRequests: true });
+  const secret = "sk-or-v1-saved-key-must-not-leave";
+  h.store.update({ openrouterApiKey: secret, logRequests: true });
   h.enable();
   const artifact = `notes-${secret}.md`;
   writeFileSync(`${h.dir}/${artifact}`, "ok");
@@ -542,5 +542,5 @@ test("a saved key in a compact-adviser.json read is absent from the request body
   assert.ok(!body.includes(secret));
   assert.ok(!logged.includes(secret));
   assert.ok(body.includes("hint"));
-  assert.ok(logged.includes("jev-latest"));
+  assert.ok(logged.includes("typesafe/jev-1.13"));
 });

@@ -2,9 +2,9 @@
 //
 // Claude Code runs with an isolated configuration directory, this package loaded through
 // --plugin-dir, a deterministic local stand-in for the Anthropic Messages API
-// (ANTHROPIC_BASE_URL), and a local TypeSafe fixture reached through the mod's
+// (ANTHROPIC_BASE_URL), and a local OpenRouter fixture reached through the mod's
 // loopback-only COMPACT_ADVISER_TEST_ENDPOINT. No account credential, model quota, or
-// real TypeSafe request is used, and no user configuration is read or written.
+// real OpenRouter request is used, and no user configuration is read or written.
 //
 // It proves:
 //   1. With CLAUDE_CODE_ENABLE_FUNCTION_HOOKS unset the mod is inert: no status strip and no
@@ -38,7 +38,7 @@ import { CLAUDE, claudeEnv, claudeVersion, PACKAGE } from "./common.mjs";
 
 const HINT = "work appears completed or recorded. Run /compact to save tokens.";
 const API_KEY = "sk-ant-fixture-not-a-real-key-0000000000";
-const TYPESAFE_KEY = "tsk-live-fixture-key";
+const OPENROUTER_KEY = "sk-or-v1-live-fixture-key";
 const SOCKET = `compact-adviser-e2e-${process.pid}`;
 const SESSION = "e2e";
 const version = claudeVersion();
@@ -47,7 +47,7 @@ const config = join(lab, "config");
 const project = join(lab, "project");
 mkdirSync(config, { recursive: true });
 mkdirSync(project, { recursive: true });
-writeFileSync(join(project, ".env"), `TYPESAFE_API_KEY=${TYPESAFE_KEY}\n`);
+writeFileSync(join(project, ".env"), `OPENROUTER_API_KEY=${OPENROUTER_KEY}\n`);
 
 // --- Local servers -----------------------------------------------------------------
 const jevRequests = [];
@@ -320,8 +320,8 @@ try {
   await command("/compact-adviser");
   await waitText("Minimum context         40,000 tokens");
   await waitText("Reset minimum to 40,000");
-  await waitText("TypeSafe API key        from .env");
-  if (screen().includes("TypeSafe sharing")) {
+  await waitText("OpenRouter API key      from .env");
+  if (screen().includes("OpenRouter sharing")) {
     throw new Error(`[${step}] sharing toggle still present\n${screen()}`);
   }
   pass(
@@ -368,26 +368,26 @@ try {
   }
 
   step = "request logging";
-  await moveTo("Log TypeSafe requests");
+  await moveTo("Log OpenRouter requests");
   key("Enter");
-  await waitText("› Log TypeSafe requests");
+  await waitText("› Log OpenRouter requests");
   await waitText("● Off (default)");
   await moveTo("On");
   key("Enter");
-  await waitText("TypeSafe request logging on (all sessions)", 20000);
+  await waitText("OpenRouter request logging on (all sessions)", 20000);
   await waitFor(() => pluginOptions().logRequests === true, "the host to enable request logging");
-  await waitText("Log TypeSafe requests   On");
+  await waitText("Log OpenRouter requests On");
   pass("request logging is enabled by arrows and Enter alone through the real settings pane");
 
   step = "escape back";
   // After the save the ring is back on the row that was opened; Escape inside a view returns
   // to the list with the keyboard, and the list then closes on Escape.
-  await moveTo("Log TypeSafe requests");
+  await moveTo("Log OpenRouter requests");
   key("Enter");
   await waitText("● On");
   key("Escape");
   await waitText("↑↓ move · Enter select · Esc close");
-  await moveTo("Log TypeSafe requests", "Up");
+  await moveTo("Log OpenRouter requests", "Up");
   pass("Escape in a view returns to the list, keeping the keyboard and the row");
 
   step = "pane minimum";
@@ -426,14 +426,17 @@ try {
     throw new Error(`[${step}] expected one host-highlighted status line\n${hintShot}`);
   }
   if (jevRequests.length !== 1)
-    throw new Error(`[${step}] expected one TypeSafe request, saw ${jevRequests.length}`);
+    throw new Error(`[${step}] expected one OpenRouter request, saw ${jevRequests.length}`);
   const request = jevRequests[0];
-  if (request.authorization !== `Bearer ${TYPESAFE_KEY}` || request.body.model !== "jev-latest") {
+  if (
+    request.authorization !== `Bearer ${OPENROUTER_KEY}` ||
+    request.body.model !== "typesafe/jev-1.13"
+  ) {
     throw new Error(
-      `[${step}] unexpected TypeSafe request ${JSON.stringify({ ...request, body: request.body.model })}`,
+      `[${step}] unexpected OpenRouter request ${JSON.stringify({ ...request, body: request.body.model })}`,
     );
   }
-  if (JSON.stringify(request.body).includes(TYPESAFE_KEY))
+  if (JSON.stringify(request.body).includes(OPENROUTER_KEY))
     throw new Error(`[${step}] the key leaked into the body`);
   const logDir = join(lab, ".claude");
   const logNames = readdirSync(logDir).filter(
@@ -460,8 +463,8 @@ try {
   ) {
     throw new Error(`[${step}] Jev decision log is incomplete: ${JSON.stringify(loggedResponse)}`);
   }
-  if (readFileSync(requestLog, "utf8").includes(TYPESAFE_KEY))
-    throw new Error(`[${step}] the TypeSafe key leaked into the request log`);
+  if (readFileSync(requestLog, "utf8").includes(OPENROUTER_KEY))
+    throw new Error(`[${step}] the OpenRouter key leaked into the request log`);
   if (process.env.COMPACT_TEST_LOG_EVIDENCE)
     copyFileSync(requestLog, process.env.COMPACT_TEST_LOG_EVIDENCE);
   pass(

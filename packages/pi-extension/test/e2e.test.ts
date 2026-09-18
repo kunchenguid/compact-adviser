@@ -108,7 +108,7 @@ function run(
       PI_CODING_AGENT_DIR: dir,
       PI_OFFLINE: "1",
       PI_TELEMETRY: "0",
-      TYPESAFE_API_KEY: "test-key-not-a-secret",
+      OPENROUTER_API_KEY: "test-key-not-a-secret",
       COMPACT_TEST_LOG: log,
       COMPACT_TEST_INPUT_TOKENS: String(fixture.inputTokens ?? 45000),
       COMPACT_TEST_COORDINATING: fixture.coordinating ? "1" : "0",
@@ -220,7 +220,7 @@ test("signed Pi: snooze still suppresses the next three completed exchanges", (t
   assert.equal(r.events.filter((e) => e.event === "jev").length, 1);
 });
 
-test("signed Pi: minimum tokens and TypeSafe error backoff still suppress judgments", (t) => {
+test("signed Pi: minimum tokens and OpenRouter error backoff still suppress judgments", (t) => {
   const belowMinimum = run(
     t,
     "hint",

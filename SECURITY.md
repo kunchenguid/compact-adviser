@@ -2,12 +2,12 @@
 
 ## Conversation data
 
-The Pi extension and the Claude Code mod send selected conversation text to TypeSafe when the package is installed, a key is available from the launch environment, a menu-saved setting, or `TYPESAFE_API_KEY` in a `.env` file in the working directory, and the other product gates pass (mode, minimum context, idle session).
+The Pi extension and the Claude Code mod send selected conversation text to OpenRouter when the package is installed, a key is available from the launch environment, a menu-saved setting, or `OPENROUTER_API_KEY` in a `.env` file in the working directory, and the other product gates pass (mode, minimum context, idle session).
 Installing the package is that consent; there is no separate sharing toggle.
 A menu-saved key is stored in the same settings file as mode and threshold, with file permissions as restrictive as the host allows.
-It is never shown after save, and never written to logs, status lines, error messages, or TypeSafe request bodies, including when the agent reads the settings file.
+It is never shown after save, and never written to logs, status lines, error messages, or OpenRouter request bodies, including when the agent reads the settings file.
 
-| Sent to `https://api.typesafe.ai/v1/systemone` | Not sent |
+| Sent to `https://openrouter.ai/api/alpha/decisions` | Not sent |
 | --- | --- |
 | Bounded user constraints, up to the last 64 visible replies and tool results (clipped), short tool-result excerpts, an existing summary, saved-artifact names, omission markers | System prompts, hidden reasoning, images, environment variables, the API key, complete transcripts |
 
@@ -30,7 +30,7 @@ Neither loads the other's runtime or reads the other's storage.
 Verified on 2026-09-17 against the actual signed **Pi 0.85.1** runtime and **Claude Code 2.1.275**.
 The Pi extension API floor remains 0.82.0; the Claude Code mods API is early access and default-off.
 The Claude Code module is a complete no-op unless `CLAUDE_CODE_ENABLE_FUNCTION_HOOKS` is exactly `1`.
-Requests from the mod go through Claude Code's host fetch (`$.http.fetch`), which does not expose redirect control to plugins; the fixed endpoint is `https://api.typesafe.ai/v1/systemone`.
+Requests from the mod go through Claude Code's host fetch (`$.http.fetch`), which does not expose redirect control to plugins; the fixed endpoint is `https://openrouter.ai/api/alpha/decisions`.
 The only endpoint override, `COMPACT_ADVISER_TEST_ENDPOINT`, exists for the live regression and is ignored unless it is an `http://127.0.0.1:<port>/` URL.
 The automatic-mode acknowledgement is kept in the plugin's own store, not in `/config`, so experimental auto cannot be granted without the disclosure dialog. A legacy `sharingConsent` field in that store is ignored.
 
@@ -49,6 +49,6 @@ Development dependencies can be revisited when upgrading the supported API basel
 
 ## Tests versus model accuracy
 
-The native integration tests use the real Pi executable or the real Claude Code TUI, isolated configuration directories, and deterministic provider and TypeSafe fixtures.
+The native integration tests use the real Pi executable or the real Claude Code TUI, isolated configuration directories, and deterministic provider and OpenRouter fixtures.
 They prove API/UI integration, cancellation, and local safety conditions without exposing account credentials or conversation data.
 They do not establish live Jev precision or continued task quality after a real generated summary.

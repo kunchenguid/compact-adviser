@@ -1,5 +1,5 @@
 /**
- * The Pi extension and the Claude mod must ask TypeSafe the same question.
+ * The Pi extension and the Claude mod must ask Jev the same question.
  *
  * Judge wording is tuned against the judgment-eval corpus, and a tuning pass
  * that lands in one package but not the other would silently ship two
@@ -111,11 +111,11 @@ test("both packages parse the same wire response into the same judgment", () => 
 });
 
 test("both packages scrub owned settings fields and known key values the same way", () => {
-  const secret = "tsk-saved-key-must-not-leave";
+  const secret = "sk-or-v1-saved-key-must-not-leave";
   const dump = JSON.stringify({
     mode: "hint",
-    typesafeApiKey: secret,
-    "compact-adviser.typesafeApiKey": secret,
+    openrouterApiKey: secret,
+    "compact-adviser.openrouterApiKey": secret,
   });
   assert.deepEqual(claudeSnapshot.redact(dump), piContext.redact(dump));
   assert.deepEqual(claudeSnapshot.redactOwnedSettings(dump), piContext.redactOwnedSettings(dump));
@@ -127,7 +127,7 @@ test("both packages scrub owned settings fields and known key values the same wa
   assert.ok(claudeSnapshot.redact(dump).text.includes("hint"));
 });
 
-test("both packages write the same TypeSafe log line shape", () => {
+test("both packages write the same OpenRouter log line shape", () => {
   const body = pi.requestBody(state);
   const judgment = pi.parseJudgment({
     model: "jev-1.13.0",
@@ -210,12 +210,12 @@ test("both packages apply the same cooldownReason gates", () => {
       reason: "Snoozed",
     },
     {
-      name: "typesafe backoff",
+      name: "openrouter backoff",
       tokens: 60000,
       now: 10999,
       compacted: false,
       patch: { retryAfter: 11000 },
-      reason: "TypeSafe backoff",
+      reason: "OpenRouter backoff",
     },
     {
       name: "post-compaction no baseline",

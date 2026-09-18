@@ -1,5 +1,5 @@
 /**
- * Score the checkpoint dataset against live TypeSafe Jev using the shipped
+ * Score the checkpoint dataset against live Jev (on OpenRouter) using the shipped
  * judge(), score() and qualifies(). Writes one result row per checkpoint with
  * both answers and the composed score; `hint` / `auto` are the gate at a
  * reference context usage (default 0.5, floor 0.70), and metrics.py can
@@ -11,7 +11,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { floorFor, judge, type Judgment, qualifies, score } from "../src/judge.ts";
 import { continuationOf } from "./continuation.ts";
-import { typesafeKeyFromEnv } from "./key.ts";
+import { openrouterKeyFromEnv } from "./key.ts";
 
 const dir = process.argv[2];
 const repeats = Number(process.argv[3] ?? 1);
@@ -21,7 +21,7 @@ if (!dir) {
   process.exit(1);
 }
 console.error(`gate: score >= ${floorFor(usage)} (context usage ${usage})`);
-const key = typesafeKeyFromEnv();
+const key = openrouterKeyFromEnv();
 
 const rows = readFileSync(join(dir, "checkpoints.jsonl"), "utf8")
   .split("\n")

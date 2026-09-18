@@ -8,7 +8,7 @@
  */
 import { readFileSync, writeFileSync } from "node:fs";
 import { ENDPOINT } from "../../src/judge.ts";
-import { typesafeKeyFromEnv } from "../key.ts";
+import { openrouterKeyFromEnv } from "../key.ts";
 
 const [dir, qpath, out, gate = "phase"] = process.argv.slice(2);
 if (!dir || !qpath || !out) {
@@ -17,7 +17,7 @@ if (!dir || !qpath || !out) {
   );
   process.exit(1);
 }
-const key = typesafeKeyFromEnv();
+const key = openrouterKeyFromEnv();
 const questions = JSON.parse(readFileSync(qpath, "utf8"));
 const rows = readFileSync(`${dir}/checkpoints.jsonl`, "utf8")
   .split("\n")
@@ -25,7 +25,7 @@ const rows = readFileSync(`${dir}/checkpoints.jsonl`, "utf8")
   .map((l) => JSON.parse(l));
 const res: unknown[] = [];
 for (const r of rows) {
-  const body = JSON.stringify({ model: "jev-latest", state: r.state, questions });
+  const body = JSON.stringify({ model: "typesafe/jev-1.13", state: r.state, questions });
   try {
     const rsp = await fetch(ENDPOINT, {
       method: "POST",
