@@ -328,19 +328,33 @@ try {
     "the settings pane opens as one list, naming the .env key in effect, without a sharing toggle",
   );
 
-  // A key sent while the surface is still settling the pane's focus can be dropped, so
-  // move with one arrow at a time until the wanted row is highlighted.
+  // The pane can be drawn before the host gives it keyboard focus. Wait for its ring, then
+  // count only arrows that observably move it; keys sent while focus is settling can be dropped.
   const ESC = String.fromCharCode(27);
   const inverse = new RegExp(`${ESC}\\[7m([^${ESC}\\n]*)${ESC}\\[(?:0|27|39)m`);
   const highlighted = () => inverse.exec(screenRaw())?.[1]?.trim() ?? "";
   async function moveTo(rowText, direction = "Down") {
-    for (let i = 0; i <= 8; i++) {
-      if (highlighted().startsWith(rowText)) return;
-      if (i < 8) {
-        key(direction);
-        await sleep(400);
+    const deadline = Date.now() + 15000;
+    let moves = 0;
+    while (Date.now() < deadline && moves < 8) {
+      const before = highlighted();
+      if (before.startsWith(rowText)) return;
+      if (!before) {
+        await sleep(100);
+        continue;
       }
+      key(direction);
+      const moved = await waitFor(
+        () => highlighted() !== before,
+        `the selection to move ${direction.toLowerCase()} from ${JSON.stringify(before)}`,
+        1500,
+      ).then(
+        () => true,
+        () => false,
+      );
+      if (moved) moves++;
     }
+    if (highlighted().startsWith(rowText)) return;
     throw new Error(`[${step}] never highlighted ${JSON.stringify(rowText)}\n${screen()}`);
   }
 
