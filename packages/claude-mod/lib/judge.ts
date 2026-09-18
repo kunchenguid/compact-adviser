@@ -1,7 +1,8 @@
-// The TypeSafe Jev judgment: the Pi extension's question set, response validation, and
-// thresholds, sent through Claude Code's host fetch (`$.http.fetch`), which is injected.
+// The Jev judgment for Claude Code. Same question set, response validation, and thresholds
+// as the Pi extension, sent to OpenRouter through the injected host fetch (`$.http.fetch`).
+// Jev is TypeSafe's model; the endpoint, key, and account are OpenRouter's.
 
-export const ENDPOINT = "https://api.typesafe.ai/v1/systemone";
+export const ENDPOINT = "https://openrouter.ai/api/alpha/decisions";
 export const MAX_REQUEST_BYTES = 32000;
 export const MAX_RESPONSE_BYTES = 32768;
 export const TIMEOUT_MS = 2000;
@@ -64,6 +65,7 @@ export type JudgeErrorKind =
   | "timeout"
   | "network"
   | "authentication"
+  | "credits"
   | "rate-limit"
   | "server"
   | "response"
@@ -79,20 +81,24 @@ const TRANSIENT_JUDGE_KINDS: ReadonlySet<JudgeErrorKind> = new Set([
 
 const JUDGE_KIND_CAUSE: Record<JudgeErrorKind, string> = {
   timeout: "the request timed out",
-  network: "the request could not reach TypeSafe",
-  authentication: "TypeSafe rejected the API key",
-  "rate-limit": "TypeSafe rate-limited the request",
-  server: "TypeSafe returned a server error",
-  response: "TypeSafe's reply was not a usable judgment",
+  network: "the request could not reach OpenRouter",
+  authentication: "OpenRouter rejected the API key",
+  credits: "the OpenRouter account is out of credits",
+  "rate-limit": "OpenRouter rate-limited the request",
+  server: "OpenRouter returned a server error",
+  response: "OpenRouter's reply was not a usable judgment",
   input: "this checkpoint is too large to send",
 };
 
 export function judgeErrorMessage(kind: JudgeErrorKind): string {
   const core =
-    `The compact adviser asked TypeSafe (Jev) but did not get a usable judgment (${JUDGE_KIND_CAUSE[kind]}). ` +
+    `The compact adviser asked Jev via OpenRouter but did not get a usable judgment (${JUDGE_KIND_CAUSE[kind]}). ` +
     "Context was left unchanged on purpose so a compact or hint cannot come from a bad answer.";
   if (kind === "authentication") {
-    return `${core} Check the TypeSafe key configuration; this is not a temporary glitch.`;
+    return `${core} Check the OpenRouter key configuration; this is not a temporary glitch.`;
+  }
+  if (kind === "credits") {
+    return `${core} Add credits to the OpenRouter account; this is not a temporary glitch.`;
   }
   if (kind === "input") {
     return `${core} This is a size limit, not a temporary glitch.`;
@@ -104,14 +110,14 @@ export function judgeErrorMessage(kind: JudgeErrorKind): string {
 }
 
 export const JUDGE_UNAVAILABLE_MESSAGE =
-  "The compact adviser asked TypeSafe (Jev) but did not get a usable judgment. " +
+  "The compact adviser asked Jev via OpenRouter but did not get a usable judgment. " +
   "Context was left unchanged on purpose so a compact or hint cannot come from a bad answer. " +
   "This can be temporary; the adviser will try again later. No action needed unless it keeps repeating.";
 
 export const JUDGE_DISABLED_NETWORK_MESSAGE =
-  "The compact adviser could not ask TypeSafe (Jev): Claude Code has nonessential network traffic disabled. " +
+  "The compact adviser could not ask Jev via OpenRouter because Claude Code has nonessential network traffic disabled. " +
   "Context was left unchanged on purpose so a compact or hint cannot run without a judgment. " +
-  "Enable nonessential network traffic if TypeSafe should run; this is a configuration setting, not a temporary glitch.";
+  "Enable nonessential network traffic if the adviser should run; this is a configuration setting, not a temporary glitch.";
 
 export class JudgeError extends Error {
   constructor(
@@ -233,7 +239,7 @@ export function byteLength(text: string): number {
 }
 
 export function requestBody(state: unknown): string {
-  const body = JSON.stringify({ model: "jev-latest", state, questions: QUESTIONS });
+  const body = JSON.stringify({ model: "typesafe/jev-1.13", state, questions: QUESTIONS });
   if (byteLength(body) > MAX_REQUEST_BYTES) throw new JudgeError("input");
   return body;
 }
@@ -270,9 +276,11 @@ export async function judge(state: unknown, key: string, transport: Transport): 
     throw new JudgeError(
       response.status === 401 || response.status === 403
         ? "authentication"
-        : response.status === 429
-          ? "rate-limit"
-          : "server",
+        : response.status === 402
+          ? "credits"
+          : response.status === 429
+            ? "rate-limit"
+            : "server",
     );
   }
   if (typeof response.text !== "string" || byteLength(response.text) > MAX_RESPONSE_BYTES) {
