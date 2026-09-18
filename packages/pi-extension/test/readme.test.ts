@@ -35,9 +35,9 @@ test("committed and packed READMEs equal the transformed root README, with no br
   const packedReadme = readFileSync(join(destination, "package", "README.md"), "utf8");
   assert.equal(packedReadme, expected);
 
-  // Every relative Markdown/HTML reference the root README makes (a sibling package
-  // README, SECURITY.md, the eval guide, the usage-floor image) must have become an
-  // absolute GitHub URL; none of these root-relative paths exist under this package.
+  // Every relative Markdown/HTML reference the root README makes (including package
+  // docs, security guidance, and images) must become an absolute GitHub URL; none of
+  // these root-relative paths exist under this package.
   for (const brokenRef of ["](packages/", "](SECURITY.md)", "](docs/", 'href="LICENSE"'] as const) {
     assert.ok(
       !packedReadme.includes(brokenRef),
