@@ -61,35 +61,37 @@ The key is never written to logs, status lines, or messages.
 
 ## Persistent settings
 
-`/compact-adviser` opens a settings pane with the Pi extension's rows:
+`/compact-adviser` opens a settings pane: one list of rows, as the Pi extension's menu, each showing the value in effect:
 
 ```text
-Mode: Hints only (default)
-Log TypeSafe requests: Off (default)
-Minimum context tokens: 40000
-  A token count, not a percentage; no judgment below it.
-TypeSafe API key: not saved
-TypeSafe API key: [paste key to save]
-[ Reset minimum to 40,000 ]
-[ Status ]
-[ Close ]
+Compact adviser  saved for all sessions
+
+Mode                    Hints only (default)
+Minimum context         40,000 tokens
+Log TypeSafe requests   Off
+TypeSafe API key        from .env
+Reset minimum to 40,000
+Status
+Close
+↑↓ move · Enter select · Esc close
 ```
 
-Tab moves between rows; Enter opens the mode picker, saves the minimum, or presses a button; Escape closes the pane without saving an unsubmitted edit.
+The arrow keys (or Tab) move between rows and Enter opens the highlighted row's own view; Escape closes the pane.
+In a view, Enter picks the highlighted option or saves the field, and Escape or Back returns to the list without saving an unsubmitted edit.
 
-**Mode** offers Hints only, Automatic (experimental), and Off.
+**Mode** offers Hints only, Automatic (experimental), and Off, the current one marked.
 The first Automatic selection requires confirmation about lossy compaction and its across-project scope.
 Selecting Automatic does not compact immediately.
 
-**Minimum context tokens** is prefilled with the saved number, initially `40000`.
+**Minimum context** opens a field prefilled with the saved number, initially `40000`.
 Edit it and press Enter to validate and save.
 Blank, zero, negative, fractional, exponential, suffixed (`40k`), nonnumeric, and unsafe-integer inputs are rejected with a message beneath the field, and the typed text stays for correction.
 A value at or above the current model's window is saved with a warning; it is never clamped.
 Reset changes only the minimum, not the mode, request logging, the saved TypeSafe key, or session cooldowns.
 
-**TypeSafe API key** shows whether a key is saved, never the value.
-Paste a key into the field and press Enter to save it; Clear saved key removes it.
-A non-empty launch-environment `TYPESAFE_API_KEY` still wins over the saved key; a cwd `.env` is used only when both are empty.
+**TypeSafe API key** shows which key is in effect and where it comes from, never the value: `from the environment` (a non-empty launch-environment `TYPESAFE_API_KEY`), `saved` (a key entered here), `from .env` (a `TYPESAFE_API_KEY` assignment in the working directory's `.env`), or `missing`.
+Its view spells the same out, including a saved key that the launch environment overrides.
+Paste a key into the field and press Enter to save it; Clear saved key removes only the key saved here, so a launch-environment or `.env` key still applies and the list says so.
 
 `mode`, `minContextTokens`, `logRequests`, and `typesafeApiKey` are this plugin's declared `userConfig` options.
 Claude Code validates them and stores them in your user `settings.json` under `pluginConfigs["compact-adviser@…"].options`.
@@ -187,7 +189,7 @@ Pricing and limits can change.
 | Pi extension | Claude Code mod | Why |
 | --- | --- | --- |
 | `compact-adviser.json` in Pi's agent directory holds mode, minimum, request logging, a saved TypeSafe key, and the auto acknowledgement | `mode`, `minContextTokens`, and `logRequests` are host-stored `userConfig` options (also in `/config`); `typesafeApiKey` is the same settings path but hidden from `/config`; the auto acknowledgement is in the plugin store | Claude Code gives plugins a declared, validated configuration surface; `/config` must not display the API key, and a `/config` toggle must not bypass the auto confirmation |
-| Menu from Pi's select and input dialogs | One settings pane with a picker, a prefilled field, and buttons; confirmations in Claude Code's own question dialog | Same rows and flow on Claude Code's elements |
+| Menu from Pi's select and input dialogs | One settings pane: the same list of rows, each opening its own options or field in the pane; confirmations in Claude Code's own question dialog | Same rows and flow on Claude Code's elements, which draw a pane rather than a dialog |
 | Judges at `agent_settled` | Judges at `turn.complete` for the main loop | Claude Code's turn end is already the settled point |
 | Yellow sticky widget above the editor | Yellow status line until the next turn | One hint surface per host |
 | Cooldowns in Pi session entries | Cooldowns in the plugin store by session id | Plugins cannot write session entries |
@@ -209,7 +211,7 @@ npm run test:e2e
 `check` regenerates the plugin API declarations from the installed Claude Code (`/plugin-types`, in a throwaway configuration), type-checks, runs Biome, runs `claude plugin validate --strict` and asserts the hooks and environment reads it reports, then runs the behavioral suites under `claude plugin test` (the lib suite covers settings, cooldowns, the bounded judge input, and the Jev client; the adviser suite drives the hooks module through the engine's own host with mocked usage, transcript, store, clock, and TypeSafe).
 
 `test:e2e` requires `tmux` and drives the **real Claude Code TUI** with an isolated configuration directory, `--plugin-dir`, a local deterministic stand-in for the Anthropic Messages API, and a local TypeSafe fixture reached through the loopback-only `COMPACT_ADVISER_TEST_ENDPOINT` override (any non-`127.0.0.1` value is ignored).
-It checks the inert flag-off path, the settings pane (refused `40k`, saved `60000` in the host's options, Escape), a judged hint and its clearing without ambient chrome, and automatic mode chosen in the pane compacting exactly once through Claude Code's own compaction.
+It checks the inert flag-off path, the settings pane driven by the arrows and Enter alone (a row's view, refused `40k`, saved `60000` in the host's options, Escape back to the list and then closing), a judged hint and its clearing without ambient chrome, and automatic mode chosen in the pane compacting exactly once through Claude Code's own compaction.
 Set `COMPACT_TEST_CLAUDE_BIN` to test a different Claude Code binary.
 It spends no model quota and reads no account credential.
 

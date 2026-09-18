@@ -11,6 +11,7 @@ import {
 import { RECENT_TAIL_MESSAGES } from "../lib/snapshot.ts";
 import {
   answered,
+  autoFocused,
   commandRun,
   elements,
   interactiveStart,
@@ -19,6 +20,7 @@ import {
   longConversation,
   PLUGIN,
   pane,
+  rows,
   SESSION,
   START,
   text,
@@ -169,7 +171,7 @@ describe("turn-end gates", () => {
           {
             tool_use_id: "settings",
             tool: "Read",
-            input: { file_path: "/home/fixture/.claude/settings.json" },
+            input: { file_path: "/tmp/fixture-home/.claude/settings.json" },
             text: JSON.stringify({
               pluginConfigs: {
                 "compact-adviser@0.1.0": {
@@ -757,9 +759,9 @@ describe("commands", () => {
     await $.session.start(interactiveStart);
     await $.command.run(commandRun("status"));
     const line = w.journal.logs.at(-1) ?? "";
-    expect(line.includes("/home/fixture/.claude/compact-adviser-requests-session-1.jsonl")).toBe(
-      true,
-    );
+    expect(
+      line.includes("/tmp/fixture-home/.claude/compact-adviser-requests-session-1.jsonl"),
+    ).toBe(true);
     expect(line.includes(KEY)).toBe(false);
   });
 
@@ -792,74 +794,163 @@ describe("commands", () => {
 });
 
 describe("settings pane", () => {
-  test("opens focused and draws the Pi menu rows with the saved values prefilled", async ($, on) => {
+  test("opens focused and lists the Pi menu rows, arrow-keyed, with the values in effect", async ($, on) => {
     const w = world(on);
     await $.session.start(interactiveStart);
     await $.command.run(commandRun(""));
     expect(w.journal.opened).toEqual([{ id: PLUGIN, focus: true }]);
     const tree = await $.ui.render(pane);
+    expect(rows(tree)).toEqual([
+      "Mode Hints only (default)",
+      "Minimum context 40,000 tokens",
+      "Log TypeSafe requests Off",
+      "TypeSafe API key from the environment",
+      "Reset minimum to 40,000",
+      "Status",
+      "Close",
+    ]);
+    // Plain buttons only: the arrows move between rows, no picker or field takes them.
     const drawn = elements(tree);
-    const select = drawn.find((e) => e.type === "Select" && e.props.label === "Mode");
-    expect(select?.props.value).toBe("hint");
-    expect(JSON.stringify(select?.props.options)).toBe(
-      JSON.stringify([
-        { value: "hint", label: "Hints only (default)" },
-        { value: "auto", label: "Automatic (experimental)" },
-        { value: "off", label: "Off" },
-      ]),
+    expect(drawn.some((e) => e.type === "Select" || e.type === "Input")).toBe(false);
+    expect(drawn.filter((e) => e.type === "Button").every((e) => e.props.plain === true)).toBe(
+      true,
     );
-    const logging = drawn.find(
-      (e) => e.type === "Select" && e.props.label === "Log TypeSafe requests",
-    );
-    expect(logging?.props.value).toBe("off");
-    const input = drawn.find(
-      (e) => e.type === "Input" && e.props.label === "Minimum context tokens",
-    );
-    expect(input?.props.value).toBe("40000");
-    expect(input?.props.label).toBe("Minimum context tokens");
-    const keyField = drawn.find((e) => e.type === "Input" && e.props.key === "typesafeApiKey");
-    expect(keyField?.props.value).toBe("");
-    expect(keyField?.props.submitLabel).toBe("set");
-    const buttons = drawn.filter((e) => e.type === "Button").map((e) => e.props.label);
-    expect(buttons).toEqual(["Reset minimum to 40,000", "Status", "Close"]);
-    expect(text(tree)).toContain("TypeSafe API key: not saved");
-    expect(text(tree)).toContain("A token count, not a percentage; no judgment below it.");
+    expect(autoFocused(tree)).toBe("menu:mode");
+    expect(text(tree)).toContain("Compact adviser");
+    expect(text(tree)).toContain("saved for all sessions");
+    expect(text(tree)).toContain("↑↓ move · Enter select · Esc close");
+    expect(text(tree)).not.toContain(KEY);
   });
 
-  // The kit drives presses only; choosing a mode and submitting the minimum field are
-  // exercised against the real Claude Code TUI by scripts/live-e2e.mjs.
+  // Escape inside a view (the engine's own close, origin person, which the mod refuses and
+  // turns into Back) and where the focus ring lands are outside the kit's reach: the kit
+  // drives presses only, and its `ui.focus` chain skips a test's hooks. The `autoFocus`
+  // element is asserted here; scripts/live-e2e.mjs presses the real keys.
+  test("a row opens its own view; an option or Back returns to the list", async ($, on) => {
+    const w = world(on);
+    await $.session.start(interactiveStart);
+    await $.command.run(commandRun(""));
+    await $.ui.render(pane);
+    await $.ui.press({ plugin: PLUGIN, key: "menu:logRequests" });
+    await drain(w);
+    let tree = await $.ui.render(pane);
+    expect(text(tree)).toContain("› Log TypeSafe requests");
+    expect(rows(tree)).toEqual(["● Off (default)", "On", "Back"]);
+    expect(autoFocused(tree)).toBe("logging:off");
+    await $.ui.press({ plugin: PLUGIN, key: "logging:on" });
+    await drain(w);
+    expect(w.rows.get(`${PLUGIN}.logRequests`)).toBe(true);
+    expect(w.journal.toasts.at(-1)).toContain("TypeSafe request logging on (all sessions).");
+    tree = await $.ui.render(pane);
+    expect(rows(tree)[2]).toBe("Log TypeSafe requests On");
+    // The ring goes back to the row that was opened, so the arrows continue from there.
+    expect(autoFocused(tree)).toBe("menu:logRequests");
+
+    await $.ui.press({ plugin: PLUGIN, key: "menu:mode" });
+    tree = await $.ui.render(pane);
+    expect(rows(tree)).toEqual([
+      "● Hints only (default)",
+      "Automatic (experimental)",
+      "Off",
+      "Back",
+    ]);
+    // Picking the current option changes nothing and returns.
+    await $.ui.press({ plugin: PLUGIN, key: "mode:hint" });
+    await drain(w);
+    expect(w.journal.configSets).toEqual([{ key: `${PLUGIN}.logRequests`, value: true }]);
+    expect(rows(await $.ui.render(pane))[0]).toBe("Mode Hints only (default)");
+    await $.ui.press({ plugin: PLUGIN, key: "menu:mode" });
+    await $.ui.render(pane);
+    await $.ui.press({ plugin: PLUGIN, key: "back" });
+    expect(rows(await $.ui.render(pane))).toHaveLength(7);
+
+    await $.ui.press({ plugin: PLUGIN, key: "menu:minimum" });
+    tree = await $.ui.render(pane);
+    expect(text(tree)).toContain("› Minimum context");
+    const field = elements(tree).find((e) => e.type === "Input");
+    expect(field?.props.key).toBe("minimum");
+    expect(field?.props.value).toBe("40000");
+    expect(field?.props.submitLabel).toBe("save");
+    expect(field?.props.autoFocus).toBe(true);
+    expect(text(tree)).toContain("A token count, not a percentage; no judgment below it.");
+    expect(rows(tree)).toEqual(["Back"]);
+    await $.ui.press({ plugin: PLUGIN, key: "back" });
+    await drain(w);
+    tree = await $.ui.render(pane);
+    expect(rows(tree)).toHaveLength(7);
+    expect(autoFocused(tree)).toBe("menu:minimum");
+    expect(w.journal.closed).toEqual([]);
+  });
+
+  test("choosing Automatic asks first; either answer returns to the list", async ($, on) => {
+    const w = world(on);
+    await $.session.start(interactiveStart);
+    await $.command.run(commandRun(""));
+    await $.ui.render(pane);
+    await $.ui.press({ plugin: PLUGIN, key: "menu:mode" });
+    await $.ui.render(pane);
+    w.answers = [undefined];
+    await $.ui.press({ plugin: PLUGIN, key: "mode:auto" });
+    await drain(w);
+    expect(w.journal.asks).toHaveLength(1);
+    expect(w.rows.get(`${PLUGIN}.mode`)).toBe("hint");
+    // The dialog took the keyboard; the pane asked for it back.
+    expect(w.journal.opened).toHaveLength(2);
+    expect(rows(await $.ui.render(pane))[0]).toBe("Mode Hints only (default)");
+    await $.ui.press({ plugin: PLUGIN, key: "menu:mode" });
+    await $.ui.render(pane);
+    w.answers = ["Enable automatic mode"];
+    await $.ui.press({ plugin: PLUGIN, key: "mode:auto" });
+    await drain(w);
+    expect(w.rows.get(`${PLUGIN}.mode`)).toBe("auto");
+    expect(w.journal.toasts.at(-1)).toBe(
+      "Automatic mode saved (all sessions). A TypeSafe key is still required.",
+    );
+    expect(rows(await $.ui.render(pane))[0]).toBe("Mode Automatic (experimental)");
+  });
+
   test("reset, status, and close act through the same paths as the commands", async ($, on) => {
     const w = world(on, { minimum: 75000, mode: "off" });
     await $.session.start(interactiveStart);
     await $.ui.render(pane);
-    await $.ui.press({ plugin: PLUGIN, key: "reset" });
+    await $.ui.press({ plugin: PLUGIN, key: "menu:reset" });
     await drain(w);
     expect(w.rows.get(`${PLUGIN}.minContextTokens`)).toBe(40000);
     expect(w.rows.get(`${PLUGIN}.mode`)).toBe("off");
     expect(w.journal.toasts.at(-1)).toBe("Minimum context saved: 40,000 tokens (all sessions).");
     await $.ui.render(pane);
-    await $.ui.press({ plugin: PLUGIN, key: "status" });
+    await $.ui.press({ plugin: PLUGIN, key: "menu:status" });
     await drain(w);
     expect(text(await $.ui.render(pane))).toContain(
       "Mode: off. Minimum: 40,000 tokens. Context: 60,000 (30% of the window; hint floor 0.80). Key: env.",
     );
     expect(text(await $.ui.render(pane))).not.toContain("Sharing:");
-    await $.ui.press({ plugin: PLUGIN, key: "close" });
+    await $.ui.press({ plugin: PLUGIN, key: "menu:close" });
     expect(w.journal.closed).toEqual([PLUGIN]);
   });
 
-  test("the pane and status never print a saved TypeSafe key, and clear removes it", async ($, on) => {
+  test("the key row names the key in effect and its source, never the value", async ($, on) => {
     const secret = "tsk-menu-fixture-not-for-display";
-    const w = world(on, { key: undefined, savedKey: secret });
+    const w = world(on, {
+      key: undefined,
+      savedKey: secret,
+      dotenv: "TYPESAFE_API_KEY=tsk-dotenv-fixture-not-for-display\n",
+    });
     await $.session.start(interactiveStart);
-    const tree = await $.ui.render(pane);
-    expect(w.rows.get(`${PLUGIN}.typesafeApiKey`)).toBe(secret);
-    expect(text(tree)).toContain("TypeSafe API key: saved");
+    let tree = await $.ui.render(pane);
+    expect(rows(tree)[3]).toBe("TypeSafe API key saved");
     expect(text(tree)).not.toContain(secret);
-    expect(
-      elements(tree).find((e) => e.type === "Input" && e.props.key === "typesafeApiKey")?.props
-        .value,
-    ).toBe("");
+    await $.ui.press({ plugin: PLUGIN, key: "menu:typesafeApiKey" });
+    tree = await $.ui.render(pane);
+    expect(text(tree)).toContain("› TypeSafe API key");
+    expect(text(tree)).toContain("In effect: the key saved here, for all sessions.");
+    const field = elements(tree).find((e) => e.type === "Input");
+    expect(field?.props.key).toBe("typesafeApiKey");
+    expect(field?.props.value).toBe("");
+    expect(field?.props.placeholder).toBe("paste a key to replace the saved one");
+    expect(field?.props.autoFocus).toBe(true);
+    expect(rows(tree)).toEqual(["Clear saved key", "Back"]);
+    expect(text(tree)).not.toContain(secret);
     await $.command.run(commandRun("status"));
     expect(w.journal.logs.at(-1)).toContain("Key: saved");
     expect(w.journal.logs.at(-1)?.includes(secret)).toBe(false);
@@ -870,13 +961,54 @@ describe("settings pane", () => {
       "Saved TypeSafe API key cleared (all sessions). Launch environment and .env still apply.",
     );
     expect(w.journal.toasts.every((line) => !line.includes(secret))).toBe(true);
-    const cleared = await $.ui.render(pane);
-    expect(text(cleared)).toContain("TypeSafe API key: not saved");
-    expect(text(cleared)).not.toContain("Clear saved key");
-    expect(text(cleared)).not.toContain(secret);
+    // Clearing removes only the saved key: the .env one now applies, and the list says so.
+    tree = await $.ui.render(pane);
+    expect(rows(tree)[3]).toBe("TypeSafe API key from .env");
+    expect(text(tree)).not.toContain(secret);
+    expect(text(tree)).not.toContain("tsk-dotenv");
+    await $.ui.press({ plugin: PLUGIN, key: "menu:typesafeApiKey" });
+    tree = await $.ui.render(pane);
+    expect(text(tree)).toContain(
+      "In effect: TYPESAFE_API_KEY from the .env file in the working directory.",
+    );
+    expect(elements(tree).find((e) => e.type === "Input")?.props.placeholder).toBe(
+      "paste a key to save it",
+    );
+    expect(rows(tree)).toEqual(["Back"]);
     await $.command.run(commandRun("status"));
-    expect(w.journal.logs.at(-1)).toContain("Key: missing");
-    expect(w.journal.logs.at(-1)?.includes(secret)).toBe(false);
+    expect(w.journal.logs.at(-1)).toContain("Key: .env");
+  });
+
+  test("an environment key wins over a saved one, and the pane says so", async ($, on) => {
+    const secret = "tsk-menu-fixture-not-for-display";
+    const w = world(on, { savedKey: secret });
+    await $.session.start(interactiveStart);
+    let tree = await $.ui.render(pane);
+    expect(rows(tree)[3]).toBe("TypeSafe API key from the environment");
+    await $.ui.press({ plugin: PLUGIN, key: "menu:typesafeApiKey" });
+    tree = await $.ui.render(pane);
+    expect(text(tree)).toContain(
+      "In effect: TYPESAFE_API_KEY from the launch environment, which wins over the key saved here.",
+    );
+    expect(rows(tree)).toEqual(["Clear saved key", "Back"]);
+    expect(text(tree)).not.toContain(secret);
+    expect(text(tree)).not.toContain(KEY);
+    await $.ui.press({ plugin: PLUGIN, key: "clearKey" });
+    await drain(w);
+    expect(w.rows.get(`${PLUGIN}.typesafeApiKey`)).toBe("");
+    expect(rows(await $.ui.render(pane))[3]).toBe("TypeSafe API key from the environment");
+  });
+
+  test("without any key the list says so and the view explains where one can come from", async ($, on) => {
+    world(on, { key: undefined });
+    await $.session.start(interactiveStart);
+    expect(rows(await $.ui.render(pane))[3]).toBe("TypeSafe API key missing");
+    await $.ui.press({ plugin: PLUGIN, key: "menu:typesafeApiKey" });
+    const tree = await $.ui.render(pane);
+    expect(text(tree)).toContain(
+      "No key in effect. Save one here, or set TYPESAFE_API_KEY in the environment or a .env file.",
+    );
+    expect(rows(tree)).toEqual(["Back"]);
   });
 
   test("another plugin's pane is left to it", async ($, on) => {

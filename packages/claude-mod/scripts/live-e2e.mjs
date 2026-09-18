@@ -9,8 +9,10 @@
 // It proves:
 //   1. With CLAUDE_CODE_ENABLE_FUNCTION_HOOKS unset the mod is inert: no status strip and no
 //      /compact-adviser command.
-//   2. With the flag on: the settings pane (an invalid minimum is refused and kept for editing,
-//      a valid one is saved to the host's plugin options), and Escape closing the pane.
+//   2. With the flag on: the settings pane, driven by the arrows and Enter alone (a row opens
+//      its view; an invalid minimum is refused and kept for editing, a valid one is saved to
+//      the host's plugin options; Escape in a view returns to the list and, at the list, closes
+//      the pane).
 //   3. Two materially different settled exchanges are judged back-to-back and each shows
 //      a hint, proving there is no notification cooldown between new checkpoints.
 //   4. Automatic mode chosen in the pane asks for confirmation, then compacts at the next
@@ -188,6 +190,14 @@ const screen = () => {
     return "";
   }
 };
+// With the escape sequences, to read which row is highlighted (inverse video).
+const screenRaw = () => {
+  try {
+    return tmux("capture-pane", "-p", "-e", "-t", SESSION);
+  } catch {
+    return "";
+  }
+};
 const type = (text) => tmux("send-keys", "-t", SESSION, "-l", text);
 const key = (...keys) => tmux("send-keys", "-t", SESSION, ...keys);
 let step = "setup";
@@ -308,40 +318,61 @@ try {
     throw new Error(`[${step}] ambient status strip shown at idle\n${screen()}`);
   }
   await command("/compact-adviser");
-  await waitText("Minimum context tokens: 40000");
+  await waitText("Minimum context         40,000 tokens");
   await waitText("Reset minimum to 40,000");
+  await waitText("TypeSafe API key        from the environment");
   if (screen().includes("TypeSafe sharing")) {
     throw new Error(`[${step}] sharing toggle still present\n${screen()}`);
   }
-  pass("the settings pane opens without a sharing toggle or idle status strip");
+  pass("the settings pane opens as one list, naming the key in effect, without a sharing toggle");
+
+  // A key sent while the surface is still settling the pane's focus can be dropped, so
+  // move with one arrow at a time until the wanted row is highlighted.
+  const ESC = String.fromCharCode(27);
+  const inverse = new RegExp(`${ESC}\\[7m[^\\n]*?${ESC}\\[39m([^${ESC}\\n]*)`);
+  const highlighted = () => inverse.exec(screenRaw())?.[1]?.trim() ?? "";
+  async function moveTo(rowText, direction = "Down") {
+    for (let i = 0; i < 8 && !highlighted().startsWith(rowText); i++) {
+      key(direction);
+      await sleep(400);
+    }
+    if (!highlighted().startsWith(rowText))
+      throw new Error(`[${step}] never highlighted ${JSON.stringify(rowText)}\n${screen()}`);
+  }
 
   step = "request logging";
-  key("Tab");
-  for (let i = 0; i < 6 && !screen().includes("│  On"); i++) {
-    await sleep(1000);
-    key("Enter");
-    await sleep(1000);
-  }
-  await waitText("│  On");
-  key("Down");
+  await moveTo("Log TypeSafe requests");
+  key("Enter");
+  await waitText("› Log TypeSafe requests");
+  await waitText("● Off (default)");
+  await moveTo("On");
   key("Enter");
   await waitText("TypeSafe request logging on (all sessions)", 20000);
   await waitFor(() => pluginOptions().logRequests === true, "the host to enable request logging");
-  pass("request logging is enabled through the real settings pane");
+  await waitText("Log TypeSafe requests   On");
+  pass("request logging is enabled by arrows and Enter alone through the real settings pane");
+
+  step = "escape back";
+  // After the save the ring is back on the row that was opened; Escape inside a view returns
+  // to the list with the keyboard, and the list then closes on Escape.
+  await moveTo("Log TypeSafe requests");
+  key("Enter");
+  await waitText("● On");
+  key("Escape");
+  await waitText("↑↓ move · Enter select · Esc close");
+  await moveTo("Log TypeSafe requests", "Up");
+  pass("Escape in a view returns to the list, keeping the keyboard and the row");
 
   step = "pane minimum";
-  for (let i = 0; i < 6 && !screen().includes("⏎ save"); i++) {
-    await sleep(1000);
-    key("Tab");
-    await sleep(1000);
-  }
+  await moveTo("Minimum context");
+  key("Enter");
   await waitText("⏎ save");
   for (let i = 0; i < 5; i++) key("BSpace");
   type("40k");
   await sleep(300);
   key("Enter");
   await waitText("Enter a positive whole number of tokens, for example 40000.");
-  await waitText("Minimum context tokens: 40k");
+  await waitText("Tokens: 40k");
   if (pluginOptions().minContextTokens !== undefined)
     throw new Error(`[${step}] an invalid minimum was saved`);
   for (let i = 0; i < 3; i++) key("BSpace");
@@ -353,11 +384,11 @@ try {
     () => pluginOptions().minContextTokens === 60000,
     "the host to store the 60000 minimum",
   );
-  await waitText("Minimum context tokens: 60000");
+  await waitText("Minimum context         60,000 tokens");
   pass("the pane refuses 40k, keeps it for editing, then saves 60000 to the host's plugin options");
   key("Escape");
   await waitFor((s) => !s.includes("Reset minimum to 40,000"), "Escape to close the pane");
-  pass("Escape closes the settings pane");
+  pass("Escape at the list closes the settings pane");
 
   // 3. A judged hint.
   step = "hint";
@@ -422,29 +453,22 @@ try {
   // 4. Automatic mode through the pane, then one compaction and its retained wait gate.
   step = "auto";
   await command("/compact-adviser");
-  await waitText("Mode: Hints only (default)");
-  // A key sent while the surface is still settling the pane's focus can be dropped, so
-  // open the picker with one Enter at a time until it shows its options.
-  for (let i = 0; i < 6 && !screen().includes("Automatic (experimental)"); i++) {
-    await sleep(1000);
-    key("Enter");
-    await sleep(1000);
-  }
-  await waitText("Automatic (experimental)");
-  key("Down");
-  await sleep(200);
+  await waitText("Mode                    Hints only (default)");
+  await moveTo("Mode");
+  key("Enter");
+  await waitText("● Hints only (default)");
+  await moveTo("Automatic (experimental)");
   key("Enter");
   await waitText("Compaction is lossy");
   await waitText("Enable automatic mode");
   key("Enter");
   await waitFor(() => pluginOptions().mode === "auto", "the host to store auto mode");
-  // Wait for the option-triggered reload to finish and restore focus to the mode row. From
-  // there, reverse Tab wraps directly to the pane's Close button without racing the redraw.
+  // The option-triggered reload redraws the list with the new value and the ring back on
+  // the Mode row; Escape then closes it.
   await waitText("compact-adviser: options changed", 20000);
-  await waitText("Mode: Automatic (experimental)");
-  key("BTab");
-  await sleep(300);
-  key("Enter");
+  await waitText("Mode                    Automatic (experimental)");
+  await moveTo("Mode");
+  key("Escape");
   await waitFor((s) => !s.includes("Reset minimum to 40,000"), "the pane to close");
   pass("automatic mode chosen in the pane asks first, then persists");
 

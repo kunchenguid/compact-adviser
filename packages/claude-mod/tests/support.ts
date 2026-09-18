@@ -121,7 +121,7 @@ export function world(on: On, options: WorldOptions = {}): World {
   const functionHooks = "functionHooks" in options ? options.functionHooks : "1";
   const key = "key" in options ? options.key : KEY;
   mock.env(on, {
-    HOME: "/home/fixture",
+    HOME: "/tmp/fixture-home",
     ...(functionHooks === undefined ? {} : { CLAUDE_CODE_ENABLE_FUNCTION_HOOKS: functionHooks }),
     ...(key === undefined ? {} : { TYPESAFE_API_KEY: key }),
     ...(options.endpoint === undefined ? {} : { COMPACT_ADVISER_TEST_ENDPOINT: options.endpoint }),
@@ -379,4 +379,16 @@ export function elements(tree: unknown): { type: string; props: Record<string, u
 
 export function text(tree: unknown): string {
   return JSON.stringify(tree);
+}
+
+/** The pane's rows as the person reads them: each Button's label, padding collapsed. */
+export function rows(tree: unknown): string[] {
+  return elements(tree)
+    .filter((e) => e.type === "Button")
+    .map((e) => String(e.props.label).replace(/\s+/g, " ").trim());
+}
+
+/** The key of the element drawn to take the ring first, if any. */
+export function autoFocused(tree: unknown): string | undefined {
+  return elements(tree).find((e) => e.props.autoFocus === true)?.props.key as string | undefined;
 }

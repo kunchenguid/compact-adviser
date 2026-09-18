@@ -16,7 +16,7 @@
 // - `$.session.compact` runs through every hook but the caller's, so this module's own
 //   `session.compact` hook never sees its own automatic compaction; that path resets the
 //   session's counters itself.
-import type { EngineInterface, PluginOptions, Register } from "claude-code";
+import type { EngineInterface, PluginOptions, Register, RenderChildren } from "claude-code";
 import {
   API_KEY_KEY,
   CONSENT_STORE_KEY,
@@ -34,7 +34,12 @@ import {
   readConfig,
   readSavedApiKey,
 } from "../lib/config.ts";
-import { formatKeyStatus, parseDotenvKey, resolveTypesafeApiKey } from "../lib/env.ts";
+import {
+  formatKeyStatus,
+  parseDotenvKey,
+  resolveTypesafeApiKey,
+  type TypesafeKeySource,
+} from "../lib/env.ts";
 import {
   floorFor,
   JUDGE_DISABLED_NETWORK_MESSAGE,
@@ -83,6 +88,16 @@ let judging = false;
 let compacting = false;
 let hintVisible = false;
 let diagnostic = "";
+// The settings pane: one list of rows, as the Pi extension's menu, each opening a view
+// of its own; Enter on an option or a saved value returns to the list. A save hot-reloads
+// the module, so this scratch resets to the list on its own.
+type PaneView = "menu" | "mode" | "minimum" | "logging" | "key";
+let view: PaneView = "menu";
+// The list row the person last opened; the ring returns there.
+let menuRow = "menu:mode";
+// Where the ring should land once the next drawing is up: the engine keeps a moved ring
+// at its position, so a view change places it itself.
+let pendingFocus: string | undefined;
 let minimumDraft: { text: string; error: string } | undefined;
 let keyDraft: { text: string; error: string } | undefined;
 let statusDetails: string | undefined;
@@ -376,7 +391,7 @@ async function saveRow(
   await invalidate($);
   // A saved row hot-reloads this module, which drops this environment's later toasts, so
   // the confirmation is left for the reloaded environment to show at its session.start.
-  await $.store.set(PENDING_NOTICE_KEY, { message, at: await $.clock.now() });
+  await $.store.set(PENDING_NOTICE_KEY, { message, at: await $.clock.now(), row: menuRow });
   const result = await $.config.set({ key, value });
   if (result.deny !== undefined) {
     await $.store.delete(PENDING_NOTICE_KEY);
@@ -391,14 +406,36 @@ async function saveRow(
   return true;
 }
 
-/** Shows and clears a save confirmation, whichever environment gets to it first. */
+/**
+ * Shows and clears a save confirmation, whichever environment gets to it first, and puts
+ * the pane's ring back on the row that saved: the reloaded environment starts with the
+ * list and an unplaced ring.
+ */
 async function showPendingNotice($: EngineInterface): Promise<void> {
-  const pending = (await $.store.get(PENDING_NOTICE_KEY)) as { message?: unknown; at?: unknown };
+  const pending = (await $.store.get(PENDING_NOTICE_KEY)) as {
+    message?: unknown;
+    at?: unknown;
+    row?: unknown;
+  };
   if (pending === undefined) return;
   await $.store.delete(PENDING_NOTICE_KEY);
   const fresh = typeof pending.at === "number" && (await $.clock.now()) - pending.at < 30000;
   if (fresh && typeof pending.message === "string") {
     $.ui.toast(pending.message, { timeoutMs: 6000 });
+  }
+  if (fresh && typeof pending.row === "string" && (await paneOpen($))) {
+    showMenu(pending.row);
+    // A confirmation dialog on the way may have handed the keys to the prompt; ask again.
+    await openPane($).catch(() => undefined);
+    await placeRing($, 40);
+  }
+}
+
+async function paneOpen($: EngineInterface): Promise<boolean> {
+  try {
+    return (await $.ui.panes()).some((pane) => pane.id === PANE_ID);
+  } catch {
+    return false;
   }
 }
 
@@ -414,8 +451,71 @@ function openPane($: EngineInterface): Promise<void> {
     title: "Compact adviser (saved for all sessions)",
     focus: true,
     closeOnEscape: true,
-    rows: 14,
+    rows: 12,
   });
+}
+
+function showMenu(row?: string): void {
+  view = "menu";
+  if (row !== undefined) menuRow = row;
+  pendingFocus = menuRow;
+  minimumDraft = undefined;
+  keyDraft = undefined;
+}
+
+function openView(target: Exclude<PaneView, "menu">, row: string, focus: string): void {
+  view = target;
+  menuRow = row;
+  pendingFocus = focus;
+  minimumDraft = undefined;
+  keyDraft = undefined;
+}
+
+/** Lands the ring where the last view change asked, once that drawing is up. */
+async function placeRing($: EngineInterface, attempts = 10): Promise<void> {
+  const key = pendingFocus;
+  if (key === undefined) return;
+  pendingFocus = undefined;
+  // Every view keys its elements apart, so the call is refused until the new drawing is up.
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    try {
+      const result = await $.ui.focus({ requestId: PANE_ID, key });
+      if (result.deny === undefined) return;
+    } catch {
+      return;
+    }
+    await $.clock.sleep(50);
+  }
+}
+
+const MODE_LABELS: Record<Mode, string> = {
+  hint: "Hints only (default)",
+  auto: "Automatic (experimental)",
+  off: "Off",
+};
+
+/** What the list row says about the key in effect: its source, never its value. */
+const KEY_SOURCE_LABELS: Record<TypesafeKeySource, string> = {
+  env: "from the environment",
+  saved: "saved",
+  ".env": "from .env",
+  missing: "missing",
+};
+
+/** The key view's explanation: which key is in effect, and what the actions here change. */
+function keyDetail(source: TypesafeKeySource, saved: boolean): string {
+  switch (source) {
+    case "env":
+      return saved
+        ? "In effect: TYPESAFE_API_KEY from the launch environment, which wins over the key saved here."
+        : "In effect: TYPESAFE_API_KEY from the launch environment.";
+    case "saved":
+      return "In effect: the key saved here, for all sessions.";
+    case ".env":
+      return "In effect: TYPESAFE_API_KEY from the .env file in the working directory.";
+    default:
+      return "No key in effect. Save one here, or set TYPESAFE_API_KEY in the environment or a .env file.";
+  }
 }
 
 /**
@@ -624,8 +724,7 @@ export const register: Register = (on, options) => {
     const value = rest.join(" ");
     try {
       if (!command) {
-        minimumDraft = undefined;
-        keyDraft = undefined;
+        showMenu("menu:mode");
         statusDetails = undefined;
         await openPane($);
       } else if (["auto", "hint", "off"].includes(command) && !value) {
@@ -653,137 +752,274 @@ export const register: Register = (on, options) => {
     return { ...described, isHidden: true };
   });
 
-  // The settings pane: the Pi extension's menu rows as engine elements.
+  // Escape in a view returns to the list, as Pi's select cancels back to its menu; at
+  // the list it closes the pane as the person asked.
+  on("ui.close", { id: PANE_ID }, async ($, e, next) => {
+    if (!(await isActivated($)) || e.origin.kind !== "person" || view === "menu") return next(e);
+    showMenu();
+    await $.ui.invalidate("ui.render");
+    // Escape hands the keys to the prompt as it asks to close; ask for them back.
+    await openPane($).catch(() => undefined);
+    await placeRing($);
+    return { value: undefined };
+  });
+
+  // The settings pane: the Pi extension's menu as engine elements. One list of rows the
+  // arrows move through (a plain Button each, so no picker swallows the keys); Enter
+  // opens a row's own view, where an option, a field, or Back returns to the list.
   on("ui.render", { component: "Pane" }, async ($, e, next) => {
     if (!(await isActivated($)) || e.requestId !== PANE_ID) return next(e);
     if (e.surface !== "terminal") {
       const { Text } = $.ui.resolve(e);
       return Text({ children: USAGE });
     }
-    const { Box, Text, Select, Input, Button } = $.ui.resolve(e);
-    let config: Config;
-    try {
-      config = await loadConfig($);
-    } catch (error) {
-      return Box({
-        flexDirection: "column",
+    const { Box, Text, Input, Button } = $.ui.resolve(e);
+    const column = (children: RenderChildren[]) => Box({ flexDirection: "column", children });
+    const heading = (crumb?: string) =>
+      Box({
+        flexDirection: "row",
+        marginBottom: 1,
         children: [
-          Text({ color: "error", children: errorMessage(error) }),
-          Button({ key: "close", label: "Close", onPress: () => void $.ui.close({ id: PANE_ID }) }),
+          Text({ bold: true, children: "Compact adviser" }),
+          Text({ dimColor: true, children: crumb ? ` › ${crumb}` : "  saved for all sessions" }),
         ],
       });
-    }
-    const redraw = () => $.ui.invalidate("ui.render");
+    const hint = (leave: string) =>
+      Text({ dimColor: true, children: `↑↓ move · Enter select · Esc ${leave}` });
+    const closePane = () => void $.ui.close({ id: PANE_ID });
+    const redraw = async () => {
+      await $.ui.invalidate("ui.render");
+      await placeRing($);
+    };
     const run = (action: () => Promise<unknown>) => {
       void action()
         .catch((error) => $.ui.toast(errorMessage(error), { timeoutMs: 8000 }))
         .finally(redraw);
     };
-    const savedKey = readSavedApiKey(await $.config.list(), loadedOptions);
-    const children = [
-      Select({
-        key: "mode",
-        label: "Mode",
-        value: config.mode,
-        autoFocus: true,
-        options: [
-          { value: "hint", label: "Hints only (default)" },
-          { value: "auto", label: "Automatic (experimental)" },
-          { value: "off", label: "Off" },
-        ],
-        onSelect: (mode: string) => {
-          if (mode !== config.mode) run(() => changeMode($, mode as Mode, true));
-        },
-      }),
-      Select({
-        key: "logRequests",
-        label: "Log TypeSafe requests",
-        value: config.logRequests ? "on" : "off",
-        options: [
+    const back = () => {
+      showMenu();
+      void redraw();
+    };
+    let config: Config;
+    try {
+      config = await loadConfig($);
+    } catch (error) {
+      return column([
+        heading(),
+        Text({ color: "error", children: errorMessage(error) }),
+        Button({
+          key: "menu:close",
+          label: "Close",
+          plain: true,
+          autoFocus: true,
+          onPress: closePane,
+        }),
+      ]);
+    }
+    const [rows, key] = await Promise.all([$.config.list(), resolvedKey($)]);
+    const savedKey = readSavedApiKey(rows, loadedOptions) !== undefined;
+
+    /** A list of rows the ring moves through; the one at `focus` takes it first. */
+    const list = (
+      entries: { key: string; label: string; onPress: () => void; dim?: boolean }[],
+      focus: string,
+    ) => {
+      const width = Math.max(...entries.map((entry) => entry.label.length));
+      return column(
+        entries.map((entry) =>
+          Button({
+            key: entry.key,
+            label: entry.label.padEnd(width),
+            plain: true,
+            ...(entry.dim ? { dimColor: true } : {}),
+            ...(entry.key === focus ? { autoFocus: true } : {}),
+            onPress: entry.onPress,
+          }),
+        ),
+      );
+    };
+    /** A view of options: the current one marked; picking it, or Back, only returns. */
+    const options = <T extends string>(
+      crumb: string,
+      current: T,
+      choices: { value: T; label: string }[],
+      pick: (value: T) => void,
+    ) =>
+      column([
+        heading(crumb),
+        list(
+          [
+            ...choices.map((choice) => ({
+              key: `${view}:${choice.value}`,
+              label: `${choice.value === current ? "●" : " "} ${choice.label}`,
+              onPress: () => {
+                showMenu();
+                if (choice.value === current) void redraw();
+                else pick(choice.value);
+              },
+            })),
+            { key: "back", label: "  Back", dim: true, onPress: back },
+          ],
+          `${view}:${current}`,
+        ),
+        hint("back"),
+      ]);
+
+    if (view === "mode") {
+      return options(
+        "Mode",
+        config.mode,
+        (["hint", "auto", "off"] as const).map((value) => ({ value, label: MODE_LABELS[value] })),
+        (mode) => run(() => changeMode($, mode, true)),
+      );
+    }
+    if (view === "logging") {
+      return options(
+        "Log TypeSafe requests",
+        config.logRequests ? "on" : "off",
+        [
           { value: "off", label: "Off (default)" },
           { value: "on", label: "On" },
         ],
-        onSelect: (value: string) => {
-          const enabled = value === "on";
-          if (enabled !== config.logRequests) run(() => changeLogRequests($, enabled));
-        },
-      }),
-      Input({
-        key: "minimum",
-        label: "Minimum context tokens",
-        value: minimumDraft?.text ?? String(config.minContextTokens),
-        placeholder: String(DEFAULT_MINIMUM),
-        submitLabel: "save",
-        onSubmit: (text: string) => {
-          run(async () => {
-            try {
-              await changeMinimum($, text);
-              minimumDraft = undefined;
-            } catch (error) {
-              minimumDraft = { text, error: errorMessage(error) };
-            }
-          });
-        },
-      }),
-      minimumDraft
-        ? Text({ color: "error", children: `  ${minimumDraft.error}` })
-        : Text({
-            dimColor: true,
-            children: "  A token count, not a percentage; no judgment below it.",
-          }),
-      Text({
-        dimColor: true,
-        children: `TypeSafe API key: ${savedKey ? "saved" : "not saved"}`,
-      }),
-      Input({
-        key: "typesafeApiKey",
-        label: "TypeSafe API key",
-        value: keyDraft?.text ?? "",
-        placeholder: savedKey ? "saved · type to replace" : "paste key to save",
-        submitLabel: "set",
-        onSubmit: (text: string) => {
-          run(async () => {
-            try {
-              await changeSavedApiKey($, text);
-              keyDraft = undefined;
-            } catch (error) {
-              keyDraft = { text, error: errorMessage(error) };
-            }
-          });
-        },
-      }),
-      ...(keyDraft ? [Text({ color: "error", children: `  ${keyDraft.error}` })] : []),
-      ...(savedKey
-        ? [
-            Button({
-              key: "clearKey",
-              label: "Clear saved key",
-              onPress: () => {
-                keyDraft = undefined;
-                run(() => clearSavedApiKey($));
-              },
+        (value) => run(() => changeLogRequests($, value === "on")),
+      );
+    }
+    if (view === "minimum") {
+      return column([
+        heading("Minimum context"),
+        Input({
+          key: "minimum",
+          label: "Tokens",
+          value: minimumDraft?.text ?? String(config.minContextTokens),
+          placeholder: String(DEFAULT_MINIMUM),
+          submitLabel: "save",
+          autoFocus: true,
+          onSubmit: (text: string) => {
+            run(async () => {
+              try {
+                await changeMinimum($, text);
+                showMenu();
+              } catch (error) {
+                minimumDraft = { text, error: errorMessage(error) };
+              }
+            });
+          },
+        }),
+        minimumDraft
+          ? Text({ color: "error", children: minimumDraft.error })
+          : Text({
+              dimColor: true,
+              children: "A token count, not a percentage; no judgment below it.",
             }),
-          ]
-        : []),
-      Button({
-        key: "reset",
-        label: `Reset minimum to ${formatTokens(DEFAULT_MINIMUM)}`,
-        onPress: () => {
-          minimumDraft = undefined;
-          run(() => changeMinimum($, "default"));
-        },
-      }),
-      Button({
-        key: "status",
-        label: "Status",
-        onPress: () =>
-          run(async () => {
-            statusDetails = await statusText($);
-          }),
-      }),
-      ...(statusDetails ? [Text({ dimColor: true, children: statusDetails })] : []),
-      Button({ key: "close", label: "Close", onPress: () => void $.ui.close({ id: PANE_ID }) }),
-    ];
-    return Box({ flexDirection: "column", children });
+        list([{ key: "back", label: "Back", dim: true, onPress: back }], ""),
+        hint("back"),
+      ]);
+    }
+    if (view === "key") {
+      return column([
+        heading("TypeSafe API key"),
+        Text({ dimColor: true, wrap: "wrap", children: keyDetail(key.source, savedKey) }),
+        Input({
+          key: "typesafeApiKey",
+          label: "Key",
+          value: keyDraft?.text ?? "",
+          placeholder: savedKey ? "paste a key to replace the saved one" : "paste a key to save it",
+          submitLabel: "save",
+          autoFocus: true,
+          onSubmit: (text: string) => {
+            run(async () => {
+              try {
+                await changeSavedApiKey($, text);
+                showMenu();
+              } catch (error) {
+                keyDraft = { text, error: errorMessage(error) };
+              }
+            });
+          },
+        }),
+        ...(keyDraft ? [Text({ color: "error", children: keyDraft.error })] : []),
+        list(
+          [
+            ...(savedKey
+              ? [
+                  {
+                    key: "clearKey",
+                    label: "Clear saved key",
+                    onPress: () => {
+                      showMenu();
+                      run(() => clearSavedApiKey($));
+                    },
+                  },
+                ]
+              : []),
+            { key: "back", label: "Back", dim: true, onPress: back },
+          ],
+          "",
+        ),
+        hint("back"),
+      ]);
+    }
+
+    const modeValue = `${MODE_LABELS[config.mode]}${
+      config.mode === "auto" && !config.autoAcknowledged ? ", not confirmed" : ""
+    }`;
+    const setting = (label: string, value: string) => `${label.padEnd(24)}${value}`;
+    const open = (target: Exclude<PaneView, "menu">, row: string, focus: string) => () => {
+      openView(target, row, focus);
+      void redraw();
+    };
+    return column([
+      heading(),
+      list(
+        [
+          {
+            key: "menu:mode",
+            label: setting("Mode", modeValue),
+            onPress: open("mode", "menu:mode", `mode:${config.mode}`),
+          },
+          {
+            key: "menu:minimum",
+            label: setting("Minimum context", `${formatTokens(config.minContextTokens)} tokens`),
+            onPress: open("minimum", "menu:minimum", "minimum"),
+          },
+          {
+            key: "menu:logRequests",
+            label: setting("Log TypeSafe requests", config.logRequests ? "On" : "Off"),
+            onPress: open(
+              "logging",
+              "menu:logRequests",
+              `logging:${config.logRequests ? "on" : "off"}`,
+            ),
+          },
+          {
+            key: "menu:typesafeApiKey",
+            label: setting("TypeSafe API key", KEY_SOURCE_LABELS[key.source]),
+            onPress: open("key", "menu:typesafeApiKey", "typesafeApiKey"),
+          },
+          {
+            key: "menu:reset",
+            label: `Reset minimum to ${formatTokens(DEFAULT_MINIMUM)}`,
+            onPress: () => {
+              menuRow = "menu:reset";
+              run(() => changeMinimum($, "default"));
+            },
+          },
+          {
+            key: "menu:status",
+            label: "Status",
+            onPress: () => {
+              menuRow = "menu:status";
+              run(async () => {
+                statusDetails = await statusText($);
+              });
+            },
+          },
+          { key: "menu:close", label: "Close", onPress: closePane },
+        ],
+        menuRow,
+      ),
+      ...(statusDetails ? [Text({ dimColor: true, wrap: "wrap", children: statusDetails })] : []),
+      hint("close"),
+    ]);
   });
 };
