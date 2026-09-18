@@ -9,7 +9,7 @@
       "name": "compact-adviser",
       "source": "./packages/claude-mod",
       "description": "Suggests (or, opt-in, runs) /compact at a completed checkpoint judged by TypeSafe Jev.",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "category": "productivity"
     }
   ]

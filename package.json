@@ -1,15 +1,19 @@
 {
   "name": "compact-adviser-monorepo",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "license": "MIT",
   "description": "Find a good checkpoint before compacting an AI coding session.",
-  "keywords": ["pi-package"],
+  "keywords": [
+    "pi-package"
+  ],
   "engines": {
     "node": ">=22"
   },
   "pi": {
-    "extensions": ["./packages/pi-extension/src/index.ts"]
+    "extensions": [
+      "./packages/pi-extension/src/index.ts"
+    ]
   },
   "scripts": {
     "check": "npm --prefix packages/pi-extension run check",
