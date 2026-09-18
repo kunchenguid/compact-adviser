@@ -37,8 +37,11 @@ test("the question set and the floor schedule match", () => {
   assert.deepEqual(Object.keys(pi.QUESTIONS), ["done", "shape"]);
   assert.equal(claude.FLOOR_MAX, pi.FLOOR_MAX);
   assert.equal(claude.FLOOR_MIN, pi.FLOOR_MIN);
-  assert.equal(claude.FLOOR_OFFSET, pi.FLOOR_OFFSET);
-  assert.equal(pi.FLOOR_OFFSET, 1);
+  assert.equal(claude.USAGE_STRICT_UNTIL, pi.USAGE_STRICT_UNTIL);
+  assert.equal(claude.USAGE_LOOSE_AT, pi.USAGE_LOOSE_AT);
+  assert.equal(pi.USAGE_STRICT_UNTIL, 0.1);
+  assert.equal(pi.USAGE_LOOSE_AT, 0.9);
+  assert.equal(pi.FLOOR_MIN, 0.5);
   for (let u = -0.1; u <= 1.1; u += 0.01) assert.equal(claude.floorFor(u), pi.floorFor(u));
   assert.equal(claude.floorFor(Number.NaN), pi.floorFor(Number.NaN));
   assert.equal(claude.ENDPOINT, pi.ENDPOINT);

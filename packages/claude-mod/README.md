@@ -151,7 +151,7 @@ Local code composes them into one score, P(finished) x (0.5 + 0.5 x P(hands_on))
 Malformed responses, contradictory factors, API failures, and timeouts never produce a hint or a compaction.
 Requests have a two-second deadline, no immediate retry, and capped exponential backoff.
 
-Hint and auto share one floor on that score, and the floor depends on how full the context window is (`$.session.usage()` tokens over the model's window): 0.90 while usage is at most 10 %, then one point lower per point of usage, down to 0.40 from 60 % on (`/compact-adviser status` shows the current floor).
+Hint and auto share one floor on that score, and the floor depends on how full the context window is (`$.session.usage()` tokens over the model's window): 0.90 while usage is at most 10 %, then a linear ramp down to 0.50 from 90 % on (`/compact-adviser status` shows the current floor).
 A wrong hint costs most while there is room left and least when compaction is imminent anyway.
 These are measured starting knobs, **not safety guarantees**; the Pi package's `eval/README.md` has the ladder.
 

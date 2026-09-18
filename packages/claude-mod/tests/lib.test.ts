@@ -13,7 +13,6 @@ import {
   ENDPOINT,
   FLOOR_MAX,
   FLOOR_MIN,
-  FLOOR_OFFSET,
   floorFor,
   JUDGE_DISABLED_NETWORK_MESSAGE,
   JUDGE_UNAVAILABLE_MESSAGE,
@@ -25,6 +24,8 @@ import {
   qualifies,
   requestBody,
   score,
+  USAGE_LOOSE_AT,
+  USAGE_STRICT_UNTIL,
 } from "../lib/judge.ts";
 import { RECENT_TAIL_MESSAGES, SUMMARY_PREFIX, snapshot } from "../lib/snapshot.ts";
 import {
@@ -536,21 +537,23 @@ describe("jev client", () => {
   test("the composed score and the usage-dependent floor decide hint and auto the same way", () => {
     const j = (v: Parameters<typeof jevAnswer>[0]) => parseJudgment(jevAnswer(v));
     expect(FLOOR_MAX).toBe(0.9);
-    expect(FLOOR_MIN).toBe(0.4);
-    expect(FLOOR_OFFSET).toBe(1);
+    expect(FLOOR_MIN).toBe(0.5);
+    expect(USAGE_STRICT_UNTIL).toBe(0.1);
+    expect(USAGE_LOOSE_AT).toBe(0.9);
     expect(Math.abs(score(j({ completed: 1, handsOn: 1 })) - 1) < 1e-9).toBe(true);
     expect(Math.abs(score(j({ completed: 1, handsOn: 0 })) - 0.5) < 1e-9).toBe(true);
     expect(Math.abs(score(j({ completed: 0, handsOn: 1 })) - 0) < 1e-9).toBe(true);
     expect(floorFor(0.1)).toBe(0.9);
-    expect(floorFor(0.3)).toBe(0.7);
-    expect(floorFor(0.5)).toBe(0.5);
-    expect(floorFor(0.6)).toBe(0.4);
-    expect(floorFor(0.95)).toBe(0.4);
+    expect(floorFor(0.3)).toBe(0.8);
+    expect(floorFor(0.5)).toBe(0.7);
+    expect(floorFor(0.9)).toBe(0.5);
+    expect(floorFor(0.95)).toBe(0.5);
     expect(floorFor(Number.NaN)).toBe(0.9);
     expect(qualifies(j({ completed: 0.95, handsOn: 0.95 }), 0.2)).toBe(true);
     expect(qualifies(j({ completed: 0.89, handsOn: 0.99 }), 0)).toBe(false);
     expect(qualifies(j({ completed: 0.99, handsOn: 0 }), 0.3)).toBe(false);
-    expect(qualifies(j({ completed: 0.99, handsOn: 0 }), 0.85)).toBe(true);
+    expect(qualifies(j({ completed: 1, handsOn: 0 }), 0.89)).toBe(false);
+    expect(qualifies(j({ completed: 1, handsOn: 0 }), 0.9)).toBe(true);
     expect(qualifies(j({ completed: 0.2, handsOn: 1 }), 1)).toBe(false);
   });
 });
