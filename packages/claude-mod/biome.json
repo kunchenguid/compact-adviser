@@ -1,6 +1,8 @@
 {
   "$schema": "https://biomejs.dev/schemas/2.5.14/schema.json",
-  "files": { "includes": ["**", "!package-lock.json", "!.claude"] },
+  "files": {
+    "includes": ["**", "!package-lock.json", "!.claude", "!.claude-plugin/plugin.json"]
+  },
   "formatter": { "indentStyle": "space", "lineWidth": 100 },
   "linter": { "enabled": true, "rules": { "preset": "recommended" } },
   "assist": { "actions": { "source": { "organizeImports": "on" } } }
