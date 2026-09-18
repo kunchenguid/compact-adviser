@@ -371,13 +371,21 @@ describe("turn-end gates", () => {
 
   test("a turn that starts while TypeSafe answers discards the verdict", async ($, on) => {
     const w = world(on);
+    let markRequestStarted: () => void = () => undefined;
+    const requestStarted = new Promise<void>((resolve) => {
+      markRequestStarted = resolve;
+    });
     let release: () => void = () => undefined;
-    w.respond = () =>
-      new Promise((resolve) => {
+    w.respond = () => {
+      markRequestStarted();
+      return new Promise((resolve) => {
         release = () => resolve({ status: 200, text: JSON.stringify(jevAnswer()) });
       });
+    };
     await $.session.start(interactiveStart);
-    await turnEnd($, w);
+    await $.turn.complete(answered());
+    await w.clock.settle();
+    await requestStarted;
     expect(w.journal.requests).toHaveLength(1);
     await $.turn.start({ turnId: "t2", origin: { kind: "composer" } } as never);
     release();
