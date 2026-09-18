@@ -99,8 +99,7 @@ describe("turn-end gates", () => {
     expect(request.headers.Authorization).toBe(`Bearer ${KEY}`);
     expect(request.body.includes(KEY)).toBe(false);
     expect(JSON.parse(request.body).model).toBe("jev-latest");
-    expect(w.journal.statuses.at(-1)).toContain(HINT);
-    expect(w.journal.statuses.at(-1)).toContain("\x1b[33m");
+    expect(w.journal.statuses.at(-1)).toBe(HINT);
     expect(w.journal.toasts.includes(HINT)).toBe(false);
     expect(w.journal.suggestions).toEqual([]);
     expect(w.journal.compactions).toHaveLength(0);
@@ -230,7 +229,7 @@ describe("turn-end gates", () => {
     const w = world(on);
     await $.session.start(interactiveStart);
     await turnEnd($, w);
-    expect(w.journal.statuses.at(-1)).toContain(HINT);
+    expect(w.journal.statuses.at(-1)).toBe(HINT);
     await $.turn.start({ turnId: "t2", origin: { kind: "composer" } } as never);
     expect(w.journal.statuses.at(-1)).toBeUndefined();
   });
@@ -776,7 +775,7 @@ describe("commands", () => {
     w.messages = longConversation("s3");
     await turn($, w, "s3");
     expect(w.journal.requests).toHaveLength(1);
-    expect(w.journal.statuses.at(-1)).toContain(HINT);
+    expect(w.journal.statuses.at(-1)).toBe(HINT);
     await $.command.run(commandRun("dismiss"));
     expect(w.journal.statuses.at(-1)).toBeUndefined();
   });

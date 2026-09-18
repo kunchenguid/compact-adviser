@@ -66,7 +66,6 @@ import {
 const COMMAND = "compact-adviser";
 const PANE_ID = "compact-adviser";
 const HINT = "Compact adviser: work appears completed or recorded. Run /compact to save tokens.";
-const HINT_STATUS = `\x1b[33m${HINT}\x1b[0m`;
 const COMPACT_INSTRUCTIONS =
   "The session reached a natural boundary; keep the current work, pending tasks, referenced files, and the next step exact.";
 const PENDING_NOTICE_KEY = "pendingNotice";
@@ -297,7 +296,7 @@ async function judgeCheckpoint($: EngineInterface, epoch: number): Promise<void>
       await $.store.set(key, state);
       if (epoch !== generation) return;
       hintVisible = true;
-      $.ui.status(HINT_STATUS);
+      $.ui.status(HINT);
       return;
     }
     await $.store.set(key, state);

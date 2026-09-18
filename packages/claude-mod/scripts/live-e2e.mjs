@@ -362,7 +362,11 @@ try {
   // 3. A judged hint.
   step = "hint";
   await command("E2E-PROMPT-1 build the parser");
-  await waitText(HINT, 60000);
+  const hintShot = await waitText(HINT, 60000);
+  const hintLines = hintShot.split("\n").filter((line) => line.includes(HINT));
+  if (hintLines.length !== 1 || hintLines[0].trim() !== `⚠ compact-adviser: ${HINT}`) {
+    throw new Error(`[${step}] expected one host-highlighted status line\n${hintShot}`);
+  }
   if (jevRequests.length !== 1)
     throw new Error(`[${step}] expected one TypeSafe request, saw ${jevRequests.length}`);
   const request = jevRequests[0];
