@@ -23,6 +23,7 @@ export interface MessageLike {
   text: string;
   toolUses: readonly ToolUseLike[];
   toolResults?: readonly { text: string; isError: boolean }[];
+  hasImages?: boolean;
 }
 
 /** Rollout records mapped per read; a full answer means older transcript entries were dropped. */
@@ -201,6 +202,7 @@ export interface Snapshot {
 export function snapshot(
   messages: readonly MessageLike[],
   secrets: readonly (string | undefined)[] = [],
+  options: { truncated?: boolean } = {},
 ): Snapshot {
   const artifacts = new Set<string>();
   let redacted = false;
@@ -270,7 +272,9 @@ export function snapshot(
 
   const lastUser = users.at(-1)?.text ?? "";
   const lastAssistant = recent.at(-1)?.text ?? "";
-  const transcriptLimitReached = messages.length >= MESSAGE_LIMIT;
+  const truncated = options.truncated === true;
+  const transcriptLimitReached = messages.length >= MESSAGE_LIMIT || truncated;
+  const hasImages = messages.some((m) => m.hasImages === true);
   const state: Snapshot["state"] = {
     userConstraints: users,
     recent,
@@ -282,10 +286,12 @@ export function snapshot(
     }),
     coverage: {
       omittedUserMessages: omittedUsers,
-      olderMessagesOmitted: Math.max(0, messages.length - RECENT_TAIL_MESSAGES),
+      olderMessagesOmitted: Math.max(
+        truncated ? 1 : 0,
+        messages.length - RECENT_TAIL_MESSAGES,
+      ),
       recentTextTruncated: recentTruncated,
-      // The rollout records mapped here carry text only; images are dropped before this point.
-      hasImages: false,
+      hasImages,
       redacted,
       transcriptLimitReached,
     },
@@ -298,6 +304,7 @@ export function snapshot(
     state,
     conversationTokens: estimateConversationTokens(messages),
     checkpointText: JSON.stringify([lastUser, lastAssistant]),
-    autoCoverage: omittedUsers === 0 && !recentTruncated && !redacted && !transcriptLimitReached,
+    autoCoverage:
+      omittedUsers === 0 && !recentTruncated && !redacted && !transcriptLimitReached && !hasImages,
   };
 }

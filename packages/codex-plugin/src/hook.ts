@@ -166,7 +166,9 @@ async function onStop(payload: HookPayload, environment: Environment): Promise<H
   if (tokens < config.minContextTokens) return {};
   if (cooldownReason(state, tokens, now) !== undefined) return {};
 
-  const view = snapshot(rollout.messages, [key.value, config.typesafeApiKey]);
+  const view = snapshot(rollout.messages, [key.value, config.typesafeApiKey], {
+    truncated: rollout.truncated,
+  });
   if (view.conversationTokens <= MINIMUM_CONVERSATION_TOKENS) return {};
   const fingerprint = await checkpointKey(view.checkpointText);
   if (state.lastHintKey === fingerprint) return {};

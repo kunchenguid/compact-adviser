@@ -329,7 +329,49 @@ test("a rollout past the read window keeps its header and its newest records", (
     assert.equal(rollout.tokens, 4242);
     assert.equal(rollout.messages.at(-1)?.text, "newest");
     assert.ok(!rollout.messages.some((m) => m.text.includes("oldest")));
+    assert.equal(rollout.truncated, true);
+    const coverage = snapshot(rollout.messages, [], { truncated: rollout.truncated }).state.coverage;
+    assert.equal(coverage.transcriptLimitReached, true);
+    assert.ok(coverage.olderMessagesOmitted > 0);
   } finally {
     lab.cleanup();
   }
+});
+
+test("an image-only user message is kept and marks coverage as having images", () => {
+  const rollout = mapRecords([
+    {
+      type: "response_item",
+      payload: {
+        type: "message",
+        role: "user",
+        content: [{ type: "input_image", image_url: "data:image/png;base64,QQ==" }],
+      },
+    },
+  ]);
+  assert.equal(rollout.messages.length, 1);
+  assert.equal(rollout.messages[0]?.role, "user");
+  assert.equal(rollout.messages[0]?.hasImages, true);
+  assert.equal(snapshot(rollout.messages).state.coverage.hasImages, true);
+});
+
+test("a mixed text-and-image user message keeps the text and marks images", () => {
+  const rollout = mapRecords([
+    {
+      type: "response_item",
+      payload: {
+        type: "message",
+        role: "user",
+        content: [
+          { type: "input_text", text: "Look at this screenshot." },
+          { type: "input_image", image_url: "data:image/png;base64,QQ==" },
+        ],
+      },
+    },
+  ]);
+  assert.equal(rollout.messages[0]?.text, "Look at this screenshot.");
+  assert.equal(rollout.messages[0]?.hasImages, true);
+  const view = snapshot(rollout.messages);
+  assert.equal(view.state.coverage.hasImages, true);
+  assert.equal(view.state.userConstraints[0]?.text, "Look at this screenshot.");
 });

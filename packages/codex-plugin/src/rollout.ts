@@ -37,6 +37,8 @@ export interface Rollout {
   tokens: number | undefined;
   /** The active model's context window, or undefined when it was not recorded. */
   window: number | undefined;
+  /** True when earlier records were dropped by the read window or message cap. */
+  truncated: boolean;
 }
 
 export const EMPTY_ROLLOUT: Readonly<Rollout> = Object.freeze({
@@ -44,6 +46,7 @@ export const EMPTY_ROLLOUT: Readonly<Rollout> = Object.freeze({
   messages: [],
   tokens: undefined,
   window: undefined,
+  truncated: false,
 });
 
 /** Context usage as a fraction of the window, or NaN when either number is unusable. */
@@ -62,18 +65,19 @@ export function usageFraction(rollout: Pick<Rollout, "tokens" | "window">): numb
 }
 
 /** Reads the first line, and the last `MAX_ROLLOUT_BYTES`, dropping a partial line between. */
-function readHeadAndTail(path: string): { head: string; tail: string } {
+function readHeadAndTail(path: string): { head: string; tail: string; truncated: boolean } {
   const fd = openSync(path, "r");
   try {
     const size = statSync(path).size;
     const start = Math.max(0, size - MAX_ROLLOUT_BYTES);
     const tail = readRange(fd, start, size - start);
-    if (start === 0) return { head: "", tail };
+    if (start === 0) return { head: "", tail, truncated: false };
     const newline = tail.indexOf("\n");
     // The session header is the file's first line, which the tail window may have cut away.
     return {
       head: firstLine(readRange(fd, 0, HEAD_BYTES)),
       tail: newline === -1 ? "" : tail.slice(newline + 1),
+      truncated: true,
     };
   } finally {
     closeSync(fd);
@@ -102,6 +106,14 @@ function textOf(content: unknown): string {
     })
     .filter((part) => part !== "")
     .join("\n");
+}
+
+function contentHasImage(content: unknown): boolean {
+  if (!Array.isArray(content)) return false;
+  return content.some((part) => {
+    const type = (part as { type?: unknown } | null)?.type;
+    return type === "input_image" || type === "output_image" || type === "image";
+  });
 }
 
 /** Written and removed paths in an `apply_patch` body, including move sources as removed. */
@@ -231,12 +243,14 @@ function consumeResponseItem(
 ): void {
   if (payload.type === "message") {
     const text = textOf(payload.content).trim();
-    if (!text) return;
+    const hasImages = contentHasImage(payload.content);
+    if (!text && !hasImages) return;
+    const image = hasImages ? { hasImages: true as const } : {};
     if (payload.role === "assistant") {
-      messages.push({ role: "assistant", text, toolUses: [] });
+      messages.push({ role: "assistant", text, toolUses: [], ...image });
     } else if (payload.role === "user") {
-      if (INJECTED_USER_PREFIXES.some((prefix) => text.startsWith(prefix))) return;
-      messages.push({ role: "user", text, toolUses: [] });
+      if (text && INJECTED_USER_PREFIXES.some((prefix) => text.startsWith(prefix))) return;
+      messages.push({ role: "user", text, toolUses: [], ...image });
     }
     return;
   }
@@ -329,17 +343,19 @@ export function mapRecords(records: readonly unknown[]): Rollout {
     consumeResponseItem(payload, messages, pending);
   }
 
+  const truncated = messages.length > MESSAGE_LIMIT;
   return {
     originator,
     messages: messages.slice(-MESSAGE_LIMIT),
     tokens,
     window,
+    truncated,
   };
 }
 
 /** Reads and maps the rollout; an unreadable transcript yields the empty rollout. */
 export function readRollout(path: string): Rollout {
-  let parts: { head: string; tail: string };
+  let parts: { head: string; tail: string; truncated: boolean };
   try {
     parts = readHeadAndTail(path);
   } catch {
@@ -354,5 +370,6 @@ export function readRollout(path: string): Rollout {
       // One unreadable record does not invalidate the rest of the transcript.
     }
   }
-  return mapRecords(records);
+  const mapped = mapRecords(records);
+  return { ...mapped, truncated: mapped.truncated || parts.truncated };
 }
