@@ -131,19 +131,22 @@ Pi deliberately reports unknown usage immediately after compaction; the extensio
 
 ## The judgment and its limits
 
-One HTTPS request to `https://api.typesafe.ai/v1/systemone` uses `jev-latest` and one typed factor:
+One HTTPS request to `https://api.typesafe.ai/v1/systemone` uses `jev-latest` and two typed factors, each a one-sentence question:
 
-1. Completed checkpoint, still in progress, or unclear.
+1. `done`: is the assistant's own latest unit of work finished, not finished, or unclear. Waiting for a person or another party counts as finished.
+2. `shape`: did the assistant mostly do the work itself (hands-on) or mostly coordinate others.
 
-Local code combines the results and renders the reason.
+Local code composes them into one score, P(finished) x (0.5 + 0.5 x P(hands_on)), and renders the reason.
 Jev does not generate an explanatory paragraph.
 Malformed responses, contradictory factors, API failures, timeouts, and stale results never trigger compaction.
 Requests have a two-second deadline, no immediate retry, and capped backoff on later eligible exchanges.
 The remote call is not awaited by Pi's event dispatcher.
 Input, model/branch/session changes, and native compaction invalidate an outstanding result.
 
-Hint and auto share one 0.90 floor on the completed-checkpoint probability.
-These are conservative starting knobs in code, **not measured safety guarantees**.
+Hint and auto share one floor on that score, and the floor depends on how full the context window is: 0.90 while usage is at most 40 % of the window, then one point lower per point of usage, down to 0.40 from 90 % on (`/compact-adviser status` shows the current floor).
+A wrong hint costs most while there is room left and least when compaction is imminent anyway.
+Measured on real sessions against what the user actually asked next, this gives about 95 % precision at the strict end and 74 % precision with 91 % recall at the loose end; the eval README under `eval/` has the ladder.
+These are measured starting knobs in code, **not safety guarantees**.
 Do not interpret a concentrated probability distribution as proof that a summary will preserve every useful fact.
 
 Automatic mode still requires the first-use acknowledgement to turn auto on.

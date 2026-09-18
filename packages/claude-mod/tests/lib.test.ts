@@ -5,6 +5,9 @@ import { DEFAULT_MINIMUM, parseConsent, parseMinimum, readConfig } from "../lib/
 import { parseDotenvKey } from "../lib/env.ts";
 import {
   ENDPOINT,
+  FLOOR_MAX,
+  FLOOR_MIN,
+  floorFor,
   JUDGE_DISABLED_NETWORK_MESSAGE,
   JUDGE_UNAVAILABLE_MESSAGE,
   JudgeError,
@@ -12,9 +15,9 @@ import {
   judgeErrorMessage,
   MAX_REQUEST_BYTES,
   parseJudgment,
-  QUALIFY_FLOOR,
   qualifies,
   requestBody,
+  score,
 } from "../lib/judge.ts";
 import { RECENT_TAIL_MESSAGES, SUMMARY_PREFIX, snapshot } from "../lib/snapshot.ts";
 import {
@@ -324,9 +327,10 @@ describe("jev client", () => {
     expect(calls[0]?.init.headers.Authorization).toBe("Bearer tsk-secret");
     const body = JSON.parse(calls[0]?.init.body ?? "{}");
     expect(body.model).toBe("jev-latest");
-    expect(Object.keys(body.questions)).toEqual(["phase"]);
+    expect(Object.keys(body.questions)).toEqual(["done", "shape"]);
     expect(calls[0]?.init.body.includes("tsk-secret")).toBe(false);
-    expect(result.phase.choice).toBe("completed_checkpoint");
+    expect(result.done.choice).toBe("finished");
+    expect(result.shape.choice).toBe("hands_on");
   });
 
   test("errors map to kinds and never to a judgment", async () => {
@@ -373,27 +377,27 @@ describe("jev client", () => {
     expect(() => parseJudgment(base)).not.toThrow();
     expect(
       mutate((a) => {
-        (a.answers.phase as { choice: string }).choice = "done";
+        (a.answers.done as { choice: string }).choice = "completed";
       }),
     ).toThrow(JudgeError);
     expect(
       mutate((a) => {
-        a.answers.phase.probabilities.unclear = 0.5;
+        a.answers.done.probabilities.unclear = 0.5;
       }),
     ).toThrow(JudgeError);
     expect(
       mutate((a) => {
-        (a.answers.phase.probabilities as Record<string, number>).extra = 0;
+        (a.answers.done.probabilities as Record<string, number>).extra = 0;
       }),
     ).toThrow(JudgeError);
     expect(
       mutate((a) => {
-        a.answers.phase.choice = "unclear";
+        a.answers.done.choice = "unclear";
       }),
     ).toThrow(JudgeError);
     expect(
       mutate((a) => {
-        a.answers.phase.confidence = 1.2;
+        a.answers.shape.confidence = 1.2;
       }),
     ).toThrow(JudgeError);
     expect(
@@ -434,11 +438,28 @@ describe("jev client", () => {
     expect(JUDGE_DISABLED_NETWORK_MESSAGE).toContain("configuration setting");
   });
 
-  test("the shared phase floor decides hint and auto the same way", () => {
+  test("a missing second answer is rejected", () => {
+    const partial = jevAnswer() as { answers: Partial<ReturnType<typeof jevAnswer>["answers"]> };
+    delete partial.answers.shape;
+    expect(() => parseJudgment(partial)).toThrow(JudgeError);
+  });
+
+  test("the composed score and the usage-dependent floor decide hint and auto the same way", () => {
     const j = (v: Parameters<typeof jevAnswer>[0]) => parseJudgment(jevAnswer(v));
-    expect(QUALIFY_FLOOR).toBe(0.9);
-    expect(qualifies(j({ completed: 0.9 }))).toBe(true);
-    expect(qualifies(j({ completed: 0.89 }))).toBe(false);
-    expect(qualifies(j({ completed: 0.95 }))).toBe(true);
+    expect(FLOOR_MAX).toBe(0.9);
+    expect(FLOOR_MIN).toBe(0.4);
+    expect(Math.abs(score(j({ completed: 1, handsOn: 1 })) - 1) < 1e-9).toBe(true);
+    expect(Math.abs(score(j({ completed: 1, handsOn: 0 })) - 0.5) < 1e-9).toBe(true);
+    expect(Math.abs(score(j({ completed: 0, handsOn: 1 })) - 0) < 1e-9).toBe(true);
+    expect(floorFor(0.3)).toBe(0.9);
+    expect(floorFor(0.5)).toBe(0.8);
+    expect(floorFor(0.7)).toBe(0.6);
+    expect(floorFor(0.95)).toBe(0.4);
+    expect(floorFor(Number.NaN)).toBe(0.9);
+    expect(qualifies(j({ completed: 0.95, handsOn: 0.95 }), 0.2)).toBe(true);
+    expect(qualifies(j({ completed: 0.89, handsOn: 0.99 }), 0.2)).toBe(false);
+    expect(qualifies(j({ completed: 0.99, handsOn: 0 }), 0.3)).toBe(false);
+    expect(qualifies(j({ completed: 0.99, handsOn: 0 }), 0.85)).toBe(true);
+    expect(qualifies(j({ completed: 0.2, handsOn: 1 }), 1)).toBe(false);
   });
 });

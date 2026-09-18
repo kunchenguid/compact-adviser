@@ -30,9 +30,11 @@ It uses [Jev](https://typesafe.ai) to instantly judge whether the current sessio
 
 It can give you a hint to run `/compact` - or, if you opt in, it can run it for you at the right time automatically.
 
+Judgment is two one-sentence Jev questions in one request (is the unit finished; is this hands-on work or coordination), composed in code into one score. The hint floor is 0.90 while the context window is mostly empty and relaxes toward 0.40 as it fills - a wrong hint costs most when there is still room. Automatic mode is the same gate, plus a first-use confirmation.
+
 ## Quick Start
 
-Prerequisites: Node 22+, [Pi](https://pi.dev) 0.82.0 or newer (verified on **0.85.1**) or Claude Code 2.1.274 or newer (verified on **2.1.275**), and a [TypeSafe API key](https://console.typesafe.ai/settings/keys) (`TYPESAFE_API_KEY` in the launch environment, or in `./.env`). Jev is TypeSafe's structured decision model; this package asks it one classification question and never asks it to write a summary.
+Prerequisites: Node 22+, [Pi](https://pi.dev) 0.82.0 or newer (verified on **0.85.1**) or Claude Code 2.1.274 or newer (verified on **2.1.275**), and a [TypeSafe API key](https://console.typesafe.ai/settings/keys) (`TYPESAFE_API_KEY` in the launch environment, or in `./.env`). Jev is TypeSafe's structured decision model; this package asks it two one-sentence classification questions and never asks it to write a summary.
 
 Installing the package is consent to send eligible checkpoint context to TypeSafe when a key is available and the other product gates pass.
 
@@ -92,7 +94,7 @@ settled turn
 └─────────┬─────────┘
           ▼
 ┌───────────────────┐
-│ TypeSafe Jev      │  one request at turn end
+│ TypeSafe Jev      │  done × shape score, floor slides 0.90→0.40 with usage
 └─────────┬─────────┘
           ▼
  hint: run /compact     or, with explicit auto, native compaction

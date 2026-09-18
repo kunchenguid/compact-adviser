@@ -21,15 +21,29 @@ export function temp(t: TestContext): string {
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   return dir;
 }
-export const apiResponse = () => ({
+export const apiResponse = (finished = 0.995, handsOn = 0.99) => ({
   model: "jev-test",
   usage: { input_tokens: 2000, output_tokens: 60 },
   answers: {
-    phase: {
+    done: {
       type: "choice",
-      choice: "completed_checkpoint",
-      probabilities: { completed_checkpoint: 0.995, still_in_progress: 0.003, unclear: 0.002 },
-      confidence: 0.99,
+      choice: finished >= 0.5 ? "finished" : "not_finished",
+      probabilities: {
+        finished,
+        not_finished: Number((1 - finished).toFixed(6)),
+        unclear: 0,
+      },
+      confidence: Math.abs(finished - 0.5) * 2,
+    },
+    shape: {
+      type: "choice",
+      choice: handsOn >= 0.5 ? "hands_on" : "coordinating",
+      probabilities: {
+        hands_on: handsOn,
+        coordinating: Number((1 - handsOn).toFixed(6)),
+        unclear: 0,
+      },
+      confidence: Math.abs(handsOn - 0.5) * 2,
     },
   },
 });

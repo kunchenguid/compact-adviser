@@ -7,6 +7,7 @@ import { type Config, ConfigStore, DEFAULT_CONFIG, type Mode, parseMinimum } fro
 import { snapshot } from "./context.ts";
 import { resolveTypesafeApiKey } from "./env.ts";
 import {
+  floorFor,
   JUDGE_UNAVAILABLE_MESSAGE,
   type Judgment,
   judge,
@@ -98,6 +99,19 @@ export function installAdviser(pi: ExtensionAPI, options: Options): void {
       return undefined;
     return usage.tokens;
   }
+  /** Context tokens over the model's window, or NaN when Pi does not know it (strictest floor). */
+  function usageFraction(ctx: ExtensionContext): number {
+    const usage = ctx.getContextUsage();
+    if (
+      !usage ||
+      usage.tokens === null ||
+      !Number.isFinite(usage.tokens) ||
+      !Number.isFinite(usage.contextWindow) ||
+      usage.contextWindow <= 0
+    )
+      return Number.NaN;
+    return usage.tokens / usage.contextWindow;
+  }
   function sessionIdentity(ctx: ExtensionContext) {
     return JSON.stringify([
       ctx.sessionManager.getSessionId(),
@@ -154,7 +168,7 @@ export function installAdviser(pi: ExtensionAPI, options: Options): void {
         return;
       state = { ...state, failures: 0, retryAfter: 0 };
       const auto = latest.mode === "auto";
-      if (!qualifies(result)) {
+      if (!qualifies(result, usageFraction(ctx))) {
         persist(state);
         return;
       }
@@ -333,9 +347,10 @@ export function installAdviser(pi: ExtensionAPI, options: Options): void {
   function status(ctx: ExtensionCommandContext) {
     const c = store.read(),
       s = restoreState(ctx.sessionManager.getBranch()),
-      t = ctx.getContextUsage()?.tokens;
+      t = ctx.getContextUsage()?.tokens,
+      u = usageFraction(ctx);
     ctx.ui.notify(
-      `Mode: ${c.mode}. Minimum: ${c.minContextTokens.toLocaleString("en-US")} tokens. Context: ${t ?? "unknown"}. Key: ${key()?.trim() ? "present" : "missing"}. ${typeof t === "number" ? (cooldownReason(s, t, now()) ?? "No cooldown; semantic checks still apply.") : "Waiting for fresh model usage."} Request log: ${c.logRequests ? requestLogPath(options.agentDir) : "off"}. Settings: ${store.path}`,
+      `Mode: ${c.mode}. Minimum: ${c.minContextTokens.toLocaleString("en-US")} tokens. Context: ${t ?? "unknown"}${Number.isFinite(u) ? ` (${Math.round(u * 100)}% of the window; hint floor ${floorFor(u).toFixed(2)})` : ""}. Key: ${key()?.trim() ? "present" : "missing"}. ${typeof t === "number" ? (cooldownReason(s, t, now()) ?? "No cooldown; semantic checks still apply.") : "Waiting for fresh model usage."} Request log: ${c.logRequests ? requestLogPath(options.agentDir) : "off"}. Settings: ${store.path}`,
       "info",
     );
   }

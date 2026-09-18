@@ -16,12 +16,26 @@ def load(path):
 
 
 if len(sys.argv) < 4:
-    sys.exit("usage: metrics.py <labels.jsonl> <checkpoints.jsonl> <results.jsonl>")
+    sys.exit("usage: metrics.py <labels.jsonl> <checkpoints.jsonl> <results.jsonl> [floor]")
 
 L, C, raw = load(sys.argv[1]), load(sys.argv[2]), load(sys.argv[3])
 R = {i: raw[i] for i in raw if raw[i].get("ok")}
 ids = sorted(R)
-print(f"scored {len(ids)} checkpoints | model {set(R[i]['model'] for i in ids)}\n")
+FLOOR = float(sys.argv[4]) if len(sys.argv) > 4 else None
+
+# The shipped judge answers `done` and `shape` and composes a score; older results
+# carry a single `phase` answer. Map `done` onto the phase classes so the per-class
+# report keeps working, and re-gate from `score` when a floor is given.
+DONE_TO_PHASE = {"finished": "completed_checkpoint", "not_finished": "still_in_progress", "unclear": "unclear"}
+for i in ids:
+    if "phase" not in R[i] and "done" in R[i]:
+        R[i]["phase"] = DONE_TO_PHASE.get(R[i]["done"], "unclear")
+    if FLOOR is not None:
+        if "score" not in R[i]:
+            sys.exit("a floor needs results with a composed score (eval/score.ts output)")
+        R[i]["hint"] = R[i]["auto"] = R[i]["score"] >= FLOOR
+gate = f"score >= {FLOOR}" if FLOOR is not None else "as recorded"
+print(f"scored {len(ids)} checkpoints | model {set(R[i]['model'] for i in ids)} | gate {gate}\n")
 
 
 def per_class(field, gold_field, classes):

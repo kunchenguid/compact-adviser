@@ -1,21 +1,26 @@
 /**
  * Score the checkpoint dataset against live TypeSafe Jev using the shipped
- * judge() and qualifies(). Writes one result row per checkpoint.
- *   node --import tsx eval/score.ts <dataDir> [repeats]
+ * judge(), score() and qualifies(). Writes one result row per checkpoint with
+ * both answers and the composed score; `hint` / `auto` are the gate at a
+ * reference context usage (default 0.5, floor 0.80), and metrics.py can
+ * re-gate from `score` at any floor.
+ *   node --import tsx eval/score.ts <dataDir> [repeats] [usage]
  * The key is read from the environment only and is never printed or stored.
  */
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { judge, qualifies, type Judgment } from "../src/judge.ts";
+import { floorFor, judge, type Judgment, qualifies, score } from "../src/judge.ts";
 import { continuationOf } from "./continuation.ts";
 import { typesafeKeyFromEnv } from "./key.ts";
 
 const dir = process.argv[2];
 const repeats = Number(process.argv[3] ?? 1);
+const usage = Number(process.argv[4] ?? 0.5);
 if (!dir) {
-  console.error("usage: node --import tsx eval/score.ts <dataDir> [repeats]");
+  console.error("usage: node --import tsx eval/score.ts <dataDir> [repeats] [usage]");
   process.exit(1);
 }
+console.error(`gate: score >= ${floorFor(usage)} (context usage ${usage})`);
 const key = typesafeKeyFromEnv();
 
 const rows = readFileSync(join(dir, "checkpoints.jsonl"), "utf8")
@@ -38,9 +43,15 @@ for (const r of rows) {
         model: j.model,
         inputTokens: j.inputTokens,
         outputTokens: j.outputTokens,
-        phase: j.phase.choice,
-        phaseP: j.phase.probabilities,
-        phaseConf: j.phase.confidence,
+        done: j.done.choice,
+        doneP: j.done.probabilities,
+        doneConf: j.done.confidence,
+        shape: j.shape.choice,
+        shapeP: j.shape.probabilities,
+        shapeConf: j.shape.confidence,
+        score: score(j),
+        usage,
+        floor: floorFor(usage),
         ...(cont
           ? {
               continuation: cont.choice,
@@ -48,11 +59,11 @@ for (const r of rows) {
               continuationConf: cont.confidence,
             }
           : {}),
-        hint: qualifies(j),
-        auto: qualifies(j),
+        hint: qualifies(j, usage),
+        auto: qualifies(j, usage),
       });
       console.error(
-        `${r.id} r${rep} ${String(latencyMs).padStart(5)}ms ${j.phase.choice} hint=${qualifies(j)}`,
+        `${r.id} r${rep} ${String(latencyMs).padStart(5)}ms ${j.done.choice}/${j.shape.choice} score=${score(j).toFixed(2)} hint=${qualifies(j, usage)}`,
       );
     } catch (e) {
       const err = e as { kind?: string; message?: string };

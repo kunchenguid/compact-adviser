@@ -255,6 +255,36 @@ describe("turn-end gates", () => {
     expect(w.journal.requests).toHaveLength(2);
   });
 
+  test("the hint floor slides with context usage: a finished coordinating unit hints only once the window is fuller", async ($, on) => {
+    // finished but coordinating scores about 0.5: below the 0.90 floor at 30 % usage,
+    // above the 0.45 floor at 85 % usage. Same judgment, different window fill.
+    const w = world(on);
+    w.respond = async () => ({
+      status: 200,
+      text: JSON.stringify(jevAnswer({ completed: 0.99, handsOn: 0.01 })),
+    });
+    await $.session.start(interactiveStart);
+    await turnEnd($, w);
+    expect(w.journal.requests).toHaveLength(1);
+    expect(w.journal.statuses.includes(HINT)).toBe(false);
+    w.usage.tokens = 170000;
+    w.messages = longConversation("and now the window is nearly full");
+    await turnEnd($, w);
+    expect(w.journal.requests).toHaveLength(2);
+    expect(w.journal.statuses.includes(HINT)).toBe(true);
+  });
+
+  test("unknown context usage keeps the strictest floor", async ($, on) => {
+    const w = world(on);
+    w.respond = async () => ({
+      status: 200,
+      text: JSON.stringify(jevAnswer({ completed: 0.95, handsOn: 0.99 })),
+    });
+    await $.session.start(interactiveStart);
+    await turnEnd($, w);
+    expect(w.journal.statuses.includes(HINT)).toBe(true);
+  });
+
   test("uncertain or insufficient verdicts leave context alone", async ($, on) => {
     const w = world(on);
     w.respond = async () => ({
@@ -572,7 +602,7 @@ describe("commands", () => {
     await $.command.run(commandRun("status"));
     const line = w.journal.logs.at(-1) ?? "";
     expect(line).toBe(
-      "Mode: hint. Minimum: 40,000 tokens. Context: 60,000. Key: present. No cooldown; semantic checks still apply. Claude Code auto-compacts at 167,000 tokens. Request log: off. Settings: /config (compact-adviser rows) and /compact-adviser.",
+      "Mode: hint. Minimum: 40,000 tokens. Context: 60,000 (30% of the window; hint floor 0.90). Key: present. No cooldown; semantic checks still apply. Claude Code auto-compacts at 167,000 tokens. Request log: off. Settings: /config (compact-adviser rows) and /compact-adviser.",
     );
     expect(line.includes(KEY)).toBe(false);
   });
@@ -649,7 +679,7 @@ describe("settings pane", () => {
     await $.ui.press({ plugin: PLUGIN, key: "status" });
     await drain(w);
     expect(text(await $.ui.render(pane))).toContain(
-      "Mode: off. Minimum: 40,000 tokens. Context: 60,000. Key: present.",
+      "Mode: off. Minimum: 40,000 tokens. Context: 60,000 (30% of the window; hint floor 0.90). Key: present.",
     );
     expect(text(await $.ui.render(pane))).not.toContain("Sharing:");
     await $.ui.press({ plugin: PLUGIN, key: "close" });

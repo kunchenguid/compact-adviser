@@ -30,26 +30,27 @@ export type Journal = {
   fsWrites: { path: string; text: string }[];
 };
 
-export type Verdict = {
-  completed?: number;
-};
+export type Verdict = { completed?: number; handsOn?: number };
 
 export function jevAnswer(v: Verdict = {}) {
-  const completed = v.completed ?? 0.99;
+  const finished = v.completed ?? 0.99;
+  const handsOn = v.handsOn ?? 0.99;
   const rest = (p: number) => Number(((1 - p) / 2).toFixed(6));
+  const choice = (name: string, other: string, p: number) => ({
+    type: "choice",
+    choice: p >= 0.5 ? name : other,
+    confidence: Math.abs(p - 0.5) * 2,
+    probabilities: {
+      [name]: p,
+      [other]: rest(p),
+      unclear: Number((1 - p - rest(p)).toFixed(6)),
+    },
+  });
   return {
     model: "jev-1.13.0",
     answers: {
-      phase: {
-        type: "choice",
-        choice: "completed_checkpoint",
-        confidence: completed,
-        probabilities: {
-          completed_checkpoint: completed,
-          still_in_progress: rest(completed),
-          unclear: 1 - completed - rest(completed),
-        },
-      },
+      done: choice("finished", "not_finished", finished),
+      shape: choice("hands_on", "coordinating", handsOn),
     },
     usage: { input_tokens: 2500, output_tokens: 0 },
   };
