@@ -1,5 +1,6 @@
 {
   "name": "compact-adviser",
+  "description": "A single-plugin marketplace for compact-adviser, which tells you when your Claude Code session has reached a good point to run /compact.",
   "owner": {
     "name": "Kun Chen",
     "url": "https://github.com/kunchenguid"
@@ -8,9 +9,16 @@
     {
       "name": "compact-adviser",
       "source": "./packages/claude-mod",
-      "description": "Suggests (or, opt-in, runs) /compact at a completed checkpoint judged by TypeSafe Jev.",
+      "description": "Stop guessing when to run /compact. Watches your session and suggests compaction at a completed checkpoint - after work lands, not mid-task - so you keep context you still need and drop what you do not. Optionally compacts for you. Judgment runs through the TypeSafe Jev API and needs your own key.",
       "version": "0.1.0",
-      "category": "productivity"
+      "category": "productivity",
+      "author": {
+        "name": "Kun Chen"
+      },
+      "homepage": "https://github.com/kunchenguid/compact-adviser#readme",
+      "repository": "https://github.com/kunchenguid/compact-adviser",
+      "license": "MIT",
+      "keywords": ["compact", "context", "context-management", "checkpoint", "productivity"]
     }
   ]
 }
