@@ -109,8 +109,9 @@ function cancellableJudgeTransport(fetch: Environment["fetch"]): {
     fetch: async (url, init) => {
       try {
         const response = await fetch(url, { ...init, signal: controller.signal });
+        const text = await response.text();
         stopTimer();
-        return { status: response.status, ok: response.ok, text: await response.text() };
+        return { status: response.status, ok: response.ok, text };
       } catch (error) {
         stopTimer();
         if (controller.signal.aborted) {
@@ -243,7 +244,6 @@ export async function handle(payload: HookPayload, environment: Environment): Pr
   switch (payload.hook_event_name) {
     case "Stop":
       return onStop(payload, environment);
-    case "PreCompact":
     case "PostCompact":
       resetAfterCompaction(payload, environment);
       return {};

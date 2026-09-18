@@ -11,7 +11,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const PACKAGE = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const HOOK_EVENTS = ["Stop", "PreCompact", "PostCompact", "SessionStart"];
+const HOOK_EVENTS = ["Stop", "PostCompact", "SessionStart"];
 const problems = [];
 
 function fail(message) {

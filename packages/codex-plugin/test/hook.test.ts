@@ -174,17 +174,20 @@ test("a TypeSafe timeout aborts the in-flight request and stays silent", async (
     writeRollout(lab.transcript, settledRollout());
     let aborted = false;
     const fetch = (async (_url: string | URL, init?: RequestInit) => {
-      await new Promise<never>((_, reject) => {
-        const signal = init?.signal;
-        if (signal === undefined) return;
-        const fail = () => {
-          aborted = true;
-          reject(Object.assign(new Error("aborted"), { name: "AbortError" }));
-        };
-        if (signal.aborted) fail();
-        else signal.addEventListener("abort", fail, { once: true });
-      });
-      throw new Error("unreachable");
+      return new Response(
+        new ReadableStream({
+          start(controller) {
+            const fail = () => {
+              aborted = true;
+              controller.error(Object.assign(new Error("aborted"), { name: "AbortError" }));
+            };
+            const signal = init?.signal;
+            if (signal?.aborted) fail();
+            else signal?.addEventListener("abort", fail, { once: true });
+          },
+        }),
+        { status: 200 },
+      );
     }) as Environment["fetch"];
 
     const output = await handle(stop(lab), environment(lab, { fetch }));
@@ -272,13 +275,15 @@ test("compaction resets the session, and the next checkpoint waits for the new b
     const store = new SessionStore(adviserRoot({ CODEX_HOME: lab.home }));
 
     await handle(stop(lab), environment_);
-    for (const event of ["PreCompact", "PostCompact"]) {
-      await handle({ hook_event_name: event, session_id: "s1" }, environment_);
-      const state = store.read("s1", 0).state;
-      assert.equal(state.compacted, true, event);
-      assert.equal(state.completed, 0, event);
-      assert.equal(state.lastHintKey, null, event);
-    }
+    await handle({ hook_event_name: "PreCompact", session_id: "s1" }, environment_);
+    assert.equal(store.read("s1", 0).state.compacted, false);
+    assert.ok(store.read("s1", 0).state.completed > 0);
+
+    await handle({ hook_event_name: "PostCompact", session_id: "s1" }, environment_);
+    const state = store.read("s1", 0).state;
+    assert.equal(state.compacted, true);
+    assert.equal(state.completed, 0);
+    assert.equal(state.lastHintKey, null);
 
     writeRollout(lab.transcript, [
       ...settledRollout(),

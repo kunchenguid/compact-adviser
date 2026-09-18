@@ -14,21 +14,9 @@
         ]
       }
     ],
-    "PreCompact": [
-      {
-        "description": "Reset this session's cooldown counters around a compaction",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "sh \"${PLUGIN_ROOT}/hooks/run.sh\" \"${PLUGIN_ROOT}/src/hook.ts\"",
-            "timeout": 10
-          }
-        ]
-      }
-    ],
     "PostCompact": [
       {
-        "description": "Reset this session's cooldown counters around a compaction",
+        "description": "Reset this session's cooldown counters after a compaction",
         "hooks": [
           {
             "type": "command",
