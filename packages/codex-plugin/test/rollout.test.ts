@@ -189,6 +189,46 @@ test("a content-array tool output with a non-zero process exit is an error", () 
   assert.ok(rollout.messages[0]?.toolUses[0]?.text?.includes("command failed"));
 });
 
+test("a plain-text process envelope with a non-zero exit is an error", () => {
+  const rollout = mapRecords([
+    {
+      type: "response_item",
+      payload: { type: "function_call", name: "shell", arguments: "{}", call_id: "call_1" },
+    },
+    {
+      type: "response_item",
+      payload: {
+        type: "function_call_output",
+        call_id: "call_1",
+        output: "Process exited with code 1\nFinal output:\ncommand failed",
+      },
+    },
+  ]);
+  assert.equal(rollout.messages[0]?.toolUses[0]?.isError, true);
+  assert.ok(rollout.messages[0]?.toolUses[0]?.text?.includes("command failed"));
+});
+
+test("a content-array plain-text process envelope with a non-zero exit is an error", () => {
+  const rollout = mapRecords([
+    toolCall("shell", "{}"),
+    {
+      type: "response_item",
+      payload: {
+        type: "custom_tool_call_output",
+        call_id: "call_1",
+        output: [
+          {
+            type: "input_text",
+            text: "Process exited with code 1\nFinal output:\ncommand failed",
+          },
+        ],
+      },
+    },
+  ]);
+  assert.equal(rollout.messages[0]?.toolUses[0]?.isError, true);
+  assert.ok(rollout.messages[0]?.toolUses[0]?.text?.includes("command failed"));
+});
+
 test("usage comes from the last token_count record and degrades to NaN", () => {
   const rollout = mapRecords([tokenCount(10), tokenCount(95941, 258400)]);
   assert.equal(rollout.tokens, 95941);

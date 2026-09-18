@@ -69,6 +69,22 @@ test("a version manager's Node under HOME is found when PATH has none", () => {
   }
 });
 
+test("an nvm Node whose path contains a space is still found", () => {
+  const lab = makeLab();
+  try {
+    const home = join(lab.home, "user home");
+    const managed = join(home, ".nvm", "versions", "node", "v24.0.0", "bin");
+    mkdirSync(managed, { recursive: true });
+    writeFileSync(join(managed, "node"), "#!/bin/sh\necho '{\"picked\":\"nvm-space\"}'\n");
+    chmodSync(join(managed, "node"), 0o755);
+    const result = launch({ PATH: NO_NODE_PATH, HOME: home, CODEX_HOME: lab.home });
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.stdout.trim(), '{"picked":"nvm-space"}');
+  } finally {
+    lab.cleanup();
+  }
+});
+
 test("a Node on PATH is preferred over the fallback search", () => {
   const lab = makeLab();
   try {

@@ -140,10 +140,10 @@ function processExitCode(value: unknown): number | undefined {
       try {
         return processExitCode(JSON.parse(trimmed));
       } catch {
-        return undefined;
       }
     }
-    return undefined;
+    const match = /^Process exited with code (-?\d+)\b/.exec(trimmed);
+    return match ? Number(match[1]) : undefined;
   }
   if (Array.isArray(value)) {
     for (const part of value) {

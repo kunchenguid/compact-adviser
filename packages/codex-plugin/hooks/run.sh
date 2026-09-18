@@ -24,13 +24,52 @@ find_node() {
   # The usual places a version manager or package manager puts it, newest nvm release first.
   for candidate in \
     "${HOME:-}"/.volta/bin/node \
-    "${HOME:-}"/.local/bin/node \
+    "${HOME:-}"/.local/bin/node; do
+    [ -x "${candidate}" ] && printf '%s' "${candidate}" && return 0
+  done
+  newest=
+  newest_major=-1
+  newest_minor=-1
+  newest_patch=-1
+  for candidate in "${HOME:-}/.nvm/versions/node/"*/bin/node; do
+    [ -x "${candidate}" ] || continue
+    version=${candidate%/bin/node}
+    version=${version##*/}
+    version=${version#v}
+    major=${version%%.*}
+    rest=${version#*.}
+    if [ "${rest}" = "${version}" ]; then
+      minor=0
+      patch=0
+    else
+      minor=${rest%%.*}
+      rest=${rest#*.}
+      if [ "${rest}" = "${minor}" ]; then
+        patch=0
+      else
+        patch=${rest%%.*}
+      fi
+    fi
+    case ${major} in *[!0-9]* | "") continue ;; esac
+    case ${minor} in *[!0-9]* | "") minor=0 ;; esac
+    case ${patch} in *[!0-9]* | "") patch=0 ;; esac
+    if [ "${major}" -gt "${newest_major}" ] ||
+      { [ "${major}" -eq "${newest_major}" ] && [ "${minor}" -gt "${newest_minor}" ]; } ||
+      { [ "${major}" -eq "${newest_major}" ] && [ "${minor}" -eq "${newest_minor}" ] && [ "${patch}" -gt "${newest_patch}" ]; }; then
+      newest=${candidate}
+      newest_major=${major}
+      newest_minor=${minor}
+      newest_patch=${patch}
+    fi
+  done
+  if [ -n "${newest}" ]; then
+    printf '%s' "${newest}"
+    return 0
+  fi
+  for candidate in \
     /opt/homebrew/bin/node \
     /usr/local/bin/node \
     /usr/bin/node; do
-    [ -x "${candidate}" ] && printf '%s' "${candidate}" && return 0
-  done
-  for candidate in $(ls -d "${HOME:-}"/.nvm/versions/node/*/bin/node 2>/dev/null | sort -rV); do
     [ -x "${candidate}" ] && printf '%s' "${candidate}" && return 0
   done
   return 1
