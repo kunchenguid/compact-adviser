@@ -1,0 +1,16 @@
+{
+  "name": "compact-adviser",
+  "owner": {
+    "name": "Kun Chen",
+    "url": "https://github.com/kunchenguid"
+  },
+  "plugins": [
+    {
+      "name": "compact-adviser",
+      "source": "./packages/claude-mod",
+      "description": "Suggests (or, opt-in, runs) /compact at a completed checkpoint judged by TypeSafe Jev.",
+      "version": "0.1.0",
+      "category": "productivity"
+    }
+  ]
+}

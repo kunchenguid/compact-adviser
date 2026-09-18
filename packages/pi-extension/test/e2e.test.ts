@@ -10,10 +10,28 @@ import { assistant, temp } from "./helpers.ts";
 
 const root = process.cwd();
 const binary = process.env.COMPACT_TEST_PI_BIN ?? "";
-assert.ok(
-  binary,
-  "Set COMPACT_TEST_PI_BIN to the actual Pi 0.82.0 executable (not npm's injected PATH).",
-);
+assert.ok(binary, "Set COMPACT_TEST_PI_BIN to the actual Pi executable (not npm's injected PATH).");
+const pinnedPi = JSON.parse(readFileSync(join(root, "package.json"), "utf8")).devDependencies[
+  "@earendil-works/pi-coding-agent"
+] as string;
+function atLeast(version: string, minimum: string): boolean {
+  const parts = (v: string) =>
+    v
+      .trim()
+      .replace(/^v/, "")
+      .split(".")
+      .slice(0, 3)
+      .map((n) => Number(n));
+  const a = parts(version);
+  const b = parts(minimum);
+  if (![...a, ...b].every(Number.isFinite) || a.length < 2 || b.length < 2) return false;
+  for (let i = 0; i < 3; i++) {
+    const left = a[i] ?? 0;
+    const right = b[i] ?? 0;
+    if (left !== right) return left > right;
+  }
+  return true;
+}
 function run(
   t: TestContext,
   mode: "hint" | "auto",
@@ -99,11 +117,11 @@ function run(
   return { dir, store, result: JSON.parse(result), events };
 }
 
-test("signed Pi 0.82.0: native configuration input is actually prefilled", (t) => {
-  assert.equal(
-    execFileSync(binary, ["--version"], { encoding: "utf8" }).trim(),
-    "0.82.0",
-    "Set COMPACT_TEST_PI_BIN to the target Pi 0.82.0 executable.",
+test("signed Pi: native configuration input is actually prefilled", (t) => {
+  const installed = execFileSync(binary, ["--version"], { encoding: "utf8" }).trim();
+  assert.ok(
+    atLeast(installed, "0.82.0"),
+    `Set COMPACT_TEST_PI_BIN to Pi 0.82.0 or newer (got ${installed}; development SDK ${pinnedPi}).`,
   );
   const r = run(t, "hint", [
     { send: "/compact-adviser\r", wait: "Compact adviser (saved for all sessions)" },
@@ -117,7 +135,7 @@ test("signed Pi 0.82.0: native configuration input is actually prefilled", (t) =
   assert.ok(r.result.ok);
 });
 
-test("signed Pi 0.82.0: real settled event produces the hint through native UI", (t) => {
+test("signed Pi: real settled event produces the hint through native UI", (t) => {
   const r = run(t, "hint", [
     { send: "Finish the fixture report.\r", wait: "Run /compact to save tokens." },
   ]);
@@ -127,7 +145,7 @@ test("signed Pi 0.82.0: real settled event produces the hint through native UI",
   assert.ok(!r.events.some((e) => e.event === "compacted"));
 });
 
-test("signed Pi 0.82.0: opt-in auto uses native compaction and resets usage", (t) => {
+test("signed Pi: opt-in auto uses native compaction and resets usage", (t) => {
   const r = run(t, "auto", [
     { send: "Finish the fixture report.\r", wait: "Compact adviser: compaction completed." },
   ]);
@@ -135,7 +153,7 @@ test("signed Pi 0.82.0: opt-in auto uses native compaction and resets usage", (t
   assert.ok(r.events.some((e) => e.event === "compacted" && e.tokens === null));
 });
 
-test("signed Pi 0.82.0: production-only independent package installs and loads through its manifest", (t) => {
+test("signed Pi: production-only independent package installs and loads through its manifest", (t) => {
   const r = run(
     t,
     "hint",

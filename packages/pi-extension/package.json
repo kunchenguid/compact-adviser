@@ -1,11 +1,25 @@
 {
   "name": "compact-adviser",
   "version": "0.1.0",
-  "private": true,
+  "license": "MIT",
   "description": "A standalone Pi extension that suggests semantic checkpoints for context compaction.",
   "type": "module",
   "keywords": [
     "pi-package"
+  ],
+  "homepage": "https://github.com/kunchenguid/compact-adviser#readme",
+  "bugs": {
+    "url": "https://github.com/kunchenguid/compact-adviser/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kunchenguid/compact-adviser.git",
+    "directory": "packages/pi-extension"
+  },
+  "files": [
+    "src",
+    "README.md",
+    "LICENSE"
   ],
   "engines": {
     "node": ">=22"

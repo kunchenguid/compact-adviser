@@ -48,11 +48,11 @@ for (const r of rows) {
               continuationConf: cont.confidence,
             }
           : {}),
-        hint: qualifies(j, false),
-        auto: qualifies(j, true),
+        hint: qualifies(j),
+        auto: qualifies(j),
       });
       console.error(
-        `${r.id} r${rep} ${String(latencyMs).padStart(5)}ms ${j.phase.choice} hint=${qualifies(j, false)}`,
+        `${r.id} r${rep} ${String(latencyMs).padStart(5)}ms ${j.phase.choice} hint=${qualifies(j)}`,
       );
     } catch (e) {
       const err = e as { kind?: string; message?: string };

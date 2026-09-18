@@ -2,6 +2,7 @@
   "name": "compact-adviser-claude-mod",
   "version": "0.1.0",
   "private": true,
+  "license": "MIT",
   "description": "A standalone Claude Code mod that suggests semantic checkpoints for context compaction.",
   "type": "module",
   "scripts": {
