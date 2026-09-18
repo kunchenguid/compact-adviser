@@ -331,7 +331,7 @@ try {
   // The pane can be drawn before the host gives it keyboard focus. Wait for its ring, then
   // count only arrows that observably move it; keys sent while focus is settling can be dropped.
   const ESC = String.fromCharCode(27);
-  const inverse = new RegExp(`${ESC}\\[7m([^${ESC}\\n]*)${ESC}\\[(?:0|27|39)m`);
+  const inverse = new RegExp(`${ESC}\\[7m(?:${ESC}\\[[0-9;]*m)*([^${ESC}\\n]*)`);
   const highlighted = () => inverse.exec(screenRaw())?.[1]?.trim() ?? "";
   async function moveTo(rowText, direction = "Down") {
     const deadline = Date.now() + 15000;
