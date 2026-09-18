@@ -54,7 +54,7 @@ so a slow call is measured rather than counted as a failure; production uses
 2000ms. Latency is recorded per row so that gap is visible. Each result row
 carries both answers (`doneP`, `shapeP`) and the composed `score`; `hint` and
 `auto` are the gate at one reference context usage (third argument, default
-0.5, floor 0.80), and `metrics.py` or `schedule.py` re-gate from `score` at any
+0.5, floor 0.70), and `metrics.py` or `schedule.py` re-gate from `score` at any
 floor, so one live run measures the whole usage-dependent ladder.
 
 Optional provenance: `build.ts` marks rows whose snapshot state matches a logged

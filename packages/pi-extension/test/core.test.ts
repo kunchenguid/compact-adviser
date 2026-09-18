@@ -20,6 +20,8 @@ import {
   qualifies,
   requestBody,
   score,
+  USAGE_LOOSE_AT,
+  USAGE_STRICT_UNTIL,
 } from "../src/judge.ts";
 import { apiResponse, assistant, harness, temp, toolResult } from "./helpers.ts";
 
@@ -216,28 +218,29 @@ test("tool results count in the 64-message window and long dumps keep a head and
 test("two typed factors compose into one score; the floor slides with usage", () => {
   const valid = parseJudgment(apiResponse());
   assert.equal(FLOOR_MAX, 0.9);
-  assert.equal(FLOOR_MIN, 0.4);
+  assert.equal(FLOOR_MIN, 0.5);
+  assert.equal(USAGE_STRICT_UNTIL, 0.1);
+  assert.equal(USAGE_LOOSE_AT, 0.9);
   assert.ok(qualifies(valid, 0.2));
   // finished is the gate, hands-on adds up to half again
   assert.ok(Math.abs(score(parseJudgment(apiResponse(1, 1))) - 1) < 1e-9);
   assert.ok(Math.abs(score(parseJudgment(apiResponse(1, 0))) - 0.5) < 1e-9);
   assert.ok(Math.abs(score(parseJudgment(apiResponse(0, 1))) - 0) < 1e-9);
   assert.ok(Math.abs(score(parseJudgment(apiResponse(0.8, 0.5))) - 0.6) < 1e-9);
-  // the schedule: strict while the window is mostly empty, loose as it fills
+  // the schedule: 0.90 through 10 %, linear ramp to 0.50 at 90 %
   assert.equal(floorFor(0), 0.9);
-  assert.equal(floorFor(0.4), 0.9);
-  assert.equal(floorFor(0.5), 0.8);
-  assert.equal(floorFor(0.7), 0.6);
-  assert.equal(floorFor(0.9), 0.4);
-  assert.equal(floorFor(1), 0.4);
+  assert.equal(floorFor(0.1), 0.9);
+  assert.equal(floorFor(0.5), 0.7);
+  assert.equal(floorFor(0.9), 0.5);
+  assert.equal(floorFor(1), 0.5);
   assert.equal(floorFor(Number.NaN), 0.9);
   assert.equal(floorFor(-1), 0.9);
   for (let u = 0; u < 1; u += 0.05) assert.ok(floorFor(u) >= floorFor(u + 0.05));
-  // a finished coordinating unit (score 0.5) hints only once the window is 80 % full
+  // a finished coordinating unit (score 0.5) hints only once the window is 90 % full
   const coordinating = parseJudgment(apiResponse(1, 0));
   assert.ok(!qualifies(coordinating, 0.3));
-  assert.ok(!qualifies(coordinating, 0.79));
-  assert.ok(qualifies(coordinating, 0.8));
+  assert.ok(!qualifies(coordinating, 0.89));
+  assert.ok(qualifies(coordinating, 0.9));
   // a confident hands-on completion hints at any usage; unfinished work never does
   assert.ok(qualifies(parseJudgment(apiResponse(0.95, 0.9)), 0));
   assert.ok(!qualifies(parseJudgment(apiResponse(0.2, 1)), 1));

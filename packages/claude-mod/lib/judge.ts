@@ -184,9 +184,11 @@ export function parseJudgment(value: unknown): Judgment {
 /** The strictest hint floor: while the window is mostly empty, or when usage is unknown. */
 export const FLOOR_MAX = 0.9;
 /** The loosest hint floor: when the window is nearly full and compaction is imminent anyway. */
-export const FLOOR_MIN = 0.4;
-/** Between the clamps the floor is FLOOR_OFFSET minus usage: one point of floor per point of usage. */
-export const FLOOR_OFFSET = 1.3;
+export const FLOOR_MIN = 0.5;
+/** Usage at or below this keeps FLOOR_MAX. Negative and unknown usage also get FLOOR_MAX. */
+export const USAGE_STRICT_UNTIL = 0.1;
+/** Usage at or above this uses FLOOR_MIN. */
+export const USAGE_LOOSE_AT = 0.9;
 
 /**
  * The composed score: finished is the gate, hands-on adds up to half again.
@@ -209,8 +211,12 @@ export function score(j: Judgment): number {
  * fills. Unknown usage gets the strictest floor.
  */
 export function floorFor(usage: number): number {
-  if (!Number.isFinite(usage) || usage < 0) return FLOOR_MAX;
-  const raw = Math.min(FLOOR_MAX, Math.max(FLOOR_MIN, FLOOR_OFFSET - usage));
+  if (!Number.isFinite(usage) || usage <= USAGE_STRICT_UNTIL) return FLOOR_MAX;
+  if (usage >= USAGE_LOOSE_AT) return FLOOR_MIN;
+  const raw =
+    FLOOR_MAX -
+    (FLOOR_MAX - FLOOR_MIN) *
+      ((usage - USAGE_STRICT_UNTIL) / (USAGE_LOOSE_AT - USAGE_STRICT_UNTIL));
   return Math.round(raw * 1000) / 1000;
 }
 

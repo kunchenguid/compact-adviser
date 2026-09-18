@@ -2,7 +2,7 @@
  * Score the checkpoint dataset against live TypeSafe Jev using the shipped
  * judge(), score() and qualifies(). Writes one result row per checkpoint with
  * both answers and the composed score; `hint` / `auto` are the gate at a
- * reference context usage (default 0.5, floor 0.80), and metrics.py can
+ * reference context usage (default 0.5, floor 0.70), and metrics.py can
  * re-gate from `score` at any floor.
  *   node --import tsx eval/score.ts <dataDir> [repeats] [usage]
  * The key is read from the environment only and is never printed or stored.

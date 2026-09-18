@@ -37,6 +37,7 @@ function run(
   mode: "hint" | "auto",
   actions: { send: string; wait?: string }[],
   installed = false,
+  fixture: { inputTokens?: number; coordinating?: boolean } = {},
 ) {
   const dir = temp(t),
     store = new ConfigStore(dir);
@@ -100,6 +101,8 @@ function run(
       PI_TELEMETRY: "0",
       TYPESAFE_API_KEY: "test-key-not-a-secret",
       COMPACT_TEST_LOG: log,
+      COMPACT_TEST_INPUT_TOKENS: String(fixture.inputTokens ?? 45000),
+      COMPACT_TEST_COORDINATING: fixture.coordinating ? "1" : "0",
     },
     actions,
     output: join(dir, "terminal.log"),
@@ -143,6 +146,30 @@ test("signed Pi: real settled event produces the hint through native UI", (t) =>
   assert.ok(r.events.some((e) => e.event === "start" && e.mode === "tui"));
   assert.ok(r.events.some((e) => e.event === "settled" && e.idle));
   assert.ok(!r.events.some((e) => e.event === "compacted"));
+});
+
+test("signed Pi: knee floor withholds a coordinating hint until 90% usage", (t) => {
+  const early = run(
+    t,
+    "hint",
+    [
+      { send: "Finish the low-usage fixture report.\r", wait: "This phase is complete" },
+      { send: "/compact-adviser status\r", wait: "hint floor 0.87" },
+    ],
+    false,
+    { inputTokens: 45000, coordinating: true },
+  );
+  assert.equal(early.events.filter((e) => e.event === "jev").length, 1);
+  assert.ok(!early.result.tail.includes("Run /compact to save tokens."));
+
+  const full = run(
+    t,
+    "hint",
+    [{ send: "Finish the nearly-full fixture report.\r", wait: "Run /compact to save tokens." }],
+    false,
+    { inputTokens: 245000, coordinating: true },
+  );
+  assert.equal(full.events.filter((e) => e.event === "jev").length, 1);
 });
 
 test("signed Pi: opt-in auto uses native compaction and resets usage", (t) => {
