@@ -255,9 +255,16 @@ function launch() {
 }
 
 async function ask(prompt) {
+  const requestsBefore = modelRequests;
   type(prompt);
-  await sleep(400);
-  key("Enter");
+  const deadline = Date.now() + 15000;
+  while (Date.now() < deadline) {
+    // Like the trust dialog, the composer can paint typed text before it accepts Enter.
+    key("Enter");
+    await sleep(300);
+    if (modelRequests > requestsBefore) return;
+  }
+  throw new Error(`[${step}] the composer never submitted ${JSON.stringify(prompt)}\n--- screen ---\n${screen()}`);
 }
 
 function hintLines(shot) {
