@@ -9,9 +9,11 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import * as claude from "../../claude-mod/lib/judge.ts";
+import * as claudeLog from "../../claude-mod/lib/log.ts";
 import * as claudeSnapshot from "../../claude-mod/lib/snapshot.ts";
 import * as piContext from "../src/context.ts";
 import * as pi from "../src/judge.ts";
+import * as piLog from "../src/log.ts";
 
 /** Shaped like a real `snapshot()`, small enough to stay well under the cap. */
 const state = {
@@ -121,4 +123,53 @@ test("both packages scrub owned settings fields and known key values the same wa
   );
   assert.ok(!claudeSnapshot.redact(dump).text.includes(secret));
   assert.ok(claudeSnapshot.redact(dump).text.includes("hint"));
+});
+
+test("both packages write the same TypeSafe log line shape", () => {
+  const body = pi.requestBody(state);
+  const judgment = pi.parseJudgment({
+    model: "jev-1.13.0",
+    answers: {
+      done: {
+        type: "choice",
+        choice: "finished",
+        probabilities: { finished: 0.93, not_finished: 0.06, unclear: 0.01 },
+        confidence: 0.88,
+      },
+      shape: {
+        type: "choice",
+        choice: "hands_on",
+        probabilities: { hands_on: 0.97, coordinating: 0.02, unclear: 0.01 },
+        confidence: 0.95,
+      },
+    },
+    usage: { input_tokens: 7440, output_tokens: 44 },
+  });
+  const at = "2026-09-18T00:00:00.000Z";
+  assert.equal(claudeLog.requestLogId(body), piLog.requestLogId(body));
+  assert.equal(claudeLog.requestLogLine(body, at), piLog.requestLogLine(body, at));
+  assert.equal(
+    claudeLog.responseLogLine(body, judgment, 0.2, at),
+    piLog.responseLogLine(body, judgment, 0.2, at),
+  );
+  assert.equal(
+    claudeLog.responseLogLine(body, judgment, Number.NaN, at),
+    piLog.responseLogLine(body, judgment, Number.NaN, at),
+  );
+  assert.equal(
+    claudeLog.errorLogLine("timeout", body, at),
+    piLog.errorLogLine("timeout", body, at),
+  );
+  assert.equal(
+    claudeLog.errorLogLine("input", undefined, at),
+    piLog.errorLogLine("input", undefined, at),
+  );
+  assert.equal(
+    claudeLog.loggedJudgeErrorKind(new claude.JudgeError("network")),
+    piLog.loggedJudgeErrorKind(new pi.JudgeError("network")),
+  );
+  assert.equal(
+    claudeLog.loggedJudgeErrorKind(new Error("boom")),
+    piLog.loggedJudgeErrorKind(new Error("boom")),
+  );
 });

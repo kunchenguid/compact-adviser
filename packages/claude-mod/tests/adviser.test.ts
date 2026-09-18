@@ -2,7 +2,12 @@
 // gates, hint and automatic outcomes, cooldowns across compactions, the commands, and
 // the settings pane. The world beneath the plugin is mocked in ./support.ts.
 import { describe, type Engine, expect, test } from "claude-code/testing";
-import { JUDGE_DISABLED_NETWORK_MESSAGE, judgeErrorMessage } from "../lib/judge.ts";
+import {
+  JUDGE_DISABLED_NETWORK_MESSAGE,
+  judgeErrorMessage,
+  parseJudgment,
+  score,
+} from "../lib/judge.ts";
 import { RECENT_TAIL_MESSAGES } from "../lib/snapshot.ts";
 import {
   answered,
@@ -23,6 +28,11 @@ import {
 
 const MESSAGES = [{ role: "user" as const, text: "hello", toolUses: [] }];
 const HINT = "Potential session boundary detected. Run /compact to save tokens.";
+
+function lastJsonl(write: { text: string } | undefined) {
+  const lines = (write?.text ?? "").trim().split("\n").filter(Boolean);
+  return JSON.parse(lines.at(-1) ?? "");
+}
 
 /** Drain `$.clock.after(0, …)` plus the async judgment it starts. */
 async function drain(w: World) {
@@ -97,11 +107,38 @@ describe("turn-end gates", () => {
     await $.session.start(interactiveStart);
     await turnEnd($, w);
     expect(w.journal.requests).toHaveLength(1);
-    expect(w.journal.fsWrites).toHaveLength(1);
-    const logged = w.journal.fsWrites[0]?.text ?? "";
-    expect(logged.includes("jev-latest")).toBe(true);
-    expect(logged.includes(KEY)).toBe(false);
-    expect(w.journal.fsWrites[0]?.path.endsWith("compact-adviser-requests.jsonl")).toBe(true);
+    expect(w.journal.fsWrites).toHaveLength(2);
+    const requestLine = lastJsonl(w.journal.fsWrites[0]);
+    const responseLine = lastJsonl(w.journal.fsWrites[1]);
+    expect(w.journal.fsWrites[1]?.text.trim().split("\n")).toHaveLength(2);
+    expect(requestLine.kind).toBe("request");
+    expect(requestLine.body.model).toBe("jev-latest");
+    expect(responseLine.kind).toBe("response");
+    expect(responseLine.id).toBe(requestLine.id);
+    expect(responseLine.answers.done.choice).toBe("finished");
+    expect(typeof responseLine.answers.done.probabilities.finished).toBe("number");
+    expect(typeof responseLine.answers.shape.probabilities.hands_on).toBe("number");
+    expect(responseLine.score).toBe(score(parseJudgment(jevAnswer())));
+    expect(responseLine.usage).toBe(0.3);
+    expect(typeof responseLine.floor).toBe("number");
+    expect(responseLine.qualifies).toBe(true);
+    expect(w.journal.fsWrites[0]?.path.endsWith("compact-adviser-requests-session-1.jsonl")).toBe(
+      true,
+    );
+    expect(w.journal.fsWrites.some((write) => write.text.includes(KEY))).toBe(false);
+  });
+
+  test("each session writes its own request log file", async ($, on) => {
+    const w = world(on, { logRequests: true });
+    await $.session.start(interactiveStart);
+    await turnEnd($, w);
+    w.sessionId = "session-2";
+    w.messages = longConversation("Please finish the other parser and commit it.");
+    await turnEnd($, w);
+    const paths = [...new Set(w.journal.fsWrites.map((write) => write.path))];
+    expect(paths).toHaveLength(2);
+    expect(paths[0]?.endsWith("compact-adviser-requests-session-1.jsonl")).toBe(true);
+    expect(paths[1]?.endsWith("compact-adviser-requests-session-2.jsonl")).toBe(true);
   });
 
   test("a saved key in a settings.json read is absent from the TypeSafe body and request log", async ($, on) => {
@@ -147,9 +184,41 @@ describe("turn-end gates", () => {
     expect(request.headers.Authorization).toBe(`Bearer ${secret}`);
     expect(request.body.includes(secret)).toBe(false);
     expect(request.body).toContain("hint");
-    const logged = w.journal.fsWrites[0]?.text ?? "";
+    const logged = w.journal.fsWrites.map((write) => write.text).join("");
     expect(logged.includes(secret)).toBe(false);
     expect(logged.includes("jev-latest")).toBe(true);
+  });
+
+  test("a silent no-qualify turn still logs the Jev response", async ($, on) => {
+    const answer = jevAnswer({ completed: 0.99, handsOn: 0.01 });
+    const w = world(on, { logRequests: true });
+    w.respond = async () => ({ status: 200, text: JSON.stringify(answer) });
+    await $.session.start(interactiveStart);
+    await turnEnd($, w);
+    expect(w.journal.requests).toHaveLength(1);
+    expect(w.journal.statuses.includes(HINT)).toBe(false);
+    expect(w.journal.fsWrites).toHaveLength(2);
+    const responseLine = lastJsonl(w.journal.fsWrites[1]);
+    expect(responseLine.kind).toBe("response");
+    expect(responseLine.qualifies).toBe(false);
+    expect(responseLine.score).toBe(score(parseJudgment(answer)));
+    expect(w.journal.fsWrites.some((write) => write.text.includes(KEY))).toBe(false);
+  });
+
+  test("a judgment failure logs the error kind without the key", async ($, on) => {
+    const w = world(on, { logRequests: true });
+    w.respond = async () => ({ status: 429, text: `rate-limit ${KEY}` });
+    await $.session.start(interactiveStart);
+    await turnEnd($, w);
+    expect(w.journal.fsWrites).toHaveLength(2);
+    const requestLine = lastJsonl(w.journal.fsWrites[0]);
+    const errorLine = lastJsonl(w.journal.fsWrites[1]);
+    expect(requestLine.kind).toBe("request");
+    expect(errorLine.kind).toBe("error");
+    expect(errorLine.id).toBe(requestLine.id);
+    expect(errorLine.error).toEqual({ kind: "rate-limit" });
+    expect(JSON.stringify(errorLine).includes(KEY)).toBe(false);
+    expect(w.journal.fsWrites.some((write) => write.text.includes(KEY))).toBe(false);
   });
 
   test("the next turn clears the hint without restoring a status strip", async ($, on) => {
@@ -674,6 +743,17 @@ describe("commands", () => {
     const line = w.journal.logs.at(-1) ?? "";
     expect(line).toBe(
       "Mode: hint. Minimum: 40,000 tokens. Context: 60,000 (30% of the window; hint floor 0.80). Key: env. No cooldown; semantic checks still apply. Claude Code auto-compacts at 167,000 tokens. Request log: off. Settings: /config (compact-adviser rows) and /compact-adviser.",
+    );
+    expect(line.includes(KEY)).toBe(false);
+  });
+
+  test("status names this session's request log when logging is on", async ($, on) => {
+    const w = world(on, { logRequests: true });
+    await $.session.start(interactiveStart);
+    await $.command.run(commandRun("status"));
+    const line = w.journal.logs.at(-1) ?? "";
+    expect(line.includes("/home/fixture/.claude/compact-adviser-requests-session-1.jsonl")).toBe(
+      true,
     );
     expect(line.includes(KEY)).toBe(false);
   });

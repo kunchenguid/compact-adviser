@@ -29,6 +29,7 @@ const settled = entries.filter(
 console.log(`settled assistant checkpoints: ${settled.length}`);
 
 for (const rec of logged) {
+  if (rec.body?.state === undefined) continue;
   const want = JSON.stringify(rec.body.state);
   const t = Date.parse(rec.at);
   const near = settled.filter((e) => Math.abs(Date.parse(e.timestamp ?? "") - t) < 5 * 60 * 1000);

@@ -60,8 +60,9 @@ floor, so one live run measures the whole usage-dependent ladder.
 Optional provenance: `build.ts` marks rows whose snapshot state matches a logged
 production request. It reads `~/.pi/agent/compact-adviser-requests.jsonl` unless
 `COMPACT_ADVISER_REQUEST_LOG` is set. Enable request logging from
-`/compact-adviser` first. The log is the redacted body; it never includes the
-API key.
+`/compact-adviser` first. The log is the redacted body plus the Jev response
+used to gate the hint; it never includes the API key. Response and error lines
+are ignored when matching live request bodies.
 
 ## Commands
 

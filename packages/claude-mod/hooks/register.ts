@@ -44,7 +44,13 @@ import {
   qualifies,
   requestBody,
 } from "../lib/judge.ts";
-import { requestLogLine, requestLogPath } from "../lib/log.ts";
+import {
+  errorLogLine,
+  loggedJudgeErrorKind,
+  requestLogLine,
+  requestLogPath,
+  responseLogLine,
+} from "../lib/log.ts";
 import { snapshot } from "../lib/snapshot.ts";
 import {
   backoff,
@@ -148,6 +154,21 @@ async function logHome($: EngineInterface): Promise<string> {
   return ((await $.env.get("HOME")) ?? (await $.session.cwd())).replace(/[\\/]+$/, "");
 }
 
+async function sessionLogPath($: EngineInterface): Promise<string> {
+  return requestLogPath(await logHome($), await $.session.id());
+}
+
+async function appendTypeSafeLog($: EngineInterface, line: string): Promise<void> {
+  const path = await sessionLogPath($);
+  let existing = "";
+  try {
+    existing = await $.fs.read(path);
+  } catch {
+    existing = "";
+  }
+  await $.fs.write(path, `${existing}${line}`);
+}
+
 function notice($: EngineInterface, message: string): void {
   if (diagnostic === message) return;
   diagnostic = message;
@@ -212,16 +233,11 @@ async function judgeCheckpoint($: EngineInterface, epoch: number): Promise<void>
     if (view.conversationTokens <= 20000) return;
     const fingerprint = await checkpointKey(view.checkpointText);
     if ((await loadState($)).state.lastHintKey === fingerprint) return;
+    let loggedBody: string | undefined;
     if (initial.logRequests) {
       try {
-        const path = requestLogPath(await logHome($));
-        let existing = "";
-        try {
-          existing = await $.fs.read(path);
-        } catch {
-          existing = "";
-        }
-        await $.fs.write(path, `${existing}${requestLogLine(requestBody(view.state))}`);
+        loggedBody = requestBody(view.state);
+        await appendTypeSafeLog($, requestLogLine(loggedBody));
       } catch {
         // Request logging must not replace or delay the judgment.
       }
@@ -236,6 +252,13 @@ async function judgeCheckpoint($: EngineInterface, epoch: number): Promise<void>
       });
     } catch (error) {
       if (epoch !== generation) return;
+      if (initial.logRequests) {
+        try {
+          await appendTypeSafeLog($, errorLogLine(loggedJudgeErrorKind(error), loggedBody));
+        } catch {
+          // Error logging must not replace backoff.
+        }
+      }
       const { key, state } = await loadState($);
       await $.store.set(key, backoff(state, await $.clock.now()));
       notice($, judgeFailureMessage(error));
@@ -246,6 +269,16 @@ async function judgeCheckpoint($: EngineInterface, epoch: number): Promise<void>
     const { key, state: current } = await loadState($);
     const now = await $.clock.now();
     const { context } = await $.session.usage();
+    if (initial.logRequests) {
+      try {
+        await appendTypeSafeLog(
+          $,
+          responseLogLine(loggedBody ?? requestBody(view.state), result, usageFraction(context)),
+        );
+      } catch {
+        // Response logging must not replace the gate decision.
+      }
+    }
     if (
       JSON.stringify(latest) !== JSON.stringify(initial) ||
       !(await eligible($, latest, current, context.tokens, now))
@@ -458,7 +491,7 @@ async function changeLogRequests($: EngineInterface, enabled: boolean): Promise<
     LOG_KEY,
     enabled,
     enabled
-      ? `TypeSafe request logging on (all sessions). ${requestLogPath(await logHome($))}`
+      ? `TypeSafe request logging on (all sessions). ${await sessionLogPath($)}`
       : "TypeSafe request logging off (all sessions).",
   );
 }
@@ -498,7 +531,7 @@ async function statusText($: EngineInterface): Promise<string> {
       ? (cooldownReason(state, tokens, await $.clock.now()) ??
         "No cooldown; semantic checks still apply.")
       : "Waiting for fresh model usage.";
-  return `Mode: ${config.mode}${config.mode === "auto" && !config.autoAcknowledged ? " (not confirmed)" : ""}. Minimum: ${formatTokens(config.minContextTokens)} tokens. Context: ${typeof tokens === "number" ? formatTokens(tokens) : "unknown"}${Number.isFinite(usageFraction(usage.context)) ? ` (${Math.round(usageFraction(usage.context) * 100)}% of the window; hint floor ${floorFor(usageFraction(usage.context)).toFixed(2)})` : ""}. ${formatKeyStatus((await resolvedKey($)).source)}. ${cooldown}${engine} Request log: ${config.logRequests ? requestLogPath(await logHome($)) : "off"}. Settings: /config (compact-adviser rows) and /compact-adviser.`;
+  return `Mode: ${config.mode}${config.mode === "auto" && !config.autoAcknowledged ? " (not confirmed)" : ""}. Minimum: ${formatTokens(config.minContextTokens)} tokens. Context: ${typeof tokens === "number" ? formatTokens(tokens) : "unknown"}${Number.isFinite(usageFraction(usage.context)) ? ` (${Math.round(usageFraction(usage.context) * 100)}% of the window; hint floor ${floorFor(usageFraction(usage.context)).toFixed(2)})` : ""}. ${formatKeyStatus((await resolvedKey($)).source)}. ${cooldown}${engine} Request log: ${config.logRequests ? await sessionLogPath($) : "off"}. Settings: /config (compact-adviser rows) and /compact-adviser.`;
 }
 
 async function snoozeOrDismiss($: EngineInterface, command: "snooze" | "dismiss") {

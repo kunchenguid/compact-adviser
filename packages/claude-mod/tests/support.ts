@@ -61,6 +61,7 @@ export type World = {
   store: Map<string, unknown>;
   journal: Journal;
   rows: Map<string, string | number | boolean>;
+  sessionId: string;
   /** The next answers `$.ui.ask` gives, in order; an `undefined` entry dismisses the dialog. */
   answers: (string | undefined)[];
   usage: { tokens?: number; window: number; autoCompactThreshold?: number };
@@ -161,6 +162,7 @@ export function world(on: On, options: WorldOptions = {}): World {
     fsReads: [],
     fsWrites: [],
   };
+  const jsonlFiles = new Map<string, string>();
   const rows = new Map<string, string | number | boolean>([
     [`${PLUGIN}.mode`, options.mode ?? "hint"],
     [`${PLUGIN}.minContextTokens`, options.minimum ?? 40000],
@@ -173,6 +175,7 @@ export function world(on: On, options: WorldOptions = {}): World {
     store,
     journal,
     rows,
+    sessionId: SESSION,
     answers: [],
     usage: { tokens: 60000, window: 200000, autoCompactThreshold: 167000 },
     messages: longConversation(),
@@ -190,7 +193,7 @@ export function world(on: On, options: WorldOptions = {}): World {
   on("session.start", async (_$, e) => ({ cwd: e.cwd }));
   on("turn.start", async (_$, e) => ({ turnId: e.turnId }));
   on("turn.complete", async (_$, e) => ({ text: e.answer }));
-  on("session.id", async () => ({ value: SESSION }));
+  on("session.id", async () => ({ value: w.sessionId }));
   on("session.usage", async (_$, e) => {
     journal.usageReads += 1;
     const context: Record<string, unknown> = { window: w.usage.window };
@@ -297,15 +300,19 @@ export function world(on: On, options: WorldOptions = {}): World {
     const envFile = e.path === ".env" || e.path.endsWith("/.env");
     if (envFile) journal.fsReads.push(e.path);
     if (envFile && options.dotenv !== undefined) return { value: options.dotenv };
-    if (String(e.path).endsWith("compact-adviser-requests.jsonl")) {
+    if (/compact-adviser-requests[^/]*\.jsonl$/.test(String(e.path))) {
       journal.fsReads.push(e.path);
-      throw new Error("ENOENT");
+      const existing = jsonlFiles.get(String(e.path));
+      if (existing === undefined) throw new Error("ENOENT");
+      return { value: existing };
     }
     return next(e);
   });
   on("fs.write", async (_$, e) => {
     const write = e as { path: string; text: string };
     journal.fsWrites.push({ path: write.path, text: write.text });
+    if (/compact-adviser-requests[^/]*\.jsonl$/.test(write.path))
+      jsonlFiles.set(write.path, write.text);
     return { value: undefined };
   });
   on("http.fetch", async (_$, e) => {
