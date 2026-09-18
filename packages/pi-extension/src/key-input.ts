@@ -30,7 +30,7 @@ export function promptSecret(ctx: ExtensionCommandContext): Promise<string | und
       },
       render(width: number) {
         heading.setText(
-          theme.fg("accent", "TypeSafe API key (saved for all sessions; never shown again)"),
+          theme.fg("accent", "OpenRouter API key (saved for all sessions; never shown again)"),
         );
         help.setText(
           theme.fg(

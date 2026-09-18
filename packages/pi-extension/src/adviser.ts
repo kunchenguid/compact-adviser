@@ -13,7 +13,7 @@ import {
   parseSavedApiKey,
 } from "./config.ts";
 import { snapshot } from "./context.ts";
-import { formatKeyStatus, type ResolvedTypesafeApiKey, resolveTypesafeApiKey } from "./env.ts";
+import { formatKeyStatus, type ResolvedOpenRouterApiKey, resolveOpenRouterApiKey } from "./env.ts";
 import {
   floorFor,
   JUDGE_UNAVAILABLE_MESSAGE,
@@ -47,21 +47,21 @@ interface Options {
 }
 function savedApiKey(store: ConfigStore): string | undefined {
   try {
-    return store.read().typesafeApiKey;
+    return store.read().openrouterApiKey;
   } catch {
     return undefined;
   }
 }
 export function installAdviser(pi: ExtensionAPI, options: Options): void {
   const store = new ConfigStore(options.agentDir);
-  const resolvedKey = (): ResolvedTypesafeApiKey => {
+  const resolvedKey = (): ResolvedOpenRouterApiKey => {
     if (options.key) {
       const value = options.key();
       return value !== undefined && value.trim() !== ""
         ? { value, source: "env" }
         : { value: undefined, source: "missing" };
     }
-    return resolveTypesafeApiKey(process.env, process.cwd(), savedApiKey(store));
+    return resolveOpenRouterApiKey(process.env, process.cwd(), savedApiKey(store));
   };
   const key = () => resolvedKey().value;
   const now = options.now ?? Date.now;
@@ -367,7 +367,7 @@ export function installAdviser(pi: ExtensionAPI, options: Options): void {
       save(
         ctx,
         { mode, autoAcknowledged: true },
-        "Automatic mode saved (all sessions). A TypeSafe key is still required.",
+        "Automatic mode saved (all sessions). An OpenRouter key is still required.",
       );
     } else
       save(
@@ -404,32 +404,32 @@ export function installAdviser(pi: ExtensionAPI, options: Options): void {
       ctx,
       { logRequests: enabled },
       enabled
-        ? `TypeSafe request logging on (all sessions). ${requestLogPath(options.agentDir)}`
-        : "TypeSafe request logging off (all sessions).",
+        ? `OpenRouter request logging on (all sessions). ${requestLogPath(options.agentDir)}`
+        : "OpenRouter request logging off (all sessions).",
     );
   }
   function changeSavedApiKey(ctx: ExtensionCommandContext, text: string) {
     save(
       ctx,
-      { typesafeApiKey: parseSavedApiKey(text) },
-      "TypeSafe API key saved (all sessions). Status shows the source, never the value.",
+      { openrouterApiKey: parseSavedApiKey(text) },
+      "OpenRouter API key saved (all sessions). Status shows the source, never the value.",
     );
   }
   function clearSavedApiKey(ctx: ExtensionCommandContext) {
     save(
       ctx,
-      { typesafeApiKey: "" },
-      "Saved TypeSafe API key cleared (all sessions). Launch environment and .env still apply.",
+      { openrouterApiKey: "" },
+      "Saved OpenRouter API key cleared (all sessions). Launch environment and .env still apply.",
     );
   }
   async function menu(ctx: ExtensionCommandContext) {
     while (true) {
       const c = store.read();
-      const keyLabel = `TypeSafe API key: ${c.typesafeApiKey ? "saved" : "not saved"}`;
+      const keyLabel = `OpenRouter API key: ${c.openrouterApiKey ? "saved" : "not saved"}`;
       const labels = [
         `Mode: ${c.mode}`,
         `Minimum context: ${c.minContextTokens.toLocaleString("en-US")} tokens`,
-        `Log TypeSafe requests: ${c.logRequests ? "on" : "off"}`,
+        `Log OpenRouter requests: ${c.logRequests ? "on" : "off"}`,
         keyLabel,
         "Reset minimum to 40,000",
         "Status",
@@ -463,11 +463,11 @@ export function installAdviser(pi: ExtensionAPI, options: Options): void {
           }
         }
       } else if (selected === labels[2]) {
-        const logging = await ctx.ui.select("Log TypeSafe requests", ["Off (default)", "On"]);
+        const logging = await ctx.ui.select("Log OpenRouter requests", ["Off (default)", "On"]);
         if (logging) await changeLogRequests(ctx, logging.startsWith("On"));
       } else if (selected === keyLabel) {
-        const actions = c.typesafeApiKey ? ["Set key", "Clear saved key"] : ["Set key"];
-        const action = await ctx.ui.select("TypeSafe API key", actions);
+        const actions = c.openrouterApiKey ? ["Set key", "Clear saved key"] : ["Set key"];
+        const action = await ctx.ui.select("OpenRouter API key", actions);
         if (action === "Clear saved key") clearSavedApiKey(ctx);
         else if (action === "Set key") {
           while (true) {
@@ -478,7 +478,7 @@ export function installAdviser(pi: ExtensionAPI, options: Options): void {
               break;
             } catch (error) {
               ctx.ui.notify(
-                error instanceof Error ? error.message : "Could not save the TypeSafe API key.",
+                error instanceof Error ? error.message : "Could not save the OpenRouter API key.",
                 "error",
               );
             }

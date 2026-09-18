@@ -21,7 +21,7 @@ export interface Config {
   minContextTokens: number;
   autoAcknowledged: boolean;
   logRequests: boolean;
-  typesafeApiKey?: string;
+  openrouterApiKey?: string;
 }
 export const DEFAULT_CONFIG: Readonly<Config> = Object.freeze({
   version: 1,
@@ -40,9 +40,9 @@ export function parseMinimum(text: string): number {
 }
 export function parseSavedApiKey(text: string): string {
   const value = text.trim();
-  if (!value) throw new Error("Enter a TypeSafe API key, or cancel to leave it unchanged.");
+  if (!value) throw new Error("Enter an OpenRouter API key, or cancel to leave it unchanged.");
   if (value.length > MAX_SAVED_API_KEY_LENGTH) {
-    throw new Error("That value is too long to save as a TypeSafe API key.");
+    throw new Error("That value is too long to save as an OpenRouter API key.");
   }
   for (let i = 0; i < value.length; i++) {
     const code = value.charCodeAt(i);
@@ -64,15 +64,17 @@ function validate(value: unknown): Config {
     c.minContextTokens <= 0 ||
     typeof c.autoAcknowledged !== "boolean" ||
     (c.logRequests !== undefined && typeof c.logRequests !== "boolean") ||
-    (c.typesafeApiKey !== undefined && typeof c.typesafeApiKey !== "string")
+    (c.openrouterApiKey !== undefined && typeof c.openrouterApiKey !== "string")
   ) {
     throw new Error("Invalid or unsupported settings. Restore a valid version-1 configuration.");
   }
-  const typesafeApiKey =
-    typeof c.typesafeApiKey === "string" && c.typesafeApiKey.trim() !== ""
-      ? c.typesafeApiKey.trim()
+  // A leftover `typesafeApiKey` from an older build is dropped, not rejected, so the existing
+  // settings file still loads. That key does not work with OpenRouter; the user enters a new one.
+  const openrouterApiKey =
+    typeof c.openrouterApiKey === "string" && c.openrouterApiKey.trim() !== ""
+      ? c.openrouterApiKey.trim()
       : undefined;
-  if (typesafeApiKey !== undefined && typesafeApiKey.length > MAX_SAVED_API_KEY_LENGTH) {
+  if (openrouterApiKey !== undefined && openrouterApiKey.length > MAX_SAVED_API_KEY_LENGTH) {
     throw new Error("Invalid or unsupported settings. Restore a valid version-1 configuration.");
   }
   return {
@@ -81,7 +83,7 @@ function validate(value: unknown): Config {
     minContextTokens: c.minContextTokens,
     autoAcknowledged: c.autoAcknowledged,
     logRequests: c.logRequests === true,
-    ...(typesafeApiKey !== undefined ? { typesafeApiKey } : {}),
+    ...(openrouterApiKey !== undefined ? { openrouterApiKey } : {}),
   };
 }
 export class ConfigStore {

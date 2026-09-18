@@ -65,7 +65,7 @@ export function cooldownReason(
   tokens: number,
   now: number,
 ): string | undefined {
-  if (now < state.retryAfter) return "TypeSafe backoff";
+  if (now < state.retryAfter) return "OpenRouter backoff";
   if (state.completed < state.snoozeUntil) return "Snoozed";
   if (
     state.compactionId &&

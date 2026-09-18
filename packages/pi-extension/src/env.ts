@@ -1,13 +1,13 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-const NAME = "TYPESAFE_API_KEY";
+const NAME = "OPENROUTER_API_KEY";
 const PREFIX = /^(?:export|declare\s+-x)\s+/;
 
-export type TypesafeKeySource = "env" | "saved" | ".env" | "missing";
-export interface ResolvedTypesafeApiKey {
+export type OpenRouterKeySource = "env" | "saved" | ".env" | "missing";
+export interface ResolvedOpenRouterApiKey {
   value: string | undefined;
-  source: TypesafeKeySource;
+  source: OpenRouterKeySource;
 }
 
 function unquote(value: string): string {
@@ -38,15 +38,15 @@ function nonempty(value: string | undefined): string | undefined {
 }
 
 /**
- * Process env (non-empty) wins, then a menu-saved key, then `TYPESAFE_API_KEY`
+ * Process env (non-empty) wins, then a menu-saved key, then `OPENROUTER_API_KEY`
  * from `.env` in `cwd`. A missing file is ignored; the value is never logged.
  */
-export function resolveTypesafeApiKey(
+export function resolveOpenRouterApiKey(
   env: NodeJS.ProcessEnv = process.env,
   cwd: string = process.cwd(),
   saved?: string,
-): ResolvedTypesafeApiKey {
-  const fromEnv = nonempty(env.TYPESAFE_API_KEY);
+): ResolvedOpenRouterApiKey {
+  const fromEnv = nonempty(env.OPENROUTER_API_KEY);
   if (fromEnv !== undefined) return { value: fromEnv, source: "env" };
   const fromSaved = nonempty(saved);
   if (fromSaved !== undefined) return { value: fromSaved, source: "saved" };
@@ -59,6 +59,6 @@ export function resolveTypesafeApiKey(
   return { value: undefined, source: "missing" };
 }
 
-export function formatKeyStatus(source: TypesafeKeySource): string {
+export function formatKeyStatus(source: OpenRouterKeySource): string {
   return `Key: ${source}`;
 }

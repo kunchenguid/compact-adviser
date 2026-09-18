@@ -2,7 +2,7 @@
 //
 // `mode`, `minContextTokens`, and `logRequests` are the plugin's manifest `userConfig` rows: the host
 // validates them, stores them in the user's settings.json, and shows them in /config.
-// `typesafeApiKey` is also a userConfig row so it lives in that same settings path, but this
+// `openrouterApiKey` is also a userConfig row so it lives in that same settings path, but this
 // module hides it from `/config` so the secret is never drawn there. Set, clear, and presence
 // are the compact-adviser pane's job.
 // `autoAcknowledged` lives in the plugin's own store so that only this mod's confirmation
@@ -14,7 +14,7 @@ export const PLUGIN = "compact-adviser";
 export const MODE_KEY = `${PLUGIN}.mode`;
 export const MINIMUM_KEY = `${PLUGIN}.minContextTokens`;
 export const LOG_KEY = `${PLUGIN}.logRequests`;
-export const API_KEY_KEY = `${PLUGIN}.typesafeApiKey`;
+export const API_KEY_KEY = `${PLUGIN}.openrouterApiKey`;
 export const CONSENT_STORE_KEY = "preferences";
 export const DEFAULT_MINIMUM = 40000;
 export const MAX_SAVED_API_KEY_LENGTH = 1024;
@@ -47,9 +47,9 @@ export function parseMinimum(text: string): number {
 
 export function parseSavedApiKey(text: string): string {
   const value = text.trim();
-  if (!value) throw new Error("Enter a TypeSafe API key, or cancel to leave it unchanged.");
+  if (!value) throw new Error("Enter an OpenRouter API key, or cancel to leave it unchanged.");
   if (value.length > MAX_SAVED_API_KEY_LENGTH) {
-    throw new Error("That value is too long to save as a TypeSafe API key.");
+    throw new Error("That value is too long to save as an OpenRouter API key.");
   }
   for (let i = 0; i < value.length; i++) {
     const code = value.charCodeAt(i);
@@ -131,13 +131,13 @@ export function readConfig(
   };
 }
 
-/** Menu-saved TypeSafe key from live `/config` rows or the options this module loaded with. */
+/** Menu-saved OpenRouter key from live `/config` rows or the options this module loaded with. */
 export function readSavedApiKey(
   rows: readonly ConfigRowLike[],
   loaded: Readonly<Record<string, unknown>> = {},
 ): string | undefined {
   const value =
-    rows.find((candidate) => candidate.key === API_KEY_KEY)?.value ?? loaded.typesafeApiKey;
+    rows.find((candidate) => candidate.key === API_KEY_KEY)?.value ?? loaded.openrouterApiKey;
   return typeof value === "string" && value.trim() !== "" ? value : undefined;
 }
 

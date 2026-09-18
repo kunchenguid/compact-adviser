@@ -36,9 +36,9 @@ import {
 } from "../lib/config.ts";
 import {
   formatKeyStatus,
+  type OpenRouterKeySource,
   parseDotenvKey,
-  resolveTypesafeApiKey,
-  type TypesafeKeySource,
+  resolveOpenRouterApiKey,
 } from "../lib/env.ts";
 import {
   floorFor,
@@ -113,26 +113,26 @@ function isActivated($: EngineInterface): Promise<boolean> {
 }
 
 async function resolvedKey($: EngineInterface) {
-  const fromEnv = await $.env.get("TYPESAFE_API_KEY");
+  const fromEnv = await $.env.get("OPENROUTER_API_KEY");
   if (fromEnv !== undefined && fromEnv.trim() !== "") {
-    return resolveTypesafeApiKey(fromEnv);
+    return resolveOpenRouterApiKey(fromEnv);
   }
   const saved = readSavedApiKey(await $.config.list(), loadedOptions);
-  if (saved) return resolveTypesafeApiKey(undefined, saved);
+  if (saved) return resolveOpenRouterApiKey(undefined, saved);
   let dotenv: string | undefined;
   try {
-    dotenv = parseDotenvKey(await $.fs.read(".env"), "TYPESAFE_API_KEY");
+    dotenv = parseDotenvKey(await $.fs.read(".env"), "OPENROUTER_API_KEY");
   } catch {
     dotenv = undefined;
   }
-  return resolveTypesafeApiKey(undefined, undefined, dotenv);
+  return resolveOpenRouterApiKey(undefined, undefined, dotenv);
 }
 
 async function apiKey($: EngineInterface): Promise<string> {
   return (await resolvedKey($)).value?.trim() ?? "";
 }
 
-/** A loopback-only endpoint override for the live regression's local TypeSafe fixture. */
+/** A loopback-only endpoint override for the live regression's local OpenRouter fixture. */
 async function testEndpoint($: EngineInterface): Promise<string | undefined> {
   const value = await $.env.get("COMPACT_ADVISER_TEST_ENDPOINT");
   return value !== undefined && LOOPBACK_ENDPOINT.test(value) ? value : undefined;
@@ -173,7 +173,7 @@ async function sessionLogPath($: EngineInterface): Promise<string> {
   return requestLogPath(await logHome($), await $.session.id());
 }
 
-async function appendTypeSafeLog($: EngineInterface, line: string): Promise<void> {
+async function appendLogLine($: EngineInterface, line: string): Promise<void> {
   const path = await sessionLogPath($);
   let existing = "";
   try {
@@ -252,7 +252,7 @@ async function judgeCheckpoint($: EngineInterface, epoch: number): Promise<void>
     if (initial.logRequests) {
       try {
         loggedBody = requestBody(view.state);
-        await appendTypeSafeLog($, requestLogLine(loggedBody));
+        await appendLogLine($, requestLogLine(loggedBody));
       } catch {
         // Request logging must not replace or delay the judgment.
       }
@@ -269,7 +269,7 @@ async function judgeCheckpoint($: EngineInterface, epoch: number): Promise<void>
       if (epoch !== generation) return;
       if (initial.logRequests) {
         try {
-          await appendTypeSafeLog($, errorLogLine(loggedJudgeErrorKind(error), loggedBody));
+          await appendLogLine($, errorLogLine(loggedJudgeErrorKind(error), loggedBody));
         } catch {
           // Error logging must not replace backoff.
         }
@@ -286,7 +286,7 @@ async function judgeCheckpoint($: EngineInterface, epoch: number): Promise<void>
     const { context } = await $.session.usage();
     if (initial.logRequests) {
       try {
-        await appendTypeSafeLog(
+        await appendLogLine(
           $,
           responseLogLine(loggedBody ?? requestBody(view.state), result, usageFraction(context)),
         );
@@ -400,7 +400,7 @@ async function saveRow(
     return false;
   }
   if (key === API_KEY_KEY && typeof value === "string") {
-    loadedOptions = { ...loadedOptions, typesafeApiKey: value };
+    loadedOptions = { ...loadedOptions, openrouterApiKey: value };
   }
   diagnostic = "";
   await showPendingNotice($);
@@ -496,7 +496,7 @@ const MODE_LABELS: Record<Mode, string> = {
 };
 
 /** What the list row says about the key in effect: its source, never its value. */
-const KEY_SOURCE_LABELS: Record<TypesafeKeySource, string> = {
+const KEY_SOURCE_LABELS: Record<OpenRouterKeySource, string> = {
   env: "from the environment",
   saved: "saved",
   ".env": "from .env",
@@ -504,18 +504,18 @@ const KEY_SOURCE_LABELS: Record<TypesafeKeySource, string> = {
 };
 
 /** The key view's explanation: which key is in effect, and what the actions here change. */
-function keyDetail(source: TypesafeKeySource, saved: boolean): string {
+function keyDetail(source: OpenRouterKeySource, saved: boolean): string {
   switch (source) {
     case "env":
       return saved
-        ? "In effect: TYPESAFE_API_KEY from the launch environment, which wins over the key saved here."
-        : "In effect: TYPESAFE_API_KEY from the launch environment.";
+        ? "In effect: OPENROUTER_API_KEY from the launch environment, which wins over the key saved here."
+        : "In effect: OPENROUTER_API_KEY from the launch environment.";
     case "saved":
       return "In effect: the key saved here, for all sessions.";
     case ".env":
-      return "In effect: TYPESAFE_API_KEY from the .env file in the working directory.";
+      return "In effect: OPENROUTER_API_KEY from the .env file in the working directory.";
     default:
-      return "No key in effect. Save one here, or set TYPESAFE_API_KEY in the environment or a .env file.";
+      return "No key in effect. Save one here, or set OPENROUTER_API_KEY in the environment or a .env file.";
   }
 }
 
@@ -556,7 +556,7 @@ async function changeMode($: EngineInterface, mode: Mode, fromPane = false): Pro
       $,
       MODE_KEY,
       "auto",
-      "Automatic mode saved (all sessions). A TypeSafe key is still required.",
+      "Automatic mode saved (all sessions). An OpenRouter key is still required.",
     );
     return;
   }
@@ -590,8 +590,8 @@ async function changeLogRequests($: EngineInterface, enabled: boolean): Promise<
     LOG_KEY,
     enabled,
     enabled
-      ? `TypeSafe request logging on (all sessions). ${await sessionLogPath($)}`
-      : "TypeSafe request logging off (all sessions).",
+      ? `OpenRouter request logging on (all sessions). ${await sessionLogPath($)}`
+      : "OpenRouter request logging off (all sessions).",
   );
 }
 
@@ -600,7 +600,7 @@ async function changeSavedApiKey($: EngineInterface, text: string): Promise<bool
     $,
     API_KEY_KEY,
     parseSavedApiKey(text),
-    "TypeSafe API key saved (all sessions). Status shows the source, never the value.",
+    "OpenRouter API key saved (all sessions). Status shows the source, never the value.",
   );
 }
 
@@ -609,7 +609,7 @@ async function clearSavedApiKey($: EngineInterface): Promise<boolean> {
     $,
     API_KEY_KEY,
     "",
-    "Saved TypeSafe API key cleared (all sessions). Launch environment and .env still apply.",
+    "Saved OpenRouter API key cleared (all sessions). Launch environment and .env still apply.",
   );
 }
 
@@ -749,7 +749,7 @@ export const register: Register = (on, options) => {
 
   // Keep the saved key out of `/config` so the host menu never draws the secret.
   // Hidden rows still persist through $.config.set in the same settings path as mode.
-  on("config.describe", { key: "compact-adviser.typesafeApiKey" }, async (_$, e, next) => {
+  on("config.describe", { key: "compact-adviser.openrouterApiKey" }, async (_$, e, next) => {
     const described = await next(e);
     return { ...described, isHidden: true };
   });
@@ -877,7 +877,7 @@ export const register: Register = (on, options) => {
     }
     if (view === "logging") {
       return options(
-        "Log TypeSafe requests",
+        "Log OpenRouter requests",
         config.logRequests ? "on" : "off",
         [
           { value: "off", label: "Off (default)" },
@@ -919,10 +919,10 @@ export const register: Register = (on, options) => {
     }
     if (view === "key") {
       return column([
-        heading("TypeSafe API key"),
+        heading("OpenRouter API key"),
         Text({ dimColor: true, wrap: "wrap", children: keyDetail(key.source, savedKey) }),
         Input({
-          key: "typesafeApiKey",
+          key: "openrouterApiKey",
           label: "Key",
           value: keyDraft?.text ?? "",
           placeholder: savedKey ? "paste a key to replace the saved one" : "paste a key to save it",
@@ -987,7 +987,7 @@ export const register: Register = (on, options) => {
           },
           {
             key: "menu:logRequests",
-            label: setting("Log TypeSafe requests", config.logRequests ? "On" : "Off"),
+            label: setting("Log OpenRouter requests", config.logRequests ? "On" : "Off"),
             onPress: open(
               "logging",
               "menu:logRequests",
@@ -995,9 +995,9 @@ export const register: Register = (on, options) => {
             ),
           },
           {
-            key: "menu:typesafeApiKey",
-            label: setting("TypeSafe API key", KEY_SOURCE_LABELS[key.source]),
-            onPress: open("key", "menu:typesafeApiKey", "typesafeApiKey"),
+            key: "menu:openrouterApiKey",
+            label: setting("OpenRouter API key", KEY_SOURCE_LABELS[key.source]),
+            onPress: open("key", "menu:openrouterApiKey", "openrouterApiKey"),
           },
           {
             key: "menu:reset",

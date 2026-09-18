@@ -2,7 +2,7 @@
   "name": "compact-adviser",
   "version": "0.1.2",
   "license": "MIT",
-  "description": "Suggests (or, opt-in, runs) /compact at a completed checkpoint, judged by TypeSafe Jev. Its hooks module activates only when CLAUDE_CODE_ENABLE_FUNCTION_HOOKS is exactly 1 and is otherwise a complete no-op.",
+  "description": "Suggests (or, opt-in, runs) /compact at a completed checkpoint, judged by TypeSafe's Jev model over OpenRouter. Its hooks module activates only when CLAUDE_CODE_ENABLE_FUNCTION_HOOKS is exactly 1 and is otherwise a complete no-op.",
   "author": {
     "name": "Kun Chen"
   },
@@ -36,14 +36,14 @@
     },
     "logRequests": {
       "type": "boolean",
-      "title": "Log TypeSafe requests",
-      "description": "When on, each TypeSafe/Jev request and sanitized Jev outcome is appended to ~/.claude/compact-adviser-requests-<session-id>.jsonl. Off by default. Never logs the API key.",
+      "title": "Log OpenRouter requests",
+      "description": "When on, the plugin appends each OpenRouter request and sanitized Jev outcome to ~/.claude/compact-adviser-requests-<session-id>.jsonl. Off by default. Never logs the API key.",
       "default": false
     },
-    "typesafeApiKey": {
+    "openrouterApiKey": {
       "type": "string",
-      "title": "TypeSafe API key",
-      "description": "Saved from /compact-adviser. Hidden in /config so the value is never shown. A non-empty TYPESAFE_API_KEY in the launch environment wins. Do not commit this value.",
+      "title": "OpenRouter API key",
+      "description": "Saved from /compact-adviser. Hidden in /config so the value is never shown. A non-empty OPENROUTER_API_KEY in the launch environment wins. Do not commit this value.",
       "default": ""
     }
   }

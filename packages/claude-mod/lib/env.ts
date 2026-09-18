@@ -1,13 +1,13 @@
-// TYPESAFE_API_KEY from the host environment, else a menu-saved key, else a cwd .env file.
+// OPENROUTER_API_KEY from the host environment, else a menu-saved key, else a cwd .env file.
 // KEY=VALUE lines: last assignment wins; comments and blanks are ignored.
 // Optional `export` / `declare -x` prefixes and one matching quote layer.
 
 const PREFIX = /^(?:export|declare\s+-x)\s+/;
 
-export type TypesafeKeySource = "env" | "saved" | ".env" | "missing";
-export interface ResolvedTypesafeApiKey {
+export type OpenRouterKeySource = "env" | "saved" | ".env" | "missing";
+export interface ResolvedOpenRouterApiKey {
   value: string | undefined;
-  source: TypesafeKeySource;
+  source: OpenRouterKeySource;
 }
 
 function unquote(value: string): string {
@@ -41,11 +41,11 @@ function nonempty(value: string | undefined): string | undefined {
  * A non-empty host env value wins, then a menu-saved key, then a parsed .env
  * assignment. Missing pieces are skipped; the value is never logged.
  */
-export function resolveTypesafeApiKey(
+export function resolveOpenRouterApiKey(
   envValue: string | undefined,
   saved?: string,
   dotenvValue?: string,
-): ResolvedTypesafeApiKey {
+): ResolvedOpenRouterApiKey {
   const fromEnv = nonempty(envValue);
   if (fromEnv !== undefined) return { value: fromEnv, source: "env" };
   const fromSaved = nonempty(saved);
@@ -55,6 +55,6 @@ export function resolveTypesafeApiKey(
   return { value: undefined, source: "missing" };
 }
 
-export function formatKeyStatus(source: TypesafeKeySource): string {
+export function formatKeyStatus(source: OpenRouterKeySource): string {
   return `Key: ${source}`;
 }
