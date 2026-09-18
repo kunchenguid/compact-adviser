@@ -3,6 +3,8 @@
  * contract) so older question text stays comparable after the shipped one moves.
  *   node --import tsx eval/tools/probe-questions.ts <dir> <questions.json> <out.jsonl> [gate]
  * gate: "conjunction" (both >= 0.90) or "phase" (phase >= 0.90). Default phase.
+ * Historical: this expects a `phase` answer (completed_checkpoint / still_in_progress /
+ * unclear); for the shipped two-question contract use eval/score.ts or probe-gate.ts.
  */
 import { readFileSync, writeFileSync } from "node:fs";
 import { ENDPOINT } from "../../src/judge.ts";

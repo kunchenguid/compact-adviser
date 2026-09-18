@@ -33,6 +33,7 @@ import {
 } from "../lib/config.ts";
 import { parseDotenvKey } from "../lib/env.ts";
 import {
+  floorFor,
   JUDGE_DISABLED_NETWORK_MESSAGE,
   JUDGE_UNAVAILABLE_MESSAGE,
   JudgeError,
@@ -151,6 +152,18 @@ async function invalidate($: EngineInterface): Promise<void> {
   }
 }
 
+/** Context tokens over the model's window, or NaN when the engine does not know it (strictest floor). */
+function usageFraction(context: { tokens?: number; window: number }): number {
+  if (
+    typeof context.tokens !== "number" ||
+    !Number.isFinite(context.tokens) ||
+    !Number.isFinite(context.window) ||
+    context.window <= 0
+  )
+    return Number.NaN;
+  return context.tokens / context.window;
+}
+
 async function eligible(
   $: EngineInterface,
   config: Config,
@@ -221,7 +234,7 @@ async function judgeCheckpoint($: EngineInterface, epoch: number): Promise<void>
       return;
     let state: SessionState = { ...current, failures: 0, retryAfter: 0, updatedAt: now };
     const auto = latest.mode === "auto";
-    if (!qualifies(result) || (auto && !latest.autoAcknowledged)) {
+    if (!qualifies(result, usageFraction(context)) || (auto && !latest.autoAcknowledged)) {
       await $.store.set(key, state);
       return;
     }
@@ -445,7 +458,7 @@ async function statusText($: EngineInterface): Promise<string> {
       ? (cooldownReason(state, tokens, await $.clock.now()) ??
         "No cooldown; semantic checks still apply.")
       : "Waiting for fresh model usage.";
-  return `Mode: ${config.mode}${config.mode === "auto" && !config.autoAcknowledged ? " (not confirmed)" : ""}. Minimum: ${formatTokens(config.minContextTokens)} tokens. Context: ${typeof tokens === "number" ? formatTokens(tokens) : "unknown"}. Key: ${(await apiKey($)) ? "present" : "missing"}. ${cooldown}${engine} Request log: ${config.logRequests ? requestLogPath(await logHome($)) : "off"}. Settings: /config (compact-adviser rows) and /compact-adviser.`;
+  return `Mode: ${config.mode}${config.mode === "auto" && !config.autoAcknowledged ? " (not confirmed)" : ""}. Minimum: ${formatTokens(config.minContextTokens)} tokens. Context: ${typeof tokens === "number" ? formatTokens(tokens) : "unknown"}${Number.isFinite(usageFraction(usage.context)) ? ` (${Math.round(usageFraction(usage.context) * 100)}% of the window; hint floor ${floorFor(usageFraction(usage.context)).toFixed(2)})` : ""}. Key: ${(await apiKey($)) ? "present" : "missing"}. ${cooldown}${engine} Request log: ${config.logRequests ? requestLogPath(await logHome($)) : "off"}. Settings: /config (compact-adviser rows) and /compact-adviser.`;
 }
 
 async function snoozeOrDismiss($: EngineInterface, command: "snooze" | "dismiss") {

@@ -4,13 +4,14 @@
  */
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { judge, qualifies } from "../../src/judge.ts";
+import { floorFor, judge, qualifies, score } from "../../src/judge.ts";
 import { continuationOf } from "../continuation.ts";
 import { typesafeKeyFromEnv } from "../key.ts";
 
-const [dir, id] = process.argv.slice(2);
+const [dir, id, usageArg] = process.argv.slice(2);
+const usage = Number(usageArg ?? 0.5);
 if (!dir || !id) {
-  console.error("usage: node --import tsx eval/tools/retry.ts <dataDir> <id>");
+  console.error("usage: node --import tsx eval/tools/retry.ts <dataDir> <id> [usage]");
   process.exit(1);
 }
 const key = typesafeKeyFromEnv();
@@ -28,7 +29,7 @@ for (let a = 0; a < 3; a++) {
     const j = await judge(r.state, key, new AbortController().signal, fetch, 60000);
     const cont = continuationOf(j);
     console.error(
-      `attempt ${a}: OK ${j.phase.choice}${cont ? `/${cont.choice}` : ""} hint=${qualifies(j)} pP=${JSON.stringify(j.phase.probabilities)}`,
+      `attempt ${a}: OK ${j.done.choice}/${j.shape.choice}${cont ? `/${cont.choice}` : ""} score=${score(j).toFixed(2)} hint=${qualifies(j, usage)}`,
     );
     const rows = readFileSync(join(dir, "results.jsonl"), "utf8")
       .split("\n")
@@ -43,9 +44,15 @@ for (let a = 0; a < 3; a++) {
       model: j.model,
       inputTokens: j.inputTokens,
       outputTokens: j.outputTokens,
-      phase: j.phase.choice,
-      phaseP: j.phase.probabilities,
-      phaseConf: j.phase.confidence,
+      done: j.done.choice,
+      doneP: j.done.probabilities,
+      doneConf: j.done.confidence,
+      shape: j.shape.choice,
+      shapeP: j.shape.probabilities,
+      shapeConf: j.shape.confidence,
+      score: score(j),
+      usage,
+      floor: floorFor(usage),
       ...(cont
         ? {
             continuation: cont.choice,
@@ -53,8 +60,8 @@ for (let a = 0; a < 3; a++) {
             continuationConf: cont.confidence,
           }
         : {}),
-      hint: qualifies(j),
-      auto: qualifies(j),
+      hint: qualifies(j, usage),
+      auto: qualifies(j, usage),
       retried: true,
     };
     if (i >= 0) rows[i] = row;

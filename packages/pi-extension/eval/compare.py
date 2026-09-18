@@ -37,14 +37,21 @@ def ok_values(r):
 
 row("hint fires", lambda r: sum(x["hint"] for x in ok_values(r)))
 row("auto fires", lambda r: sum(x["auto"] for x in ok_values(r)))
-row("phase=completed", lambda r: sum(x["phase"] == "completed_checkpoint" for x in ok_values(r)))
+
+
+def completed(x):
+    return x.get("phase", {"finished": "completed_checkpoint"}.get(x.get("done"))) == "completed_checkpoint"
+
+
+def strength(x):
+    return x["score"] if "score" in x else x["phaseP"]["completed_checkpoint"]
+
+
+row("phase=completed", lambda r: sum(completed(x) for x in ok_values(r)))
+row("max score", lambda r: f"{max(strength(x) for x in ok_values(r)):.2f}")
 row(
-    "max P(completed)",
-    lambda r: f"{max(x['phaseP']['completed_checkpoint'] for x in ok_values(r)):.2f}",
-)
-row(
-    "median P(completed)",
-    lambda r: f"{sorted(x['phaseP']['completed_checkpoint'] for x in ok_values(r))[len(ok_values(r))//2]:.2f}",
+    "median score",
+    lambda r: f"{sorted(strength(x) for x in ok_values(r))[len(ok_values(r))//2]:.2f}",
 )
 if all("continuation" in x for x in ok_values(runs[0][1])):
     row("continuation=recoverable", lambda r: sum(x.get("continuation") == "recoverable" for x in ok_values(r)))
@@ -72,7 +79,10 @@ def cm(r, k):
 
 for k in ("TP", "FP", "FN"):
     row(f"{k} vs gold should-hint", lambda r, k=k: cm(r, k))
-row("phase agreement", lambda r: sum(1 for i, x in r.items() if x.get("ok") and x["phase"] == L[i]["phase_gold"]))
+row(
+    "phase agreement",
+    lambda r: sum(1 for i, x in r.items() if x.get("ok") and completed(x) == (L[i]["phase_gold"] == "completed_checkpoint")),
+)
 print()
 for n, r in runs:
     fires = [i for i, x in r.items() if x.get("ok") and x["hint"]]

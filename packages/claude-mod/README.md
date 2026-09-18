@@ -131,16 +131,18 @@ A new turn, any compaction, or a settings save invalidates an outstanding judgme
 
 ## The judgment and its limits
 
-One HTTPS request to `https://api.typesafe.ai/v1/systemone`, through Claude Code's host fetch, uses `jev-latest` and the Pi extension's one typed factor:
+One HTTPS request to `https://api.typesafe.ai/v1/systemone`, through Claude Code's host fetch, uses `jev-latest` and the Pi extension's two typed factors, each a one-sentence question:
 
-1. Completed checkpoint, still in progress, or unclear.
+1. `done`: is the assistant's own latest unit of work finished, not finished, or unclear. Waiting for a person or another party counts as finished.
+2. `shape`: did the assistant mostly do the work itself (hands-on) or mostly coordinate others.
 
-Local code combines the results; Jev does not generate an explanation.
+Local code composes them into one score, P(finished) x (0.5 + 0.5 x P(hands_on)); Jev does not generate an explanation.
 Malformed responses, contradictory factors, API failures, and timeouts never produce a hint or a compaction.
 Requests have a two-second deadline, no immediate retry, and capped exponential backoff.
 
-Hint and auto share one 0.90 floor on the completed-checkpoint probability.
-These are conservative starting knobs, **not measured safety guarantees**.
+Hint and auto share one floor on that score, and the floor depends on how full the context window is (`$.session.usage()` tokens over the model's window): 0.90 while usage is at most 40 %, then one point lower per point of usage, down to 0.40 from 90 % on (`/compact-adviser status` shows the current floor).
+A wrong hint costs most while there is room left and least when compaction is imminent anyway.
+These are measured starting knobs, **not safety guarantees**; the Pi package's `eval/README.md` has the ladder.
 
 A hint pins the line `compact-adviser: Potential session boundary detected. Run /compact to save tokens.` under the prompt until your next turn, shows it briefly as a notice, and proposes `/compact` as the prompt box's dim suggestion (Tab to take it).
 Claude Code drops a plugin notice that follows another within two seconds; the pinned line is the reliable signal.

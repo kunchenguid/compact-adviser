@@ -1,7 +1,7 @@
 /** Repeat the same checkpoints N times to measure judgment stability. */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { judge } from "../src/judge.ts";
+import { judge, score } from "../src/judge.ts";
 import { continuationOf } from "./continuation.ts";
 import { typesafeKeyFromEnv } from "./key.ts";
 
@@ -29,8 +29,8 @@ for (const id of ids) {
   const cp: number[] = [];
   for (let i = 0; i < reps; i++) {
     const j = await judge(r.state, key, new AbortController().signal, fetch, 60000);
-    ph.push(j.phase.choice);
-    pp.push(j.phase.probabilities.completed_checkpoint);
+    ph.push(`${j.done.choice}/${j.shape.choice}`);
+    pp.push(score(j));
     const cont = continuationOf(j);
     if (cont) {
       co.push(cont.choice);
@@ -43,6 +43,6 @@ for (const id of ids) {
       ? `  cont=${uniq(co).join("|")} P=[${cp.map((x) => x.toFixed(2)).join(" ")}]`
       : "";
   console.error(
-    `${id}  phase=${uniq(ph).join("|")} P=[${pp.map((x) => x.toFixed(2)).join(" ")}]${contPart}`,
+    `${id}  done/shape=${uniq(ph).join("|")} score=[${pp.map((x) => x.toFixed(2)).join(" ")}]${contPart}`,
   );
 }

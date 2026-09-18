@@ -40,7 +40,7 @@ mkdirSync(project, { recursive: true });
 // --- Local servers -----------------------------------------------------------------
 const jevRequests = [];
 const summaries = [];
-const verdict = { completed: 0.99, recoverable: 0.99 };
+const verdict = { completed: 0.99, handsOn: 0.99 };
 
 function jevAnswer() {
   const choice = (name, p, others) => ({
@@ -52,7 +52,8 @@ function jevAnswer() {
   return {
     model: "jev-1.13.0",
     answers: {
-      phase: choice("completed_checkpoint", verdict.completed, ["still_in_progress", "unclear"]),
+      done: choice("finished", verdict.completed, ["not_finished", "unclear"]),
+      shape: choice("hands_on", verdict.handsOn, ["coordinating", "unclear"]),
     },
     usage: { input_tokens: 2500, output_tokens: 0 },
   };

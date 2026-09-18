@@ -30,32 +30,45 @@ test("both packages send byte-identical request bodies", () => {
   }
 });
 
-test("the question set and the qualifying floor match", () => {
+test("the question set and the floor schedule match", () => {
   assert.deepEqual(claude.QUESTIONS, pi.QUESTIONS);
-  assert.equal(claude.QUALIFY_FLOOR, pi.QUALIFY_FLOOR);
+  assert.deepEqual(Object.keys(pi.QUESTIONS), ["done", "shape"]);
+  assert.equal(claude.FLOOR_MAX, pi.FLOOR_MAX);
+  assert.equal(claude.FLOOR_MIN, pi.FLOOR_MIN);
+  assert.equal(claude.FLOOR_OFFSET, pi.FLOOR_OFFSET);
+  for (let u = -0.1; u <= 1.1; u += 0.01) assert.equal(claude.floorFor(u), pi.floorFor(u));
+  assert.equal(claude.floorFor(Number.NaN), pi.floorFor(Number.NaN));
   assert.equal(claude.ENDPOINT, pi.ENDPOINT);
   assert.equal(claude.MAX_REQUEST_BYTES, pi.MAX_REQUEST_BYTES);
 });
 
-test("both packages gate the same judgments the same way", () => {
-  const classes = Object.keys(pi.QUESTIONS.phase.criteria);
-  for (const choice of classes) {
-    for (const p of [0, 0.5, 0.89, 0.895, 0.9, 0.95, 1]) {
-      const rest = (1 - p) / (classes.length - 1);
-      const probabilities = Object.fromEntries(
-        classes.map((c) => [c, c === "completed_checkpoint" ? p : rest]),
-      );
+test("both packages score and gate the same judgments the same way", () => {
+  const grid = [0, 0.3, 0.5, 0.79, 0.8, 0.9, 0.95, 1];
+  for (const finished of grid) {
+    for (const handsOn of grid) {
       const judgment = {
-        phase: { choice, probabilities, confidence: p },
+        done: {
+          choice: finished >= 0.5 ? "finished" : "not_finished",
+          probabilities: { finished, not_finished: 1 - finished, unclear: 0 },
+          confidence: 1,
+        },
+        shape: {
+          choice: handsOn >= 0.5 ? "hands_on" : "coordinating",
+          probabilities: { hands_on: handsOn, coordinating: 1 - handsOn, unclear: 0 },
+          confidence: 1,
+        },
         model: "jev-test",
         inputTokens: 1,
         outputTokens: 1,
       };
-      assert.equal(
-        claude.qualifies(judgment),
-        pi.qualifies(judgment),
-        `disagreed on ${choice} at p=${p}`,
-      );
+      assert.equal(claude.score(judgment), pi.score(judgment));
+      for (const usage of [Number.NaN, 0, 0.3, 0.5, 0.7, 0.85, 1]) {
+        assert.equal(
+          claude.qualifies(judgment, usage),
+          pi.qualifies(judgment, usage),
+          `disagreed at finished=${finished} handsOn=${handsOn} usage=${usage}`,
+        );
+      }
     }
   }
 });
@@ -64,15 +77,25 @@ test("both packages parse the same wire response into the same judgment", () => 
   const response = {
     model: "jev-1.13.0",
     answers: {
-      phase: {
+      done: {
         type: "choice",
-        choice: "completed_checkpoint",
-        probabilities: { completed_checkpoint: 0.93, still_in_progress: 0.06, unclear: 0.01 },
+        choice: "finished",
+        probabilities: { finished: 0.93, not_finished: 0.06, unclear: 0.01 },
         confidence: 0.88,
+      },
+      shape: {
+        type: "choice",
+        choice: "hands_on",
+        probabilities: { hands_on: 0.97, coordinating: 0.02, unclear: 0.01 },
+        confidence: 0.95,
       },
     },
     usage: { input_tokens: 7440, output_tokens: 44 },
   };
   assert.deepEqual(claude.parseJudgment(response), pi.parseJudgment(response));
-  assert.equal(claude.qualifies(pi.parseJudgment(response)), true);
+  assert.equal(claude.qualifies(pi.parseJudgment(response), 0.2), true);
+  assert.equal(
+    claude.qualifies(pi.parseJudgment(response), 0.2),
+    pi.qualifies(pi.parseJudgment(response), 0.2),
+  );
 });

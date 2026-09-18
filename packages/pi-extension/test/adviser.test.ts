@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import test from "node:test";
-import { JUDGE_UNAVAILABLE_MESSAGE } from "../src/judge.ts";
+import { JUDGE_UNAVAILABLE_MESSAGE, parseJudgment } from "../src/judge.ts";
 import { requestLogPath } from "../src/log.ts";
 import { restoreState } from "../src/state.ts";
-import { flush, harness, success } from "./helpers.ts";
+import { apiResponse, flush, harness, success } from "./helpers.ts";
 
 test("threshold is a constant 40k and requests only run at settlement", async (t) => {
   const h = harness(t);
@@ -24,6 +24,22 @@ test("threshold is a constant 40k and requests only run at settlement", async (t
   assert.ok(h.notifications.some((x) => x.endsWith("Run /compact to save tokens.")));
   await h.fire("agent_settled");
   assert.equal(h.calls, 1);
+});
+
+test("the hint floor slides with context usage: a finished coordinating unit hints only once the window is fuller", async (t) => {
+  // finished but coordinating scores about 0.5: below the 0.90 floor at 17 % of the
+  // 272k window, above the 0.42 floor at 88 %. Same judgment, different window fill.
+  const h = harness(t, async () => parseJudgment(apiResponse(0.99, 0.01)));
+  h.enable();
+  h.tokens = 45000;
+  await h.fire("agent_settled");
+  assert.equal(h.calls, 1);
+  assert.ok(!h.notifications.some((x) => x.endsWith("Run /compact to save tokens.")));
+  h.next("and now the window is nearly full");
+  h.tokens = 240000;
+  await h.fire("agent_settled");
+  assert.equal(h.calls, 2);
+  assert.ok(h.notifications.some((x) => x.endsWith("Run /compact to save tokens.")));
 });
 
 test("unknown usage, missing key, off, busy, pending, error and non-TUI never call Jev", async (t) => {

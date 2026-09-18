@@ -8,15 +8,18 @@ import { RECENT_TAIL_MESSAGES, snapshot } from "../src/context.ts";
 import { parseDotenvKey, resolveTypesafeApiKey } from "../src/env.ts";
 import {
   ENDPOINT,
+  FLOOR_MAX,
+  FLOOR_MIN,
+  floorFor,
   JUDGE_UNAVAILABLE_MESSAGE,
   JudgeError,
   judge,
   judgeErrorMessage,
   MAX_REQUEST_BYTES,
   parseJudgment,
-  QUALIFY_FLOOR,
   qualifies,
   requestBody,
+  score,
 } from "../src/judge.ts";
 import { apiResponse, assistant, harness, temp, toolResult } from "./helpers.ts";
 
@@ -145,29 +148,42 @@ test("tool results count in the 64-message window and long dumps keep a head and
   assert.ok(!omitted.state.recent.some((m) => m.text.includes("OUTSIDE-WINDOW")));
 });
 
-test("request contains typed factors; output validation rejects malformed/contradictory confidence evidence", () => {
+test("two typed factors compose into one score; the floor slides with usage", () => {
   const valid = parseJudgment(apiResponse());
-  assert.equal(QUALIFY_FLOOR, 0.9);
-  assert.ok(qualifies(valid));
-  const atFloor = {
-    ...valid,
-    phase: {
-      ...valid.phase,
-      probabilities: { completed_checkpoint: 0.9, still_in_progress: 0.05, unclear: 0.05 },
-    },
-  };
-  const belowFloor = {
-    ...valid,
-    phase: {
-      ...valid.phase,
-      probabilities: { completed_checkpoint: 0.89, still_in_progress: 0.06, unclear: 0.05 },
-    },
-  };
-  assert.ok(qualifies(atFloor));
-  assert.ok(!qualifies(belowFloor));
+  assert.equal(FLOOR_MAX, 0.9);
+  assert.equal(FLOOR_MIN, 0.4);
+  assert.ok(qualifies(valid, 0.2));
+  // finished is the gate, hands-on adds up to half again
+  assert.ok(Math.abs(score(parseJudgment(apiResponse(1, 1))) - 1) < 1e-9);
+  assert.ok(Math.abs(score(parseJudgment(apiResponse(1, 0))) - 0.5) < 1e-9);
+  assert.ok(Math.abs(score(parseJudgment(apiResponse(0, 1))) - 0) < 1e-9);
+  assert.ok(Math.abs(score(parseJudgment(apiResponse(0.8, 0.5))) - 0.6) < 1e-9);
+  // the schedule: strict while the window is mostly empty, loose as it fills
+  assert.equal(floorFor(0), 0.9);
+  assert.equal(floorFor(0.4), 0.9);
+  assert.equal(floorFor(0.5), 0.8);
+  assert.equal(floorFor(0.7), 0.6);
+  assert.equal(floorFor(0.9), 0.4);
+  assert.equal(floorFor(1), 0.4);
+  assert.equal(floorFor(Number.NaN), 0.9);
+  assert.equal(floorFor(-1), 0.9);
+  for (let u = 0; u < 1; u += 0.05) assert.ok(floorFor(u) >= floorFor(u + 0.05));
+  // a finished coordinating unit (score 0.5) hints only once the window is 80 % full
+  const coordinating = parseJudgment(apiResponse(1, 0));
+  assert.ok(!qualifies(coordinating, 0.3));
+  assert.ok(!qualifies(coordinating, 0.79));
+  assert.ok(qualifies(coordinating, 0.8));
+  // a confident hands-on completion hints at any usage; unfinished work never does
+  assert.ok(qualifies(parseJudgment(apiResponse(0.95, 0.9)), 0));
+  assert.ok(!qualifies(parseJudgment(apiResponse(0.2, 1)), 1));
   const bad = apiResponse();
-  bad.answers.phase.probabilities.completed_checkpoint = 0.6;
+  bad.answers.done.probabilities.finished = 0.6;
   assert.throws(() => parseJudgment(bad));
+  const missingShape = apiResponse() as {
+    answers: Partial<ReturnType<typeof apiResponse>["answers"]>;
+  };
+  delete missingShape.answers.shape;
+  assert.throws(() => parseJudgment(missingShape));
   assert.throws(() => parseJudgment({}));
   assert.throws(() => requestBody({ text: "x".repeat(MAX_REQUEST_BYTES) }));
 });
@@ -194,7 +210,7 @@ test("HTTP contract, output bound, status classification, and cancellation", asy
   assert.ok(!String(seen?.body).includes("fake-test-key"));
   const body = JSON.parse(String(seen?.body));
   assert.equal(body.model, "jev-latest");
-  assert.deepEqual(Object.keys(body.questions), ["phase"]);
+  assert.deepEqual(Object.keys(body.questions), ["done", "shape"]);
   for (const [status, kind] of [
     [401, "authentication"],
     [429, "rate-limit"],

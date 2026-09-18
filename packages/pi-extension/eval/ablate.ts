@@ -6,7 +6,7 @@
  */
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { judge } from "../src/judge.ts";
+import { judge, score } from "../src/judge.ts";
 import { continuationOf } from "./continuation.ts";
 import { typesafeKeyFromEnv } from "./key.ts";
 
@@ -55,8 +55,9 @@ for (const id of ids) {
       out.push({
         id,
         variant: name,
-        phase: j.phase.choice,
-        phaseP: j.phase.probabilities.completed_checkpoint,
+        done: j.done.choice,
+        shape: j.shape.choice,
+        score: score(j),
         ...(cont
           ? { continuation: cont.choice, recovP: cont.probabilities.recoverable }
           : {}),
@@ -65,7 +66,7 @@ for (const id of ids) {
         ? `  cont=${cont.choice.padEnd(12)} P(recoverable)=${(cont.probabilities.recoverable ?? Number.NaN).toFixed(2)}`
         : "";
       console.error(
-        `${id} ${name.padEnd(17)} phase=${j.phase.choice.padEnd(20)} P(completed)=${j.phase.probabilities.completed_checkpoint.toFixed(2)}${contPart}`,
+        `${id} ${name.padEnd(17)} done=${j.done.choice.padEnd(12)} shape=${j.shape.choice.padEnd(12)} score=${score(j).toFixed(2)}${contPart}`,
       );
     } catch (e) {
       console.error(`${id} ${name} FAILED ${(e as { kind?: string }).kind}`);

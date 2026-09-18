@@ -1,7 +1,7 @@
 /**
- * Ask Jev the phase question ALONE and record the answer, to test whether a
- * companion question is load-bearing.
- *   node --import tsx eval/tools/probe-phase-only.ts <dir>
+ * Ask Jev ONE shipped question alone (default `done`) and record the answer, to
+ * test whether the companion question changes it.
+ *   node --import tsx eval/tools/probe-phase-only.ts <dir> [done|shape]
  */
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -9,8 +9,9 @@ import { ENDPOINT, QUESTIONS } from "../../src/judge.ts";
 import { typesafeKeyFromEnv } from "../key.ts";
 
 const dir = process.argv[2];
-if (!dir) {
-  console.error("usage: node --import tsx eval/tools/probe-phase-only.ts <dir>");
+const which = (process.argv[3] ?? "done") as keyof typeof QUESTIONS;
+if (!dir || !(which in QUESTIONS)) {
+  console.error("usage: node --import tsx eval/tools/probe-phase-only.ts <dir> [done|shape]");
   process.exit(1);
 }
 const key = typesafeKeyFromEnv();
@@ -21,7 +22,7 @@ const rows = readFileSync(join(dir, "checkpoints.jsonl"), "utf8")
 const out: unknown[] = [];
 let maxBody = 0;
 for (const r of rows) {
-  const body = JSON.stringify({ model: "jev-latest", state: r.state, questions: { phase: QUESTIONS.phase } });
+  const body = JSON.stringify({ model: "jev-latest", state: r.state, questions: { [which]: QUESTIONS[which] } });
   maxBody = Math.max(maxBody, Buffer.byteLength(body));
   try {
     const res = await fetch(ENDPOINT, {
@@ -31,16 +32,16 @@ for (const r of rows) {
       signal: AbortSignal.timeout(60000),
     });
     const j = (await res.json()) as {
-      answers?: { phase?: { choice?: string; probabilities?: unknown } };
+      answers?: Record<string, { choice?: string; probabilities?: unknown } | undefined>;
       model?: string;
     };
-    const a = j.answers?.phase;
-    out.push({ id: r.id, ok: !!a, phase: a?.choice, phaseP: a?.probabilities, model: j.model });
+    const a = j.answers?.[which];
+    out.push({ id: r.id, ok: !!a, question: which, choice: a?.choice, probabilities: a?.probabilities, model: j.model });
   } catch (e) {
     out.push({ id: r.id, ok: false, error: String((e as Error).message ?? e) });
   }
 }
-writeFileSync(join(dir, "phase-only.jsonl"), `${out.map((r) => JSON.stringify(r)).join("\n")}\n`);
+writeFileSync(join(dir, `${which}-only.jsonl`), `${out.map((r) => JSON.stringify(r)).join("\n")}\n`);
 console.error(
-  `phase-only: ${(out as Array<{ ok?: boolean }>).filter((r) => r.ok).length}/${out.length} ok, max body ${maxBody} bytes`,
+  `${which}-only: ${(out as Array<{ ok?: boolean }>).filter((r) => r.ok).length}/${out.length} ok, max body ${maxBody} bytes`,
 );
