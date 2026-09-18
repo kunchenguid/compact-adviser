@@ -1,16 +1,16 @@
 /**
  * Retry a single failed checkpoint score and patch results.jsonl in place.
- *   node --import tsx eval/retry.ts <dataDir> <id>
+ *   node --import tsx eval/tools/retry.ts <dataDir> <id>
  */
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { judge, qualifies } from "../src/judge.ts";
-import { continuationOf } from "./continuation.ts";
-import { typesafeKeyFromEnv } from "./key.ts";
+import { judge, qualifies } from "../../src/judge.ts";
+import { continuationOf } from "../continuation.ts";
+import { typesafeKeyFromEnv } from "../key.ts";
 
 const [dir, id] = process.argv.slice(2);
 if (!dir || !id) {
-  console.error("usage: node --import tsx eval/retry.ts <dataDir> <id>");
+  console.error("usage: node --import tsx eval/tools/retry.ts <dataDir> <id>");
   process.exit(1);
 }
 const key = typesafeKeyFromEnv();

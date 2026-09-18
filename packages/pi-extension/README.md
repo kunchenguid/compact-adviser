@@ -10,7 +10,14 @@ No other host's runtime, service, or session records are required.
 
 ## Install this package only
 
-From the monorepo root:
+From the monorepo root (the fool-proof path; this also works as `pi install git:github.com/kunchenguid/compact-adviser`):
+
+```sh
+npm install
+pi install "$PWD"
+```
+
+To install only this package directory:
 
 ```sh
 npm --prefix packages/pi-extension ci --omit=dev --omit=peer --ignore-scripts
@@ -18,12 +25,13 @@ pi install "$PWD/packages/pi-extension"
 ```
 
 Restart Pi or run `/reload`.
-Do not install the monorepo root or the reserved Claude-mod directory as a Pi extension.
+Do not install the reserved Claude-mod directory as a Pi extension.
+The monorepo root is the git-install shape; `packages/pi-extension` is the npm package.
 Pi supplies its own core and TUI modules; the package's only additional runtime dependency is `proper-lockfile`.
 For a one-run trial, use `pi -e /absolute/path/to/packages/pi-extension` instead of `pi install`.
 
 Requires Node 22+ and the Pi 0.82.0 extension API.
-Verified with the actual signed Pi 0.82.0 runtime; newer Pi versions have not been separately certified.
+Verified with the actual signed Pi **0.85.1** runtime; 0.82.0 remains the API floor.
 Only interactive TUI mode acts; RPC, JSON, and print modes do not make advice requests or compact.
 The underlying model provider can be any provider supported by Pi.
 
@@ -123,7 +131,7 @@ Pi deliberately reports unknown usage immediately after compaction; the extensio
 
 ## The judgment and its limits
 
-One HTTPS request to `https://api.typesafe.ai/v1/systemone` uses `jev-latest` and two independent typed factors:
+One HTTPS request to `https://api.typesafe.ai/v1/systemone` uses `jev-latest` and one typed factor:
 
 1. Completed checkpoint, still in progress, or unclear.
 
@@ -178,7 +186,7 @@ COMPACT_TEST_PI_BIN="$(command -v pi)" npm run test:e2e
 ```
 
 `check` performs TypeScript checking, Biome lint/format checking, and behavioral tests.
-The separate E2E suite requires Python 3 and the **actual Pi 0.82.0 executable**, resolved before npm prepends local binaries to PATH.
+The separate E2E suite requires Python 3 and the **actual Pi 0.82.0 or newer executable** (verified on 0.85.1), resolved before npm prepends local binaries to PATH.
 It drives a real pseudo-terminal, package installation in an isolated agent directory, the native settings UI, settled events, hint rendering, and native compaction.
 All model/TypeSafe responses in those integration tests are deterministic local fixtures; they do not spend provider quota or read account credentials.
 No shared Pi installation or real user configuration is modified.

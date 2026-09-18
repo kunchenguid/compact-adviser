@@ -1,16 +1,16 @@
 /**
  * Ask Jev the phase question ALONE and record the answer, to test whether a
  * companion question is load-bearing.
- *   node --import tsx eval/probe-phase-only.ts <dir>
+ *   node --import tsx eval/tools/probe-phase-only.ts <dir>
  */
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { ENDPOINT, QUESTIONS } from "../src/judge.ts";
-import { typesafeKeyFromEnv } from "./key.ts";
+import { ENDPOINT, QUESTIONS } from "../../src/judge.ts";
+import { typesafeKeyFromEnv } from "../key.ts";
 
 const dir = process.argv[2];
 if (!dir) {
-  console.error("usage: node --import tsx eval/probe-phase-only.ts <dir>");
+  console.error("usage: node --import tsx eval/tools/probe-phase-only.ts <dir>");
   process.exit(1);
 }
 const key = typesafeKeyFromEnv();

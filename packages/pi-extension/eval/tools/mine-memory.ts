@@ -3,9 +3,9 @@
  * a back-reference question and the assistant answers it immediately with a
  * settled turn that makes NO tool calls - i.e. it answered from memory.
  */
-import { mainBranch } from "./branch.ts";
-import { loadCorpus } from "./corpus.ts";
-import { loadSession, usageTokens } from "./replay.ts";
+import { mainBranch } from "../branch.ts";
+import { loadCorpus } from "../corpus.ts";
+import { loadSession, usageTokens } from "../replay.ts";
 
 const BACKREF =
   /\b(earlier|you said|we discussed|as discussed|remember|originally|last time|previously|why did we|how did we|what was|what did we|did we (ever|already|figure)|i asked|where did we land|whatever happened|what happened to)\b/i;

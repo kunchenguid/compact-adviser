@@ -310,7 +310,7 @@ describe("jev client", () => {
   });
   const never = () => new Promise<never>(() => undefined);
 
-  test("posts jev-latest with the bearer key in a header and the two questions", async () => {
+  test("posts jev-latest with the bearer key in a header and the phase question", async () => {
     const calls: { url: string; init: { headers: Record<string, string>; body: string } }[] = [];
     const result = await judge({ recent: [] }, "tsk-secret", {
       fetch: async (url, init) => {

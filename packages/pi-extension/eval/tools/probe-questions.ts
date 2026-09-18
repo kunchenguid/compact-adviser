@@ -1,17 +1,17 @@
 /**
  * Score the corpus with an ARBITRARY questions block (e.g. a historical
  * contract) so older question text stays comparable after the shipped one moves.
- *   node --import tsx eval/probe-questions.ts <dir> <questions.json> <out.jsonl> [gate]
+ *   node --import tsx eval/tools/probe-questions.ts <dir> <questions.json> <out.jsonl> [gate]
  * gate: "conjunction" (both >= 0.90) or "phase" (phase >= 0.90). Default phase.
  */
 import { readFileSync, writeFileSync } from "node:fs";
-import { ENDPOINT } from "../src/judge.ts";
-import { typesafeKeyFromEnv } from "./key.ts";
+import { ENDPOINT } from "../../src/judge.ts";
+import { typesafeKeyFromEnv } from "../key.ts";
 
 const [dir, qpath, out, gate = "phase"] = process.argv.slice(2);
 if (!dir || !qpath || !out) {
   console.error(
-    "usage: node --import tsx eval/probe-questions.ts <dir> <questions.json> <out.jsonl> [phase|conjunction]",
+    "usage: node --import tsx eval/tools/probe-questions.ts <dir> <questions.json> <out.jsonl> [phase|conjunction]",
   );
   process.exit(1);
 }

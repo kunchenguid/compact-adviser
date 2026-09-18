@@ -70,7 +70,8 @@ API key.
 | `eval/regate.ts` | Re-apply shipped `qualifies()` to stored results |
 | `eval/rebuild.ts` | Re-replay snapshots with current `snapshot()` |
 | `eval/bodycheck.ts` | Request-body size vs the 32kB cap |
-| `eval/mine.ts` / `mine2.ts` / `mine-memory.ts` | Candidate miners for labelling |
+
+One-off miners and probes live under `eval/tools/` (`mine.ts`, `mine2.ts`, `mine-memory.ts`, `probe-questions.ts`, `probe-phase-only.ts`, `retry.ts`). They are not part of the shipped scoring path.
 
 ## Label schema
 
@@ -146,8 +147,8 @@ and again with pivots excluded.
 
 ## Gitignore boundary
 
-Tracked: the runner, `corpus.example.json` / `corpus.example.ts`, this README,
-and `eval/local/.gitignore`.
+Tracked: the runner, `eval/tools/` (miners and probes), `corpus.example.json` /
+`corpus.example.ts`, this README, and `eval/local/.gitignore`.
 
 Never commit: `eval/local/**` (except that gitignore file), `checkpoints*.jsonl`,
 `results*.jsonl`, `ablation*.jsonl`, `worksheet/`, or any other session-derived
@@ -157,5 +158,5 @@ jsonl. The package-level and eval-level gitignores enforce this.
 
 The shipped product currently asks only the phase question. Continuation gold
 and miners remain so a two-question contract can still be measured with
-`probe-questions.ts`. Ablation variants overwrite coverage flags on real state;
+`eval/tools/probe-questions.ts`. Ablation variants overwrite coverage flags on real state;
 they are a diagnostic, not real checkpoints.

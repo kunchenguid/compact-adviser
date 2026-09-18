@@ -4,9 +4,9 @@
  * no snapshot() call. Output is a ranked candidate list for human labelling -
  * the signals are search heuristics, never gold labels.
  */
-import { mainBranch } from "./branch.ts";
-import { type CorpusEntry, loadCorpus } from "./corpus.ts";
-import { loadSession, usageTokens } from "./replay.ts";
+import { mainBranch } from "../branch.ts";
+import { type CorpusEntry, loadCorpus } from "../corpus.ts";
+import { loadSession, usageTokens } from "../replay.ts";
 
 function textOf(content: unknown): string {
   if (typeof content === "string") return content;
