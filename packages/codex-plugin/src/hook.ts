@@ -15,6 +15,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { ConfigStore } from "./config.ts";
+import { DISABLE_ENV, disabledByEnv } from "./disable.ts";
 import { parseDotenvKey, type ResolvedTypesafeApiKey, resolveTypesafeApiKey } from "./env.ts";
 import { judge, qualifies, requestBody } from "./judge.ts";
 import {
@@ -252,6 +253,7 @@ function resetAfterCompaction(payload: HookPayload, environment: Environment): v
 }
 
 export async function handle(payload: HookPayload, environment: Environment): Promise<HookOutput> {
+  if (disabledByEnv(environment.env[DISABLE_ENV])) return {};
   switch (payload.hook_event_name) {
     case "Stop":
       return onStop(payload, environment);
@@ -279,6 +281,10 @@ function readStdin(): string {
 
 export async function main(): Promise<void> {
   let output: HookOutput = {};
+  if (disabledByEnv(process.env[DISABLE_ENV])) {
+    process.stdout.write(JSON.stringify(output));
+    return;
+  }
   try {
     const payload = JSON.parse(readStdin()) as HookPayload;
     output = await handle(payload, {

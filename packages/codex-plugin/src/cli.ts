@@ -19,6 +19,7 @@ import {
   parseMode,
   parseSavedApiKey,
 } from "./config.ts";
+import { DISABLE_ENV, disabledByEnv } from "./disable.ts";
 import { formatKeyStatus } from "./env.ts";
 import { resolveKey } from "./hook.ts";
 import { floorFor } from "./judge.ts";
@@ -119,6 +120,7 @@ async function changeKey(environment: CliEnvironment, action: string): Promise<s
 }
 
 export async function run(argv: readonly string[], environment: CliEnvironment): Promise<string> {
+  if (disabledByEnv(environment.env[DISABLE_ENV])) return "";
   const [command = "", value = ""] = argv;
   switch (command) {
     case "status":
@@ -166,6 +168,7 @@ async function readSecret(prompt: string): Promise<string> {
 }
 
 export async function main(argv: readonly string[]): Promise<void> {
+  if (disabledByEnv(process.env[DISABLE_ENV])) return;
   try {
     const message = await run(argv, {
       env: process.env,

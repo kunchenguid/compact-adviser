@@ -94,7 +94,7 @@ node "$(ls -d "${CODEX_HOME:-$HOME/.codex}"/plugins/cache/*/compact-adviser/*/ |
 | Claude Code: "nonessential traffic" | `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` blocks plugin network requests |
 | No hint in Codex | The hook is untrusted (review it in `/hooks`), Node is older than 22.18, or the hook cannot find Node at all - Codex rebuilds its PATH, so set `COMPACT_ADVISER_NODE` to an absolute `node` path |
 | Pi print / RPC / JSON, Claude `-p`, or `codex exec` | The adviser stays inert in reliably detected non-interactive sessions |
-| Nothing at all in Pi or Claude | `COMPACT_ADVISER_DISABLE` is set to a truthy value |
+| Nothing at all in Pi, Claude, or Codex | `COMPACT_ADVISER_DISABLE` is set to a truthy value |
 
 ## Environment variables
 

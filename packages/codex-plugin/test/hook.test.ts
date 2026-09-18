@@ -199,6 +199,34 @@ test("a TypeSafe timeout aborts the in-flight request and stays silent", async (
   });
 });
 
+test("COMPACT_ADVISER_DISABLE blocks TypeSafe and the hint", async () => {
+  await withLab(async (lab) => {
+    writeRollout(lab.transcript, settledRollout());
+    const typesafe = fakeTypesafe();
+    const base = environment(lab, { fetch: typesafe.fetch });
+    const output = await handle(stop(lab), {
+      ...base,
+      env: { ...base.env, COMPACT_ADVISER_DISABLE: "1" },
+    });
+    assert.deepEqual(output, {});
+    assert.equal(typesafe.requests.length, 0);
+  });
+});
+
+test("COMPACT_ADVISER_DISABLE leaves the session alone when it is falsy", async () => {
+  await withLab(async (lab) => {
+    writeRollout(lab.transcript, settledRollout());
+    const typesafe = fakeTypesafe();
+    const base = environment(lab, { fetch: typesafe.fetch });
+    const output = await handle(stop(lab), {
+      ...base,
+      env: { ...base.env, COMPACT_ADVISER_DISABLE: "0" },
+    });
+    assert.deepEqual(output, { systemMessage: HINT });
+    assert.equal(typesafe.requests.length, 1);
+  });
+});
+
 test("a concurrent off after TypeSafe returns is honoured and does not hint", async () => {
   await withLab(async (lab) => {
     writeRollout(lab.transcript, settledRollout());

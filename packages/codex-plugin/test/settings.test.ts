@@ -211,6 +211,17 @@ test("status names the mode, the key source, and the latest session's cooldown",
   });
 });
 
+test("COMPACT_ADVISER_DISABLE makes the CLI take no action", async () => {
+  await withLab(async (lab) => {
+    const message = await run(
+      ["off"],
+      cli(lab, { env: { CODEX_HOME: lab.home, COMPACT_ADVISER_DISABLE: "1" } }),
+    );
+    assert.equal(message, "");
+    assert.equal(new ConfigStore(adviserRoot({ CODEX_HOME: lab.home })).read().mode, "hint");
+  });
+});
+
 test("the CLI explains that automatic mode does not exist on Codex", async () => {
   await withLab(async (lab) => {
     await assert.rejects(run(["auto"], cli(lab)), /not available on Codex/);
