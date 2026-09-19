@@ -1,6 +1,6 @@
 {
   "name": "compact-adviser",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "license": "MIT",
   "description": "Suggests (or, opt-in, runs) /compact at a completed checkpoint, judged by TypeSafe Jev. Its hooks module activates only when CLAUDE_CODE_ENABLE_FUNCTION_HOOKS is exactly 1 and is otherwise a complete no-op.",
   "author": {
@@ -8,13 +8,23 @@
   },
   "homepage": "https://github.com/kunchenguid/compact-adviser#readme",
   "repository": "https://github.com/kunchenguid/compact-adviser",
-  "keywords": ["compact", "context", "context-management", "checkpoint", "productivity"],
+  "keywords": [
+    "compact",
+    "context",
+    "context-management",
+    "checkpoint",
+    "productivity"
+  ],
   "userConfig": {
     "mode": {
       "type": "string",
       "title": "Mode",
       "description": "hint shows advice; auto compacts at eligible checkpoints after a first-use confirmation from /compact-adviser; off disables the adviser (Claude Code's own auto-compact is unaffected).",
-      "options": ["hint", "auto", "off"],
+      "options": [
+        "hint",
+        "auto",
+        "off"
+      ],
       "default": "hint"
     },
     "minContextTokens": {

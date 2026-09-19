@@ -9,14 +9,25 @@
     {
       "name": "compact-adviser",
       "description": "Stop guessing when to run /compact. Watches your session and suggests compaction at a completed checkpoint - after work lands, not mid-task - so you keep context you still need and drop what you do not. Hint-only on Grok: the hint is painted on the status row and never enters the model's context. Judgment runs through the TypeSafe Jev API and needs your own key.",
-      "version": "0.1.0",
+      "version": "0.1.4",
       "category": "productivity",
-      "author": { "name": "Kun Chen" },
+      "author": {
+        "name": "Kun Chen"
+      },
       "homepage": "https://github.com/kunchenguid/compact-adviser#readme",
       "repository": "https://github.com/kunchenguid/compact-adviser",
       "license": "MIT",
-      "keywords": ["compact", "context", "context-management", "checkpoint", "productivity"],
-      "source": { "type": "local", "path": "./packages/grok-plugin" }
+      "keywords": [
+        "compact",
+        "context",
+        "context-management",
+        "checkpoint",
+        "productivity"
+      ],
+      "source": {
+        "type": "local",
+        "path": "./packages/grok-plugin"
+      }
     }
   ]
 }

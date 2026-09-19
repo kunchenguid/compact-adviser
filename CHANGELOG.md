@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.1.4](https://github.com/kunchenguid/compact-adviser/compare/compact-adviser-v0.1.3...compact-adviser-v0.1.4) (2026-09-19)
+
+
+### Features
+
+* **codex-plugin:** add Codex CLI host adapter ([#36](https://github.com/kunchenguid/compact-adviser/issues/36)) ([17e441a](https://github.com/kunchenguid/compact-adviser/commit/17e441a81e9dbacfef15756b7d0cca66461a9b98))
+* **eval:** add session-grouped datasets and independent labelling ([#38](https://github.com/kunchenguid/compact-adviser/issues/38)) ([839eb2f](https://github.com/kunchenguid/compact-adviser/commit/839eb2f163fe9e3952a571e7db2cdccebe17ae68))
+* **grok:** add hint-only Grok Build adapter ([#30](https://github.com/kunchenguid/compact-adviser/issues/30)) ([f16b45c](https://github.com/kunchenguid/compact-adviser/commit/f16b45c5310eb1121792ea93ba208f23659850ca))
+
+
+### Bug Fixes
+
+* **claude-mod:** stop fighting biome over release-please's plugin.json ([#34](https://github.com/kunchenguid/compact-adviser/issues/34)) ([a41f857](https://github.com/kunchenguid/compact-adviser/commit/a41f8575c18bd27941e8ae6e445cef3eee83809f))
+* **claude-mod:** use auto-compact threshold as usage denominator ([#37](https://github.com/kunchenguid/compact-adviser/issues/37)) ([73ce0d6](https://github.com/kunchenguid/compact-adviser/commit/73ce0d6326c0fb411836b19ab8f307b8d4076606))
+
 ## [0.1.3](https://github.com/kunchenguid/compact-adviser/compare/compact-adviser-v0.1.2...compact-adviser-v0.1.3) (2026-09-18)
 
 
