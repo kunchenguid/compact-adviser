@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.5](https://github.com/kunchenguid/compact-adviser/compare/compact-adviser-v0.1.4...compact-adviser-v0.1.5) (2026-09-19)
+
+
+### Features
+
+* load optional judge profiles across all hosts ([#39](https://github.com/kunchenguid/compact-adviser/issues/39)) ([b2a27b5](https://github.com/kunchenguid/compact-adviser/commit/b2a27b59ce86af4dc8fb5141e169bfbed1e68cee))
+
 ## [0.1.4](https://github.com/kunchenguid/compact-adviser/compare/compact-adviser-v0.1.3...compact-adviser-v0.1.4) (2026-09-19)
 
 
