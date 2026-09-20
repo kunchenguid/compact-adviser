@@ -11,12 +11,20 @@ import {
   writeFileSync,
 } from "node:fs";
 import { dirname, join } from "node:path";
+import type { ThemeColor } from "@earendil-works/pi-coding-agent";
 import { lockSync } from "proper-lockfile";
 import { parseProfile } from "./profile.ts";
 
 export type Mode = "hint" | "auto" | "off";
 /** Pi theme.fg() color keys allowed for the compact-hint status line. */
-export const HINT_FG_COLORS = ["accent", "warning", "info", "success", "muted", "dim", "text"] as const;
+export const HINT_FG_COLORS = [
+  "accent",
+  "warning",
+  "success",
+  "muted",
+  "dim",
+  "text",
+] as const satisfies readonly ThemeColor[];
 export type HintFg = (typeof HINT_FG_COLORS)[number];
 export const MAX_SAVED_API_KEY_LENGTH = 1024;
 export interface Config {

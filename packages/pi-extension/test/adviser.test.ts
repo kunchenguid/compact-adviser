@@ -212,7 +212,7 @@ test("auto requires explicit confirmation, persist, and never compact on selecti
     h.notifications
       .at(-1)
       ?.includes(
-        "Use /compact-adviser, auto, hint, off, status, threshold <tokens|default>, color <accent|warning|info|success|muted|dim|text>, snooze or dismiss.",
+        "Use /compact-adviser, auto, hint, off, status, threshold <tokens|default>, color <accent|warning|success|muted|dim|text>, snooze or dismiss.",
       ),
   );
   await h.command("hint");

@@ -6,6 +6,7 @@ import { lockSync } from "proper-lockfile";
 import {
   ConfigStore,
   DEFAULT_CONFIG,
+  HINT_FG_COLORS,
   parseHintFg,
   parseMinimum,
   parseSavedApiKey,
@@ -523,7 +524,8 @@ test("TypeSafe log append keeps prior lines", (t) => {
 test("hintFg defaults to accent and accepts theme keys", (t) => {
   assert.equal(DEFAULT_CONFIG.hintFg, "accent");
   assert.equal(parseHintFg("warning"), "warning");
-  assert.equal(parseHintFg(" Info "), "info");
+  assert.equal(parseHintFg(" Success "), "success");
+  assert.throws(() => parseHintFg("info"), /accent/);
   assert.throws(() => parseHintFg("yellow"), /accent/);
   const store = new ConfigStore(temp(t));
   assert.equal(store.read().hintFg, "accent");
@@ -532,4 +534,24 @@ test("hintFg defaults to accent and accepts theme keys", (t) => {
   assert.equal(store.read().hintFg, "accent");
   store.update({ hintFg: "warning" });
   assert.equal(store.read().hintFg, "warning");
+  writeFileSync(store.path, JSON.stringify({ ...DEFAULT_CONFIG, hintFg: "info" }));
+  assert.throws(() => store.read());
+});
+
+test("every configured hint color renders with Pi's built-in themes", async (t) => {
+  const { getThemeByName } = await import(
+    new URL(
+      "./modes/interactive/theme/theme.js",
+      import.meta.resolve("@earendil-works/pi-coding-agent"),
+    ).href
+  );
+  const store = new ConfigStore(temp(t));
+  for (const name of ["dark", "light"]) {
+    const theme = getThemeByName(name);
+    assert.ok(theme);
+    for (const color of HINT_FG_COLORS) {
+      store.update({ hintFg: parseHintFg(color) });
+      assert.ok(theme.fg(store.read().hintFg, "Compact hint").includes("Compact hint"));
+    }
+  }
 });

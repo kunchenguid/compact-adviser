@@ -42,7 +42,7 @@ import {
 const LABEL = "compact-adviser";
 const HINT = "Compact adviser: work appears completed or recorded. Run /compact to save tokens.";
 const USAGE =
-  "Use /compact-adviser, auto, hint, off, status, threshold <tokens|default>, color <accent|warning|info|success|muted|dim|text>, snooze or dismiss.";
+  "Use /compact-adviser, auto, hint, off, status, threshold <tokens|default>, color <accent|warning|success|muted|dim|text>, snooze or dismiss.";
 interface Options {
   agentDir: string;
   version: string;
