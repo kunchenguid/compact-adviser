@@ -530,7 +530,10 @@ test("hintFg defaults to accent and accepts theme keys", (t) => {
   const store = new ConfigStore(temp(t));
   assert.equal(store.read().hintFg, "accent");
   // Old files without hintFg still load with the accent default.
-  writeFileSync(store.path, `${JSON.stringify({ version: 1, mode: "hint", minContextTokens: 40000, autoAcknowledged: false }, null, 2)}\n`);
+  writeFileSync(
+    store.path,
+    `${JSON.stringify({ version: 1, mode: "hint", minContextTokens: 40000, autoAcknowledged: false }, null, 2)}\n`,
+  );
   assert.equal(store.read().hintFg, "accent");
   store.update({ hintFg: "warning" });
   assert.equal(store.read().hintFg, "warning");
