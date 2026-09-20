@@ -8,7 +8,10 @@ import {
   type Config,
   ConfigStore,
   DEFAULT_CONFIG,
+  type HintFg,
+  HINT_FG_COLORS,
   type Mode,
+  parseHintFg,
   parseMinimum,
   parseSavedApiKey,
 } from "./config.ts";
@@ -39,7 +42,7 @@ import {
 const LABEL = "compact-adviser";
 const HINT = "Compact adviser: work appears completed or recorded. Run /compact to save tokens.";
 const USAGE =
-  "Use /compact-adviser, auto, hint, off, status, threshold <tokens|default>, snooze or dismiss.";
+  "Use /compact-adviser, auto, hint, off, status, threshold <tokens|default>, color <accent|warning|info|success|muted|dim|text>, snooze or dismiss.";
 interface Options {
   agentDir: string;
   version: string;
@@ -112,6 +115,11 @@ export function installAdviser(pi: ExtensionAPI, options: Options): void {
     request = undefined;
     if (hintVisible && active(ctx)) ctx.ui.setWidget(LABEL, undefined);
     hintVisible = false;
+  }
+  function showHint(ctx: ExtensionContext, color: HintFg = store.read().hintFg) {
+    const fg = (HINT_FG_COLORS as readonly string[]).includes(color) ? color : DEFAULT_CONFIG.hintFg;
+    ctx.ui.setWidget(LABEL, (_tui, theme) => new Text(theme.fg(fg, HINT), 0, 0));
+    hintVisible = true;
   }
   function eligible(ctx: ExtensionContext, c: Config, s: SessionState): number | undefined {
     const usage = ctx.getContextUsage();
@@ -233,8 +241,7 @@ export function installAdviser(pi: ExtensionAPI, options: Options): void {
       if (!auto) {
         state = { ...state, lastHintAt: state.completed, lastHintKey: view.checkpointKey };
         persist(state);
-        ctx.ui.setWidget(LABEL, (_tui, theme) => new Text(theme.fg("warning", HINT), 0, 0));
-        hintVisible = true;
+        showHint(ctx);
       } else {
         compacting = true;
         automaticCompaction = true;
@@ -390,6 +397,10 @@ export function installAdviser(pi: ExtensionAPI, options: Options): void {
         `${mode === "hint" ? "Hints only" : "Off"} saved (all sessions). Pi's built-in compaction is unchanged.`,
       );
   }
+  function changeHintFg(ctx: ExtensionCommandContext, text: string) {
+    const hintFg = parseHintFg(text);
+    save(ctx, { hintFg }, `Hint color saved: ${hintFg} (all sessions).`);
+  }
   function minimum(ctx: ExtensionCommandContext, text: string) {
     const count = text === "default" ? DEFAULT_CONFIG.minContextTokens : parseMinimum(text);
     save(
@@ -409,7 +420,7 @@ export function installAdviser(pi: ExtensionAPI, options: Options): void {
       t = ctx.getContextUsage()?.tokens,
       u = usageFraction(ctx);
     ctx.ui.notify(
-      `Mode: ${c.mode}. Minimum: ${c.minContextTokens.toLocaleString("en-US")} tokens. Context: ${t ?? "unknown"}${Number.isFinite(u) ? ` (${Math.round(u * 100)}% of the window; hint floor ${floorFor(u, parseProfile(c.profile)).toFixed(2)})` : ""}. ${formatKeyStatus(resolvedKey().source)}. ${typeof t === "number" ? (cooldownReason(s, t, now()) ?? "No cooldown; semantic checks still apply.") : "Waiting for fresh model usage."} Request log: ${c.logRequests ? requestLogPath(options.agentDir) : "off"}. Settings: ${store.path}`,
+      `Mode: ${c.mode}. Hint color: ${c.hintFg}. Minimum: ${c.minContextTokens.toLocaleString("en-US")} tokens. Context: ${t ?? "unknown"}${Number.isFinite(u) ? ` (${Math.round(u * 100)}% of the window; hint floor ${floorFor(u, parseProfile(c.profile)).toFixed(2)})` : ""}. ${formatKeyStatus(resolvedKey().source)}. ${typeof t === "number" ? (cooldownReason(s, t, now()) ?? "No cooldown; semantic checks still apply.") : "Waiting for fresh model usage."} Request log: ${c.logRequests ? requestLogPath(options.agentDir) : "off"}. Settings: ${store.path}`,
       "info",
     );
   }
@@ -443,6 +454,7 @@ export function installAdviser(pi: ExtensionAPI, options: Options): void {
       const labels = [
         `Mode: ${c.mode}`,
         `Minimum context: ${c.minContextTokens.toLocaleString("en-US")} tokens`,
+        `Hint color: ${c.hintFg}`,
         `Log TypeSafe requests: ${c.logRequests ? "on" : "off"}`,
         keyLabel,
         "Reset minimum to 40,000",
@@ -477,6 +489,12 @@ export function installAdviser(pi: ExtensionAPI, options: Options): void {
           }
         }
       } else if (selected === labels[2]) {
+        const color = await ctx.ui.select(
+          "Hint color (Pi theme.fg key; accent reads better on light themes)",
+          [...HINT_FG_COLORS],
+        );
+        if (color) changeHintFg(ctx, color);
+      } else if (selected === labels[3]) {
         const logging = await ctx.ui.select("Log TypeSafe requests", ["Off (default)", "On"]);
         if (logging) await changeLogRequests(ctx, logging.startsWith("On"));
       } else if (selected === keyLabel) {
@@ -498,14 +516,25 @@ export function installAdviser(pi: ExtensionAPI, options: Options): void {
             }
           }
         }
-      } else if (selected === labels[4]) minimum(ctx, "default");
-      else status(ctx);
+      } else if (selected === labels[5]) minimum(ctx, "default");
+      else if (selected === labels[6] || selected === "Status") status(ctx);
     }
   }
   pi.registerCommand("compact-adviser", {
     description: "Configure persistent compaction advice, experimental auto, and token minimum",
     getArgumentCompletions: (prefix) =>
-      ["auto", "hint", "off", "status", "threshold ", "threshold default", "snooze", "dismiss"]
+      [
+        "auto",
+        "hint",
+        "off",
+        "status",
+        "threshold ",
+        "threshold default",
+        "color ",
+        ...HINT_FG_COLORS.map((c) => `color ${c}`),
+        "snooze",
+        "dismiss",
+      ]
         .filter((v) => v.startsWith(prefix))
         .map((value) => ({ value, label: value })),
     handler: async (args, ctx) => {
@@ -517,6 +546,7 @@ export function installAdviser(pi: ExtensionAPI, options: Options): void {
         else if (["auto", "hint", "off"].includes(command) && !value)
           await changeMode(ctx, command as Mode);
         else if (command === "threshold" && value) minimum(ctx, value);
+        else if (command === "color" && value) changeHintFg(ctx, value);
         else if (command === "status" && !value) status(ctx);
         else if (["snooze", "dismiss"].includes(command) && !value) {
           const s = restoreState(ctx.sessionManager.getBranch());

@@ -3,7 +3,13 @@ import { readFileSync, statSync, symlinkSync, unlinkSync, writeFileSync } from "
 import { join } from "node:path";
 import test from "node:test";
 import { lockSync } from "proper-lockfile";
-import { ConfigStore, DEFAULT_CONFIG, parseMinimum, parseSavedApiKey } from "../src/config.ts";
+import {
+  ConfigStore,
+  DEFAULT_CONFIG,
+  parseHintFg,
+  parseMinimum,
+  parseSavedApiKey,
+} from "../src/config.ts";
 import { RECENT_TAIL_MESSAGES, snapshot } from "../src/context.ts";
 import { parseDotenvKey, resolveTypesafeApiKey } from "../src/env.ts";
 import {
@@ -78,6 +84,7 @@ test("config defaults, atomic persistence, field merging, contention and invalid
     minContextTokens: 50000,
     autoAcknowledged: true,
     logRequests: false,
+    hintFg: "accent",
   });
   a.update({ mode: "hint" });
   assert.equal("sharingConsent" in JSON.parse(readFileSync(a.path, "utf8")), false);
@@ -511,4 +518,18 @@ test("TypeSafe log append keeps prior lines", (t) => {
   assert.equal(lines[0].body.state.note, "prior-session");
   assert.equal(lines[1].id, requestLogId(body));
   assert.notEqual(lines[0].id, lines[1].id);
+});
+
+test("hintFg defaults to accent and accepts theme keys", (t) => {
+  assert.equal(DEFAULT_CONFIG.hintFg, "accent");
+  assert.equal(parseHintFg("warning"), "warning");
+  assert.equal(parseHintFg(" Info "), "info");
+  assert.throws(() => parseHintFg("yellow"), /accent/);
+  const store = new ConfigStore(temp(t));
+  assert.equal(store.read().hintFg, "accent");
+  // Old files without hintFg still load with the accent default.
+  writeFileSync(store.path, `${JSON.stringify({ version: 1, mode: "hint", minContextTokens: 40000, autoAcknowledged: false }, null, 2)}\n`);
+  assert.equal(store.read().hintFg, "accent");
+  store.update({ hintFg: "warning" });
+  assert.equal(store.read().hintFg, "warning");
 });

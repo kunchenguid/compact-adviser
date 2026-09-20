@@ -139,7 +139,7 @@ export function harness(
         if (typeof content === "function") {
           const component = content(
             {},
-            { fg: (color, text) => (color === "warning" ? `warning:${text}` : text) },
+            { fg: (color, text) => `${color}:${text}` },
           );
           widgets.push(component.render(120));
           return;

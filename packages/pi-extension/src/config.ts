@@ -15,6 +15,9 @@ import { lockSync } from "proper-lockfile";
 import { parseProfile } from "./profile.ts";
 
 export type Mode = "hint" | "auto" | "off";
+/** Pi theme.fg() color keys allowed for the compact-hint status line. */
+export const HINT_FG_COLORS = ["accent", "warning", "info", "success", "muted", "dim", "text"] as const;
+export type HintFg = (typeof HINT_FG_COLORS)[number];
 export const MAX_SAVED_API_KEY_LENGTH = 1024;
 export interface Config {
   version: 1;
@@ -22,6 +25,8 @@ export interface Config {
   minContextTokens: number;
   autoAcknowledged: boolean;
   logRequests: boolean;
+  /** Theme color key for the hint line. Default accent (readable on light themes). */
+  hintFg: HintFg;
   typesafeApiKey?: string;
   profile?: string;
 }
@@ -31,7 +36,15 @@ export const DEFAULT_CONFIG: Readonly<Config> = Object.freeze({
   minContextTokens: 40000,
   autoAcknowledged: false,
   logRequests: false,
+  hintFg: "accent",
 });
+export function parseHintFg(text: string): HintFg {
+  const value = text.trim().toLowerCase();
+  if ((HINT_FG_COLORS as readonly string[]).includes(value)) return value as HintFg;
+  throw new Error(
+    `Enter one of: ${HINT_FG_COLORS.join(", ")}. Default is accent (better contrast on light themes than warning).`,
+  );
+}
 export function parseMinimum(text: string): number {
   const value = text.trim();
   const number = Number(value);
@@ -66,7 +79,10 @@ function validate(value: unknown): Config {
     c.minContextTokens <= 0 ||
     typeof c.autoAcknowledged !== "boolean" ||
     (c.logRequests !== undefined && typeof c.logRequests !== "boolean") ||
-    (c.typesafeApiKey !== undefined && typeof c.typesafeApiKey !== "string")
+    (c.typesafeApiKey !== undefined && typeof c.typesafeApiKey !== "string") ||
+    (c.hintFg !== undefined &&
+      (typeof c.hintFg !== "string" ||
+        !(HINT_FG_COLORS as readonly string[]).includes(c.hintFg)))
   ) {
     throw new Error("Invalid or unsupported settings. Restore a valid version-1 configuration.");
   }
@@ -78,12 +94,17 @@ function validate(value: unknown): Config {
   if (typesafeApiKey !== undefined && typesafeApiKey.length > MAX_SAVED_API_KEY_LENGTH) {
     throw new Error("Invalid or unsupported settings. Restore a valid version-1 configuration.");
   }
+  const hintFg: HintFg =
+    typeof c.hintFg === "string" && (HINT_FG_COLORS as readonly string[]).includes(c.hintFg)
+      ? (c.hintFg as HintFg)
+      : DEFAULT_CONFIG.hintFg;
   return {
     version: 1,
     mode: c.mode as Mode,
     minContextTokens: c.minContextTokens,
     autoAcknowledged: c.autoAcknowledged,
     logRequests: c.logRequests === true,
+    hintFg,
     ...(typesafeApiKey !== undefined ? { typesafeApiKey } : {}),
     ...(c.profile !== undefined ? { profile: c.profile as string } : {}),
   };
