@@ -8,8 +8,8 @@ import {
   type Config,
   ConfigStore,
   DEFAULT_CONFIG,
-  type HintFg,
   HINT_FG_COLORS,
+  type HintFg,
   type Mode,
   parseHintFg,
   parseMinimum,
@@ -117,7 +117,9 @@ export function installAdviser(pi: ExtensionAPI, options: Options): void {
     hintVisible = false;
   }
   function showHint(ctx: ExtensionContext, color: HintFg = store.read().hintFg) {
-    const fg = (HINT_FG_COLORS as readonly string[]).includes(color) ? color : DEFAULT_CONFIG.hintFg;
+    const fg = (HINT_FG_COLORS as readonly string[]).includes(color)
+      ? color
+      : DEFAULT_CONFIG.hintFg;
     ctx.ui.setWidget(LABEL, (_tui, theme) => new Text(theme.fg(fg, HINT), 0, 0));
     hintVisible = true;
   }

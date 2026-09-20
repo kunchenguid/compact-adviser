@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { cpSync, existsSync, mkdirSync, readFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import test, { type TestContext } from "node:test";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
@@ -42,7 +42,7 @@ function run(
     coordinating?: boolean;
     logRequests?: boolean;
     jevFailure?: boolean;
-  } = {},
+    theme?: "light" | "dark";  } = {},
 ) {
   const dir = temp(t),
     store = new ConfigStore(dir);
@@ -51,6 +51,7 @@ function run(
     autoAcknowledged: mode === "auto",
     logRequests: fixture.logRequests ?? false,
   });
+  if (fixture.theme) writeFileSync(join(dir, "settings.json"), JSON.stringify({ theme: fixture.theme }));
   const sm = SessionManager.create(dir, join(dir, "sessions"));
   sm.appendMessage({
     role: "user",
@@ -149,11 +150,37 @@ test("signed Pi: native configuration input is actually prefilled", (t) => {
     { send: "\r", wait: "Minimum context saved: 40,000 tokens" },
     { send: "\x1b[B\r", wait: "Minimum context tokens" },
     { send: "\x01\x0b60000\r", wait: "Minimum context saved: 60,000 tokens" },
-    { send: "\x1b[B\x1b[B\x1b[B\x1b[B\r", wait: "Minimum context saved: 40,000 tokens" },
+    { send: "\x1b[B\x1b[B\x1b[B\x1b[B\x1b[B\r", wait: "Minimum context saved: 40,000 tokens" },
   ]);
   assert.equal(r.store.read().minContextTokens, 40000);
   assert.ok(r.result.ok);
 });
+
+for (const theme of ["light", "dark"] as const) {
+  test(`signed Pi: hint color command and menu render on ${theme} theme`, (t) => {
+    const r = run(t, "hint", [
+      { send: "Finish the default color report.\r", wait: "Run /compact to save tokens." },
+      { send: "/compact-adviser color info\r", wait: "Enter one of:" },
+      { send: "/compact-adviser status\r", wait: "Hint color: accent." },
+      { send: "/compact-adviser\r", wait: "Compact adviser (saved for all sessions)" },
+      { send: "\x1b[B\x1b[B\r", wait: "Hint color (Pi theme.fg key" },
+      { send: "\x1b[B\r", wait: "Hint color saved: warning" },
+      { send: "\x1b", wait: "local" },
+      { send: "Finish the warning color report.\r", wait: "Run /compact to save tokens." },
+      { send: "/compact-adviser color success\r", wait: "Hint color saved: success" },
+      { send: "Finish the success color report.\r", wait: "Run /compact to save tokens." },
+    ], false, { theme });
+    assert.equal(r.store.read().hintFg, "success");
+    assert.equal(r.events.filter((e) => e.event === "jev").length, 3);
+    assert.ok(r.result.ok);
+    const terminal = readFileSync(join(r.dir, "terminal.log"), "utf8");
+    const hintColors = [...terminal.matchAll(/\x1b\[38;([\d;]+)mCompact adviser: work appears/g)].map((match) => match[1]);
+    assert.equal(new Set(hintColors).size, 3, "default, warning and success must visibly differ");
+    if (process.env.COMPACT_TEST_COLOR_EVIDENCE) {
+      cpSync(join(r.dir, "terminal.log"), join(process.env.COMPACT_TEST_COLOR_EVIDENCE, `${theme}-terminal.log`));
+    }
+  });
+}
 
 test("signed Pi: real settled event produces the hint and a complete Jev decision log", (t) => {
   const r = run(

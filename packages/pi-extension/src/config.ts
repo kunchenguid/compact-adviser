@@ -89,8 +89,7 @@ function validate(value: unknown): Config {
     (c.logRequests !== undefined && typeof c.logRequests !== "boolean") ||
     (c.typesafeApiKey !== undefined && typeof c.typesafeApiKey !== "string") ||
     (c.hintFg !== undefined &&
-      (typeof c.hintFg !== "string" ||
-        !(HINT_FG_COLORS as readonly string[]).includes(c.hintFg)))
+      (typeof c.hintFg !== "string" || !(HINT_FG_COLORS as readonly string[]).includes(c.hintFg)))
   ) {
     throw new Error("Invalid or unsupported settings. Restore a valid version-1 configuration.");
   }
