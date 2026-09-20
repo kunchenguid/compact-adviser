@@ -173,6 +173,7 @@ hint can never be fed back to the model.
 | `/compact-adviser auto` / `hint` / `off` (Pi and Claude Code) | Save that mode; auto asks for first-use confirmation |
 | `/compact-adviser status` (Pi and Claude Code) | Mode, minimum, context, key source (`env` / `saved` / `.env` / `missing`), cooldown |
 | `/compact-adviser threshold 60000` (Pi and Claude Code) | Save an absolute token minimum |
+| `/compact-adviser color accent` (Pi) | Hint line theme color (`accent` default; also `warning`, `success`, `muted`, `dim`, `text`). Light themes often need `accent` instead of yellow `warning` |
 | `/compact-adviser snooze` / `dismiss` (Pi and Claude Code) | Suppress the next three exchanges, or clear the current hint |
 | `/compact-adviser` (Grok) | Show status; do not add arguments because Grok sends them to the model |
 | `/compact-adviser-hint` / `/compact-adviser-off` (Grok) | Save hint-only mode, or disable the adviser |
