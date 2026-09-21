@@ -37,7 +37,7 @@ It would ship in redacted form only if the redacted set still reproduces the pub
 A wrong hint costs most when the window is still mostly empty, and least when the host is about to compact anyway.
 Near the top the larger cost is the hint that never comes, so the bar starts strict and relaxes as the context fills: precision where there is room, recall where there is not.
 The absolute minimum before any judgment stays absolute, because the tokens a compaction saves are the same money on a small window and a large one.
-Errors, timeouts, malformed responses, unreadable usage, and invalid configuration resolve to no advice, never to an affirmative one.
+Errors, timeouts, malformed responses, and invalid configuration resolve to no advice, never to an affirmative one.
 Cheap local state is inspected before any network request.
 Where there is no human to read a hint, in a non-interactive or unattended session reliably detected from the host rather than guessed from ambient environment variables, the product does nothing and says nothing.
 A session nobody is watching is served by automatic mode if its owner chose it, never by routing advice to some other person.
