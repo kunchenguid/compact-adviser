@@ -160,6 +160,28 @@ test("persistent settings menu prefills, validates, saves, cancels and resets on
   assert.ok(!h.notifications.at(-1)?.includes("Sharing:"));
 });
 
+test("Pi uses the session cwd .env for status and settled checks", async (t) => {
+  const previous = process.env.TYPESAFE_API_KEY;
+  t.after(() => {
+    if (previous === undefined) delete process.env.TYPESAFE_API_KEY;
+    else process.env.TYPESAFE_API_KEY = previous;
+  });
+  delete process.env.TYPESAFE_API_KEY;
+  let seenKey = "";
+  const h = harness(t, async (_state, key) => {
+    seenKey = key;
+    return success();
+  });
+  writeFileSync(`${h.dir}/.env`, "TYPESAFE_API_KEY=from-session-cwd\n");
+  h.install("0.82.0", false);
+  h.enable("hint");
+  await h.command("status");
+  assert.ok(h.notifications.at(-1)?.includes("Key: .env"));
+  await h.fire("agent_settled");
+  assert.equal(seenKey, "from-session-cwd");
+  assert.ok(showedHint(h));
+});
+
 test("settings menu saves and clears a TypeSafe key without printing it", async (t) => {
   const previous = process.env.TYPESAFE_API_KEY;
   t.after(() => {

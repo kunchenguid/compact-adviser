@@ -64,16 +64,16 @@ export function installAdviser(pi: ExtensionAPI, options: Options): void {
   // and re-reading it per event would only invite a mid-session half-disabled state.
   if (disabledByEnv(process.env[DISABLE_ENV])) return;
   const store = new ConfigStore(options.agentDir);
-  const resolvedKey = (): ResolvedTypesafeApiKey => {
+  const resolvedKey = (cwd = process.cwd()): ResolvedTypesafeApiKey => {
     if (options.key) {
       const value = options.key();
       return value !== undefined && value.trim() !== ""
         ? { value, source: "env" }
         : { value: undefined, source: "missing" };
     }
-    return resolveTypesafeApiKey(process.env, process.cwd(), savedApiKey(store));
+    return resolveTypesafeApiKey(process.env, cwd, savedApiKey(store));
   };
-  const key = () => resolvedKey().value;
+  const key = (cwd?: string) => resolvedKey(cwd).value;
   const now = options.now ?? Date.now;
   const evaluate =
     options.evaluate ??
@@ -124,7 +124,7 @@ export function installAdviser(pi: ExtensionAPI, options: Options): void {
       ctx.hasPendingMessages() ||
       ctx.ui.getEditorText?.().trim() ||
       c.mode === "off" ||
-      !key()?.trim() ||
+      !key(ctx.cwd)?.trim() ||
       !usage ||
       usage.tokens === null ||
       !Number.isFinite(usage.tokens) ||
@@ -181,7 +181,7 @@ export function installAdviser(pi: ExtensionAPI, options: Options): void {
     }
     if (request || eligible(ctx, config, state) === undefined) return;
     const profile = parseProfile(config.profile);
-    const view = snapshot(ctx, [key(), savedApiKey(store)]);
+    const view = snapshot(ctx, [key(ctx.cwd), savedApiKey(store)]);
     if (view.conversationTokens <= 20000 || view.checkpointKey === state.lastHintKey) return;
     let loggedBody: string | undefined;
     if (config.logRequests) {
@@ -200,7 +200,12 @@ export function installAdviser(pi: ExtensionAPI, options: Options): void {
     const current = () =>
       !controller.signal.aborted && generation === epoch && sessionIdentity(ctx) === identity;
     try {
-      const result = await evaluate(view.state, key()?.trim() ?? "", controller.signal, profile);
+      const result = await evaluate(
+        view.state,
+        key(ctx.cwd)?.trim() ?? "",
+        controller.signal,
+        profile,
+      );
       if (!current()) return;
       if (config.logRequests) {
         try {
@@ -409,7 +414,7 @@ export function installAdviser(pi: ExtensionAPI, options: Options): void {
       t = ctx.getContextUsage()?.tokens,
       u = usageFraction(ctx);
     ctx.ui.notify(
-      `Mode: ${c.mode}. Minimum: ${c.minContextTokens.toLocaleString("en-US")} tokens. Context: ${t ?? "unknown"}${Number.isFinite(u) ? ` (${Math.round(u * 100)}% of the window; hint floor ${floorFor(u, parseProfile(c.profile)).toFixed(2)})` : ""}. ${formatKeyStatus(resolvedKey().source)}. ${typeof t === "number" ? (cooldownReason(s, t, now()) ?? "No cooldown; semantic checks still apply.") : "Waiting for fresh model usage."} Request log: ${c.logRequests ? requestLogPath(options.agentDir) : "off"}. Settings: ${store.path}`,
+      `Mode: ${c.mode}. Minimum: ${c.minContextTokens.toLocaleString("en-US")} tokens. Context: ${t ?? "unknown"}${Number.isFinite(u) ? ` (${Math.round(u * 100)}% of the window; hint floor ${floorFor(u, parseProfile(c.profile)).toFixed(2)})` : ""}. ${formatKeyStatus(resolvedKey(ctx.cwd).source)}. ${typeof t === "number" ? (cooldownReason(s, t, now()) ?? "No cooldown; semantic checks still apply.") : "Waiting for fresh model usage."} Request log: ${c.logRequests ? requestLogPath(options.agentDir) : "off"}. Settings: ${store.path}`,
       "info",
     );
   }
