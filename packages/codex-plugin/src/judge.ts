@@ -220,17 +220,18 @@ export function score(j: Judgment, profile?: JudgeProfile): number {
 export function floorFor(usage: number, profile?: JudgeProfile): number {
   if (profile) {
     const points = profile.floors;
-    if (!Number.isFinite(usage) || usage <= points[0]![0]) return points[0]![1];
+    const [firstUsage, firstFloor] = points[0] as [number, number];
+    if (!Number.isFinite(usage) || usage <= firstUsage) return firstFloor;
     for (let i = 1; i < points.length; i++) {
-      const [rightUsage, rightFloor] = points[i]!;
-      const [leftUsage, leftFloor] = points[i - 1]!;
+      const [rightUsage, rightFloor] = points[i] as [number, number];
+      const [leftUsage, leftFloor] = points[i - 1] as [number, number];
       if (usage <= rightUsage) {
         const raw =
           leftFloor - (leftFloor - rightFloor) * ((usage - leftUsage) / (rightUsage - leftUsage));
         return Math.round(raw * 1000) / 1000;
       }
     }
-    return points[points.length - 1]![1];
+    return (points[points.length - 1] as [number, number])[1];
   }
   if (!Number.isFinite(usage) || usage <= USAGE_STRICT_UNTIL) return FLOOR_MAX;
   if (usage >= USAGE_LOOSE_AT) return FLOOR_MIN;
