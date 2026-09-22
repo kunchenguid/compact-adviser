@@ -1,6 +1,6 @@
 {
   "name": "compact-adviser",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "license": "MIT",
   "description": "Suggests (or, opt-in, runs) /compact at a completed checkpoint, judged by TypeSafe Jev. Its hooks module activates only when CLAUDE_CODE_ENABLE_FUNCTION_HOOKS is exactly 1 and is otherwise a complete no-op.",
   "author": {

@@ -1,6 +1,6 @@
 {
   "name": "compact-adviser-monorepo",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "private": true,
   "license": "MIT",
   "description": "Find a good checkpoint before compacting an AI coding session.",

@@ -1,6 +1,6 @@
 {
   "name": "compact-adviser",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "license": "MIT",
   "description": "Suggests /compact at a completed checkpoint, judged by TypeSafe Jev. Hint-only on Codex (macOS and Linux): nothing outside a session can run /compact, so there is no automatic mode.",
   "author": {

@@ -1,6 +1,6 @@
 {
   "name": "compact-adviser",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "license": "MIT",
   "description": "Tells you when your Pi session has reached a good point to compact: a standalone extension that judges completed checkpoints instead of leaving you to guess.",
   "type": "module",

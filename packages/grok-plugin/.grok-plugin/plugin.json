@@ -1,6 +1,6 @@
 {
   "name": "compact-adviser",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "license": "MIT",
   "description": "Suggests /compact at a completed checkpoint, judged by TypeSafe Jev. Hint-only on Grok: the Stop hook judges and the status-line script shows the hint, which never reaches the model's context.",
   "author": {

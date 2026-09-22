@@ -9,7 +9,7 @@
     {
       "name": "compact-adviser",
       "description": "Stop guessing when to run /compact. Watches your session and suggests compaction at a completed checkpoint - after work lands, not mid-task - so you keep context you still need and drop what you do not. Hint-only on Grok: the hint is painted on the status row and never enters the model's context. Judgment runs through the TypeSafe Jev API and needs your own key.",
-      "version": "0.1.5",
+      "version": "0.1.6",
       "category": "productivity",
       "author": {
         "name": "Kun Chen"

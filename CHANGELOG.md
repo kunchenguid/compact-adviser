@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.6](https://github.com/kunchenguid/compact-adviser/compare/compact-adviser-v0.1.5...compact-adviser-v0.1.6) (2026-09-22)
+
+
+### Features
+
+* **pi-extension:** add cached judge profile optimisation harness and holdout report ([#43](https://github.com/kunchenguid/compact-adviser/issues/43)) ([dfe083b](https://github.com/kunchenguid/compact-adviser/commit/dfe083bd2bb51e8692c5c76e3d720b3dc4284203))
+
 ## [0.1.5](https://github.com/kunchenguid/compact-adviser/compare/compact-adviser-v0.1.4...compact-adviser-v0.1.5) (2026-09-21)
 
 
