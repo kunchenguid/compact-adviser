@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.7](https://github.com/kunchenguid/compact-adviser/compare/compact-adviser-v0.1.6...compact-adviser-v0.1.7) (2026-09-23)
+
+
+### Bug Fixes
+
+* **pi:** resolve dotenv key from session cwd ([#46](https://github.com/kunchenguid/compact-adviser/issues/46)) ([f249698](https://github.com/kunchenguid/compact-adviser/commit/f249698f9c963a58a5ffc31605c12efea4aa79ca))
+* recognise shell-written files in the saved-artifact snapshot ([#49](https://github.com/kunchenguid/compact-adviser/issues/49)) ([4b7c5cf](https://github.com/kunchenguid/compact-adviser/commit/4b7c5cf2d837e9f6ed39bb3eb8e82bf74707a362))
+
 ## [0.1.6](https://github.com/kunchenguid/compact-adviser/compare/compact-adviser-v0.1.5...compact-adviser-v0.1.6) (2026-09-22)
 
 
