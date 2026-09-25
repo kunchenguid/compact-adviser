@@ -34,7 +34,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
-import { judged, resolve } from "../lib/checkpoint.ts";
+import { budgetApplies, judged, resolve } from "../lib/checkpoint.ts";
 import {
   DEFAULT_MINIMUM,
   formatTokens,
@@ -411,6 +411,7 @@ async function runStop(payload: HookPayload): Promise<void> {
     fresh:
       latest !== undefined &&
       latest.profile === settings.profile &&
+      latest.contextBudgetTokens === settings.contextBudgetTokens &&
       tokens >= latest.minContextTokens &&
       cooldownReason(current, tokens, after) === undefined,
     qualifies: qualifies(judgment, fraction, profile),
@@ -649,7 +650,7 @@ function statusText(): string {
       `Session ${sessionId}: ${state.completed} completed exchange(s) since the last compaction.`,
       `Context: ${usage.tokens === undefined ? "unknown" : formatTokens(usage.tokens)}${
         Number.isFinite(fraction)
-          ? ` (${Math.round(fraction * 100)}% of the ${settings.contextBudgetTokens > 0 ? "budget" : "window"}; hint floor ${floorFor(fraction, parseProfile(settings.profile)).toFixed(2)})`
+          ? ` (${Math.round(fraction * 100)}% of the ${budgetApplies(usage.window ?? Number.NaN, settings.contextBudgetTokens) ? "budget" : "window"}; hint floor ${floorFor(fraction, parseProfile(settings.profile)).toFixed(2)})`
           : ` (usage unknown; hint floor ${floorFor(Number.NaN, parseProfile(settings.profile)).toFixed(2)})`
       }.`,
       `Cooldown: ${

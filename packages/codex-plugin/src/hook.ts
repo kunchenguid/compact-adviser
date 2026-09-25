@@ -247,7 +247,8 @@ async function onStop(payload: HookPayload, environment: Environment): Promise<H
     fresh:
       tokens >= latestConfig.minContextTokens &&
       cooldownReason(current, tokens, nowAfter) === undefined &&
-      latestConfig.profile === config.profile,
+      latestConfig.profile === config.profile &&
+      latestConfig.contextBudgetTokens === config.contextBudgetTokens,
     qualifies: qualifies(result, fraction, profile),
     mode: latestConfig.mode,
     autoAcknowledged: false,

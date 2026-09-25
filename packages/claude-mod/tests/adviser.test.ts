@@ -681,7 +681,16 @@ describe("turn-end gates", () => {
     });
   }
 
-  for (const budget of [0, 65000]) {
+  for (const [budget, hint, status] of [
+    [0, false, "Budget: off. Context: 60,000 (36% of the context limit; hint floor 0.77)"],
+    [65000, true, "Budget: 65,000 tokens. Context: 60,000 (92% of the budget; hint floor 0.50)"],
+    // A budget above the 167k auto-compact point leaves that point in charge.
+    [
+      450000,
+      false,
+      "Budget: 450,000 tokens. Context: 60,000 (36% of the context limit; hint floor 0.77)",
+    ],
+  ] as const) {
     test(`a context budget of ${budget} decides how relaxed the floor is`, async ($, on) => {
       const w = world(on);
       w.rows.set(`${PLUGIN}.contextBudgetTokens`, budget);
@@ -694,13 +703,9 @@ describe("turn-end gates", () => {
       expect(w.journal.requests).toHaveLength(1);
       // Score 0.6: short of the floor at 60k of the 167k auto-compact point, past it at
       // 60k of a 65k budget.
-      expect(hinted(w)).toBe(budget > 0);
+      expect(hinted(w)).toBe(hint);
       await $.command.run(commandRun("status"));
-      expect(w.journal.logs.at(-1)).toContain(
-        budget > 0
-          ? "Budget: 65,000 tokens. Context: 60,000 (92% of the budget; hint floor 0.50)"
-          : "Budget: off.",
-      );
+      expect(w.journal.logs.at(-1)).toContain(status);
     });
   }
 
@@ -1260,6 +1265,22 @@ describe("commands", () => {
     expect(w.rows.get(`${PLUGIN}.minContextTokens`)).toBe(60000);
     await $.command.run(commandRun("threshold default"));
     expect(w.rows.get(`${PLUGIN}.minContextTokens`)).toBe(40000);
+  });
+
+  test("budget saves a whole token count or off; invalid input keeps the setting", async ($, on) => {
+    const w = world(on);
+    await $.session.start(interactiveStart);
+    await $.command.run(commandRun("budget 65000"));
+    expect(w.rows.get(`${PLUGIN}.contextBudgetTokens`)).toBe(65000);
+    expect(w.journal.toasts.at(-1)).toBe("Context budget saved: 65,000 tokens (all sessions).");
+    await $.command.run(commandRun("budget 450k"));
+    expect(w.journal.toasts.at(-1)).toBe(
+      "Enter a whole number of tokens, for example 450000, or off.",
+    );
+    expect(w.rows.get(`${PLUGIN}.contextBudgetTokens`)).toBe(65000);
+    await $.command.run(commandRun("budget off"));
+    expect(w.rows.get(`${PLUGIN}.contextBudgetTokens`)).toBe(0);
+    expect(w.journal.toasts.at(-1)).toBe("Context budget off (all sessions).");
   });
 
   test("a minimum at or above the model window saves with a warning, never clamped", async ($, on) => {

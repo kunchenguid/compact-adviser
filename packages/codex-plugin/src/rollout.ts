@@ -57,11 +57,11 @@ export const EMPTY_ROLLOUT: Readonly<Rollout> = Object.freeze({
   truncated: false,
 });
 
-/** Context usage over the budget or the window, or NaN when either number is unusable. */
+/** Context usage over the budget or the window; NaN when neither is known (strictest floor). */
 export function usageFraction(rollout: Pick<Rollout, "tokens" | "window">, budget: number): number {
   const { tokens, window } = rollout;
-  if (typeof tokens !== "number" || typeof window !== "number") return Number.NaN;
-  return contextPressure(tokens, window, budget);
+  if (typeof tokens !== "number") return Number.NaN;
+  return contextPressure(tokens, window ?? Number.NaN, budget);
 }
 
 /** Reads the first line, and the last `MAX_ROLLOUT_BYTES`, dropping a partial line between. */

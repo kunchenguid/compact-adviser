@@ -24,7 +24,7 @@ function count(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined;
 }
 
-/** Context tokens over the budget or the window; NaN when unknown (strictest floor). */
+/** Context tokens over the budget or the window; NaN when neither is known (strictest floor). */
 export function usageFraction(usage: ContextUsage, budget: number): number {
   if (usage.tokens === undefined) return Number.NaN;
   return contextPressure(usage.tokens, usage.window ?? Number.NaN, budget);

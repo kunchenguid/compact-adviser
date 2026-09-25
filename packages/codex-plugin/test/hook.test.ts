@@ -348,6 +348,24 @@ test("a concurrent threshold increase after TypeSafe returns suppresses the hint
   });
 });
 
+test("a concurrent budget change after TypeSafe returns suppresses the hint", async () => {
+  await withLab(async (lab) => {
+    writeRollout(lab.transcript, settledRollout());
+    const root = adviserRoot({ CODEX_HOME: lab.home });
+    const typesafe = fakeTypesafe();
+    const fetch: Environment["fetch"] = async (url, init) => {
+      new ConfigStore(root).update({ contextBudgetTokens: 450000 });
+      return typesafe.fetch(url, init);
+    };
+
+    const output = await handle(stop(lab), environment(lab, { fetch }));
+
+    assert.deepEqual(output, {});
+    assert.equal(typesafe.requests.length, 1);
+    assert.equal(new SessionStore(root).read("s1", 0).state.lastHintKey, null);
+  });
+});
+
 test("a below-floor judgment discarded by a concurrent settings change does not start the re-ask wait", async () => {
   await withLab(async (lab) => {
     writeRollout(lab.transcript, settledRollout());

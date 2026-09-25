@@ -18,6 +18,7 @@
 //   session's counters itself.
 import type { EngineInterface, PluginOptions, Register, RenderChildren } from "claude-code";
 import {
+  budgetApplies,
   COOLDOWN_TEXT,
   type Cooldown,
   contextPressure,
@@ -349,25 +350,27 @@ async function invalidate($: EngineInterface): Promise<void> {
   }
 }
 
-/** Context tokens over the budget or the active limit; NaN when unknown (strictest floor). */
-function usageFraction(
-  context: {
-    tokens?: number;
-    window: number;
-    breakdown?: { isAutoCompactEnabled: boolean; autoCompactThreshold?: number };
-  },
-  budget: number,
-): number {
+interface ContextUsage {
+  tokens?: number;
+  window: number;
+  breakdown?: { isAutoCompactEnabled: boolean; autoCompactThreshold?: number };
+}
+
+/** Claude Code's auto-compact threshold when it reports one as enabled, otherwise the window. */
+function contextLimit(context: ContextUsage): number {
   const threshold = context.breakdown?.autoCompactThreshold;
-  const denominator =
-    context.breakdown?.isAutoCompactEnabled &&
+  return context.breakdown?.isAutoCompactEnabled &&
     typeof threshold === "number" &&
     Number.isFinite(threshold) &&
     threshold > 0
-      ? threshold
-      : context.window;
+    ? threshold
+    : context.window;
+}
+
+/** Context tokens over the budget or the active limit; NaN when unknown (strictest floor). */
+function usageFraction(context: ContextUsage, budget: number): number {
   if (typeof context.tokens !== "number") return Number.NaN;
-  return contextPressure(context.tokens, denominator, budget);
+  return contextPressure(context.tokens, contextLimit(context), budget);
 }
 
 /** Why this checkpoint may not be judged, cheapest gate first; undefined when it may. */
@@ -918,7 +921,7 @@ async function statusText($: EngineInterface): Promise<string> {
       : "Waiting for fresh model usage.";
   const budget = config.contextBudgetTokens;
   const fraction = usageFraction(usage.context, budget);
-  return `Mode: ${config.mode}${config.mode === "auto" && !config.autoAcknowledged ? " (not confirmed)" : ""}. Minimum: ${formatTokens(config.minContextTokens)} tokens. Budget: ${budget > 0 ? `${formatTokens(budget)} tokens` : "off"}. Context: ${typeof tokens === "number" ? formatTokens(tokens) : "unknown"}${Number.isFinite(fraction) ? ` (${Math.round(fraction * 100)}% of the ${budget > 0 ? "budget" : "context limit"}; hint floor ${floorFor(fraction, parseProfile(config.profile)).toFixed(2)})` : ""}. ${formatKeyStatus((await resolvedKey($)).source)}. ${waiting}${lastCheck === undefined ? "" : ` Last turn end: ${turnEndText(lastCheck)}.`}${engine} Request log: ${await requestLogStatus($, config)}. Settings: /config (compact-adviser rows) and /compact-adviser.`;
+  return `Mode: ${config.mode}${config.mode === "auto" && !config.autoAcknowledged ? " (not confirmed)" : ""}. Minimum: ${formatTokens(config.minContextTokens)} tokens. Budget: ${budget > 0 ? `${formatTokens(budget)} tokens` : "off"}. Context: ${typeof tokens === "number" ? formatTokens(tokens) : "unknown"}${Number.isFinite(fraction) ? ` (${Math.round(fraction * 100)}% of the ${budgetApplies(contextLimit(usage.context), budget) ? "budget" : "context limit"}; hint floor ${floorFor(fraction, parseProfile(config.profile)).toFixed(2)})` : ""}. ${formatKeyStatus((await resolvedKey($)).source)}. ${waiting}${lastCheck === undefined ? "" : ` Last turn end: ${turnEndText(lastCheck)}.`}${engine} Request log: ${await requestLogStatus($, config)}. Settings: /config (compact-adviser rows) and /compact-adviser.`;
 }
 
 async function snoozeOrDismiss($: EngineInterface, command: "snooze" | "dismiss") {

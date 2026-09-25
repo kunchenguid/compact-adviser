@@ -9,6 +9,7 @@
 
 import { createInterface } from "node:readline/promises";
 import { Writable } from "node:stream";
+import { budgetApplies } from "./checkpoint.ts";
 import {
   AUTO_UNAVAILABLE,
   ConfigStore,
@@ -72,7 +73,7 @@ function statusText(environment: CliEnvironment): string {
   const budget = config.contextBudgetTokens;
   const usage = latest === undefined ? Number.NaN : usageFraction(latest, budget);
   const window = Number.isFinite(usage)
-    ? ` Context: ${formatTokens(latest?.tokens ?? 0)} tokens, ${Math.round(usage * 100)}% of the ${budget > 0 ? "budget" : "window"}; hint floor ${floorFor(usage, parseProfile(config.profile)).toFixed(2)}.`
+    ? ` Context: ${formatTokens(latest?.tokens ?? 0)} tokens, ${Math.round(usage * 100)}% of the ${budgetApplies(latest?.window ?? Number.NaN, budget) ? "budget" : "window"}; hint floor ${floorFor(usage, parseProfile(config.profile)).toFixed(2)}.`
     : "";
   return [
     `Mode: ${config.mode}.`,

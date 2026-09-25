@@ -17,12 +17,20 @@ export const REASK_EXCHANGES = 3;
 export const REASK_MIN_TOKENS = 5000;
 
 /**
- * The context fraction the hint floor reads: tokens over the person's context budget when
- * one is set (a positive token count), otherwise over the host's own limit. NaN when either
- * side is unknown, which takes the strictest floor.
+ * Whether the person's context budget (a positive token count) is what the hint floor measures
+ * against instead of the host's own limit: a budget only relaxes the floor, so it applies when
+ * it is below the limit or the limit is unknown.
+ */
+export function budgetApplies(limit: number, budget: number): boolean {
+  return budget > 0 && !(limit > 0 && limit < budget);
+}
+
+/**
+ * The context fraction the hint floor reads: tokens over the budget when it applies, otherwise
+ * over the host's own limit. NaN when neither is known, which takes the strictest floor.
  */
 export function contextPressure(tokens: number, limit: number, budget: number): number {
-  const denominator = budget > 0 ? budget : limit;
+  const denominator = budgetApplies(limit, budget) ? budget : limit;
   if (!Number.isFinite(tokens) || !Number.isFinite(denominator) || denominator <= 0)
     return Number.NaN;
   return tokens / denominator;

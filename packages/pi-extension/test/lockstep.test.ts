@@ -621,6 +621,34 @@ test("a verdict resolves and updates the gates the same way for every mode", () 
   }
 });
 
+test("a context budget only relaxes the floor, on every host", () => {
+  const cases: [tokens: number, limit: number, budget: number, pressure: number][] = [
+    [160000, 167000, 0, 160000 / 167000],
+    [45000, 272000, 50000, 45000 / 50000],
+    // A budget above the host's limit leaves the limit in charge.
+    [160000, 167000, 450000, 160000 / 167000],
+    [160000, 450000, 450000, 160000 / 450000],
+    // An unknown limit takes the budget; without either, usage is unknown.
+    [160000, Number.NaN, 450000, 160000 / 450000],
+    [5, 0, 100, 0.05],
+    [160000, Number.NaN, 0, Number.NaN],
+  ];
+  for (const [host, policy] of [
+    ["pi", checkpoint],
+    ["claude", claudeCheckpoint],
+    ["codex", codexCheckpoint],
+    ["grok", grokCheckpoint],
+  ] as const) {
+    for (const [tokens, limit, budget, pressure] of cases) {
+      assert.equal(
+        policy.contextPressure(tokens, limit, budget),
+        pressure,
+        `${host} ${tokens}/${limit}/${budget}`,
+      );
+    }
+  }
+});
+
 test("Pi restores pre-gate and invalid gate entries like every other package", () => {
   const entry = (data: Record<string, unknown>) =>
     [{ type: "custom", customType: piState.STATE_TYPE, data }] as never;

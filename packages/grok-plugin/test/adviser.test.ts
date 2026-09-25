@@ -140,6 +140,7 @@ test("a compaction that lands while TypeSafe answers keeps its reset", async (t)
 for (const [name, settings] of [
   ["a raised minimum", { version: 1, minContextTokens: 900000 }],
   ["mode off", { version: 1, mode: "off" }],
+  ["a changed budget", { version: 1, contextBudgetTokens: 450000 }],
 ] as const) {
   test(`${name} saved while TypeSafe answers discards the verdict`, async (t) => {
     const { l, fixture } = await judgeTurn(t);

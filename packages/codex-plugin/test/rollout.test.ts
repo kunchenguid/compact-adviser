@@ -288,6 +288,9 @@ test("usage comes from the last token_count record and degrades to NaN", () => {
   assert.equal(usageFraction(rollout, 0), 95941 / 258400);
   // A budget replaces the window as the denominator.
   assert.equal(usageFraction(rollout, 120000), 95941 / 120000);
+  // A budget above the window leaves the window in charge, and needs no window to be known.
+  assert.equal(usageFraction(rollout, 450000), 95941 / 258400);
+  assert.equal(usageFraction({ tokens: 50000, window: undefined }, 100000), 0.5);
   assert.ok(Number.isNaN(usageFraction({ tokens: 5, window: 0 }, 0)));
   assert.ok(Number.isNaN(usageFraction({ tokens: undefined, window: 1000 }, 120000)));
   assert.ok(Number.isNaN(usageFraction(mapRecords([]), 0)));
