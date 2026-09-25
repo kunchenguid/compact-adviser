@@ -44,13 +44,22 @@ function hinted(w: World) {
 /**
  * Drain `$.clock.after(0, …)` plus the async judgment it starts. The checkpoint
  * fingerprint is a `crypto.subtle` digest, which settles on a host task rather than a
- * microtask, so each round also waits out one digest of its own.
+ * microtask, so each round also waits out one digest of its own. A loaded machine can take
+ * many rounds, so draining ends only once the visible world has stayed still for a while.
  */
 async function drain(w: World) {
-  for (let i = 0; i < 50; i++) {
+  const seen = () =>
+    JSON.stringify([w.journal, [...w.store], [...w.rows]], (_key, value) =>
+      typeof value === "function" ? undefined : value,
+    );
+  let last = seen();
+  for (let quiet = 0, round = 0; quiet < 100 && round < 10000; round++) {
     await w.clock.settle();
     await crypto.subtle.digest("SHA-256", new Uint8Array());
     await Promise.resolve();
+    const now = seen();
+    quiet = now === last ? quiet + 1 : 0;
+    last = now;
   }
 }
 
@@ -201,6 +210,36 @@ describe("turn-end gates", () => {
     expect(w.journal.logs.at(-1)).toContain(
       "Request log: /tmp/fixture-home/.claude/compact-adviser-requests-session-1.2.jsonl.",
     );
+  });
+
+  test("a reloaded environment keeps appending to the latest log part", async ($, on) => {
+    const w = world(on, { logRequests: true });
+    w.logFiles.set(
+      "/tmp/fixture-home/.claude/compact-adviser-requests-session-1.jsonl",
+      "old line\n",
+    );
+    w.logSizes.set(
+      "/tmp/fixture-home/.claude/compact-adviser-requests-session-1.jsonl",
+      4 * 1024 * 1024 - 200000,
+    );
+    w.logFiles.set(
+      "/tmp/fixture-home/.claude/compact-adviser-requests-session-1.2.jsonl",
+      "newer line\n",
+    );
+    await $.session.start(interactiveStart);
+    await $.command.run(commandRun("status"));
+    expect(w.journal.logs.at(-1)).toContain(
+      "Request log: /tmp/fixture-home/.claude/compact-adviser-requests-session-1.2.jsonl.",
+    );
+    await turnEnd($, w);
+    expect(
+      w.logFiles.get("/tmp/fixture-home/.claude/compact-adviser-requests-session-1.jsonl"),
+    ).toBe("old line\n");
+    expect(
+      (w.logFiles.get("/tmp/fixture-home/.claude/compact-adviser-requests-session-1.2.jsonl") ?? "")
+        .trim()
+        .split("\n"),
+    ).toHaveLength(3);
   });
 
   test("without HOME the request log is not written anywhere", async ($, on) => {
@@ -523,6 +562,73 @@ describe("turn-end gates", () => {
     expect(hinted(w)).toBe(false);
   });
 
+  test("a turn that settles while an older judgment runs is judged once that one ends", async ($, on) => {
+    const w = world(on);
+    let calls = 0;
+    w.respond = async () => {
+      calls++;
+      if (calls === 1) {
+        // Turn 2 starts and settles while turn 1's judgment is in flight.
+        await $.turn.start({ turnId: "two", origin: { kind: "composer" } } as never);
+        w.messages = longConversation("second unit");
+        await $.turn.complete(answered());
+      }
+      return { status: 200, text: JSON.stringify(jevAnswer()) };
+    };
+    await $.session.start(interactiveStart);
+    await turnEnd($, w);
+    expect(w.journal.requests).toHaveLength(2);
+    expect(hinted(w)).toBe(true);
+  });
+
+  test("status says a checkpoint is being judged, and why a late answer was discarded", async ($, on) => {
+    const w = world(on);
+    w.respond = async () => {
+      await $.command.run(commandRun("status"));
+      // Usage drops below the minimum while TypeSafe answers, with no new turn.
+      w.usage.tokens = 10000;
+      return { status: 200, text: JSON.stringify(jevAnswer()) };
+    };
+    await $.session.start(interactiveStart);
+    await turnEnd($, w);
+    expect(w.journal.logs.at(-1)).toContain("Last turn end: being judged.");
+    await $.command.run(commandRun("status"));
+    expect(w.journal.logs.at(-1)).toContain(
+      "Last turn end: judgment discarded, context below the minimum.",
+    );
+    expect(hinted(w)).toBe(false);
+  });
+
+  test("an answer discarded by a settings change still clears the TypeSafe backoff", async ($, on) => {
+    const w = world(on);
+    w.respond = async () => ({ status: 500, text: "" });
+    await $.session.start(interactiveStart);
+    await turnEnd($, w);
+    expect(stored(w).failures).toBe(1);
+    await w.clock.advance(60000);
+    w.respond = async () => {
+      w.rows.set(`${PLUGIN}.minContextTokens`, 41000);
+      return { status: 200, text: JSON.stringify(jevAnswer({ completed: 0.1 })) };
+    };
+    w.messages = longConversation("next");
+    await turnEnd($, w);
+    expect(w.journal.requests).toHaveLength(2);
+    expect([stored(w).failures, stored(w).judgedTokens]).toEqual([0, null]);
+  });
+
+  test("a compaction clears the re-ask wait a judgment started", async ($, on) => {
+    const w = world(on);
+    w.respond = async () => ({
+      status: 200,
+      text: JSON.stringify(jevAnswer({ completed: 0.1 })),
+    });
+    await $.session.start(interactiveStart);
+    await turnEnd($, w);
+    expect(stored(w).judgedTokens).toBe(60000);
+    await $.session.compact({ trigger: "manual", messages: MESSAGES });
+    expect([stored(w).compacted, stored(w).judgedTokens]).toEqual([true, null]);
+  });
+
   test("after a judgment that did not advise, re-ask waits for 20k more tokens or 3 exchanges", async ($, on) => {
     const w = world(on);
     w.respond = async () => ({
@@ -819,6 +925,15 @@ describe("automatic mode", () => {
     expect(w.journal.compactions).toHaveLength(1);
   });
 
+  test("a checkpoint while automatic mode is unconfirmed starts the re-ask wait", async ($, on) => {
+    const w = world(on, { mode: "auto" });
+    await $.session.start(interactiveStart);
+    await turnEnd($, w);
+    expect(w.journal.requests).toHaveLength(1);
+    expect(w.journal.compactions).toHaveLength(0);
+    expect(stored(w).judgedTokens).toBe(60000);
+  });
+
   test("hint-level confidence also compacts in auto mode", async ($, on) => {
     const w = autoWorld(on);
     w.respond = async () => ({
@@ -870,12 +985,18 @@ describe("automatic mode", () => {
     const state = stored(w);
     expect(state.retryAfter).toBe(START + 60000);
     expect(state.compacted).toBe(false);
+    // A compaction that did not happen did not act, so the re-ask gate holds this checkpoint.
+    expect(state.judgedTokens).toBe(60000);
     expect(w.journal.toasts).toContain(
       "Compaction failed or was cancelled. No immediate retry; Claude Code remains in control.",
     );
     w.compact = async () => Promise.reject(new Error("summarization produced empty response"));
     await w.clock.advance(60000);
     w.messages = [...w.messages, { role: "user", text: "more", toolUses: [] }];
+    await turnEnd($, w);
+    expect(w.journal.compactions).toHaveLength(1);
+    w.usage.tokens = 80000;
+    w.messages = [...w.messages, { role: "user", text: "more still", toolUses: [] }];
     await turnEnd($, w);
     expect(w.journal.compactions).toHaveLength(2);
     expect(stored(w).retryAfter).toBe(START + 120000);
