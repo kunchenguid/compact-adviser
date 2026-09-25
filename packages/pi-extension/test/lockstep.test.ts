@@ -60,9 +60,13 @@ test("the question set and the floor schedule match", () => {
     assert.equal(other.USAGE_LOOSE_AT, pi.USAGE_LOOSE_AT);
     for (let u = -0.1; u <= 1.1; u += 0.01) assert.equal(other.floorFor(u), pi.floorFor(u));
     assert.equal(other.floorFor(Number.NaN), pi.floorFor(Number.NaN));
-    assert.equal(other.ENDPOINT, pi.ENDPOINT);
+    assert.equal(other.ENDPOINT, "https://api.typesafe.ai/v1/systemone");
     assert.equal(other.MAX_REQUEST_BYTES, pi.MAX_REQUEST_BYTES);
   }
+  assert.equal(
+    pi.ENDPOINT,
+    `${process.env.TYPESAFE_BASE ?? "https://api.typesafe.ai"}/v1/systemone`,
+  );
   assert.deepEqual(Object.keys(pi.QUESTIONS), ["done", "shape"]);
   assert.equal(pi.USAGE_STRICT_UNTIL, 0.1);
   assert.equal(pi.USAGE_LOOSE_AT, 0.9);
