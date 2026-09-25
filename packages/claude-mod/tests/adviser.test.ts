@@ -927,6 +927,8 @@ describe("turn-end gates", () => {
       await $.session.start(interactiveStart);
       await turnEnd($, w);
       expect(w.journal.toasts).toContain(message);
+      // Hosts cut a long toast short; the transcript keeps the whole explanation.
+      expect(w.journal.logs).toContain(message);
       expect(stored(w).retryAfter).toBe(START + 10000);
       w.messages = longConversation("next");
       await turnEnd($, w);
@@ -947,6 +949,7 @@ describe("turn-end gates", () => {
     await $.session.start(interactiveStart);
     await turnEnd($, w);
     expect(w.journal.toasts).toContain(JUDGE_DISABLED_NETWORK_MESSAGE);
+    expect(w.journal.logs).toContain(JUDGE_DISABLED_NETWORK_MESSAGE);
     expect(hinted(w)).toBe(false);
   });
 
@@ -1180,6 +1183,7 @@ describe("commands", () => {
     await $.command.run(commandRun("threshold 60000"));
     expect(w.rows.get(`${PLUGIN}.minContextTokens`)).toBe(60000);
     expect(w.journal.toasts.at(-1)).toBe("Minimum context saved: 60,000 tokens (all sessions).");
+    expect(w.journal.logs).toHaveLength(0);
     for (const bad of ["40k", "0", "-5", "1.5", "4e4", "lots"]) {
       await $.command.run(commandRun(`threshold ${bad}`));
       expect(w.journal.toasts.at(-1)).toBe(
@@ -1196,8 +1200,10 @@ describe("commands", () => {
     await $.session.start(interactiveStart);
     await $.command.run(commandRun("threshold 250000"));
     expect(w.rows.get(`${PLUGIN}.minContextTokens`)).toBe(250000);
-    expect(w.journal.toasts.at(-1)).toContain(
-      "at or above the active model's 200,000-token window",
+    // The toast keeps the headline a host can show whole; the warning goes to the transcript.
+    expect(w.journal.toasts.at(-1)).toBe("Minimum context saved: 250,000 tokens (all sessions).");
+    expect(w.journal.logs.at(-1)).toBe(
+      "Minimum context saved: 250,000 tokens (all sessions). Warning: this is at or above the active model's 200,000-token window, so advice will not trigger before Claude Code's own compaction.",
     );
   });
 
@@ -1205,10 +1211,13 @@ describe("commands", () => {
     // Claude Code reloads the module after a saved row and drops the old environment's
     // toasts; the reloaded environment shows the confirmation at its session.start.
     const w = world(on, {
-      store: { pendingNotice: { message: "Off saved (all sessions).", at: START - 1000 } },
+      store: {
+        pendingNotice: { message: "Off saved (all sessions).", detail: "More.", at: START - 1000 },
+      },
     });
     await $.session.start(interactiveStart);
     expect(w.journal.toasts).toEqual(["Off saved (all sessions)."]);
+    expect(w.journal.logs).toEqual(["Off saved (all sessions). More."]);
     expect(w.store.has("pendingNotice")).toBe(false);
     await $.session.start(interactiveStart);
     expect(w.journal.toasts).toHaveLength(1);
@@ -1230,6 +1239,7 @@ describe("commands", () => {
     await $.command.run(commandRun("off"));
     expect(w.rows.get(`${PLUGIN}.mode`)).toBe("hint");
     expect(w.journal.toasts.at(-1)).toBe("Not saved: a managed setting owns this row");
+    expect(w.journal.logs.at(-1)).toBe("Not saved: a managed setting owns this row");
   });
 
   test("auto asks once; cancelling keeps the mode, confirming persists across sessions", async ($, on) => {
@@ -1246,7 +1256,8 @@ describe("commands", () => {
     expect(w.rows.get(`${PLUGIN}.mode`)).toBe("auto");
     expect(w.journal.asks).toHaveLength(3);
     expect(w.journal.asks[0]).toContain("Compaction is lossy");
-    expect(w.journal.toasts.at(-1)).toBe(
+    expect(w.journal.toasts.at(-1)).toBe("Automatic mode saved (all sessions).");
+    expect(w.journal.logs.at(-1)).toBe(
       "Automatic mode saved (all sessions). A TypeSafe key is still required.",
     );
     await $.command.run(commandRun("hint"));
@@ -1261,11 +1272,13 @@ describe("commands", () => {
     await $.session.start(interactiveStart);
     await $.command.run(commandRun("off"));
     expect(w.rows.get(`${PLUGIN}.mode`)).toBe("off");
-    expect(w.journal.toasts.at(-1)).toBe(
+    expect(w.journal.toasts.at(-1)).toBe("Off saved (all sessions).");
+    expect(w.journal.logs.at(-1)).toBe(
       "Off saved (all sessions). Claude Code's built-in compaction is unchanged.",
     );
     await $.command.run(commandRun("hint"));
-    expect(w.journal.toasts.at(-1)).toBe(
+    expect(w.journal.toasts.at(-1)).toBe("Hints only saved (all sessions).");
+    expect(w.journal.logs.at(-1)).toBe(
       "Hints only saved (all sessions). Claude Code's built-in compaction is unchanged.",
     );
   });
@@ -1441,7 +1454,10 @@ describe("settings pane", () => {
     await $.ui.press({ plugin: PLUGIN, key: "logging:on" });
     await drain(w);
     expect(w.rows.get(`${PLUGIN}.logRequests`)).toBe(true);
-    expect(w.journal.toasts.at(-1)).toContain("TypeSafe request logging on (all sessions).");
+    expect(w.journal.toasts.at(-1)).toBe("TypeSafe request logging on (all sessions).");
+    expect(w.journal.logs.at(-1)).toMatch(
+      /^TypeSafe request logging on \(all sessions\)\. This session logs to .*compact-adviser-requests-.*\.jsonl\.$/,
+    );
     tree = await $.ui.render(pane);
     expect(rows(tree)[2]).toBe("Log TypeSafe requests On");
     // The ring goes back to the row that was opened, so the arrows continue from there.
@@ -1504,7 +1520,8 @@ describe("settings pane", () => {
     await $.ui.press({ plugin: PLUGIN, key: "mode:auto" });
     await drain(w);
     expect(w.rows.get(`${PLUGIN}.mode`)).toBe("auto");
-    expect(w.journal.toasts.at(-1)).toBe(
+    expect(w.journal.toasts.at(-1)).toBe("Automatic mode saved (all sessions).");
+    expect(w.journal.logs.at(-1)).toBe(
       "Automatic mode saved (all sessions). A TypeSafe key is still required.",
     );
     expect(rows(await $.ui.render(pane))[0]).toBe("Mode Automatic (experimental)");
@@ -1558,7 +1575,8 @@ describe("settings pane", () => {
     await $.ui.press({ plugin: PLUGIN, key: "clearKey" });
     await drain(w);
     expect(w.rows.get(`${PLUGIN}.typesafeApiKey`)).toBe("");
-    expect(w.journal.toasts.at(-1)).toBe(
+    expect(w.journal.toasts.at(-1)).toBe("Saved TypeSafe API key cleared (all sessions).");
+    expect(w.journal.logs.at(-1)).toBe(
       "Saved TypeSafe API key cleared (all sessions). Launch environment and .env still apply.",
     );
     expect(w.journal.toasts.every((line) => !line.includes(secret))).toBe(true);

@@ -309,7 +309,16 @@ async function requestLogStatus($: EngineInterface, config: Config): Promise<str
 function notice($: EngineInterface, message: string): void {
   if (diagnostic === message) return;
   diagnostic = message;
+  warn($, message);
+}
+
+/**
+ * A warning or error: hosts cut a toast short (one line at 2.1.275, a narrow card from
+ * 2.1.282), so the full-width transcript line keeps the whole message readable.
+ */
+function warn($: EngineInterface, message: string): void {
   $.ui.toast(message, { timeoutMs: 8000 });
+  $.ui.log(message);
 }
 
 function clearStatus($: EngineInterface): void {
@@ -622,15 +631,21 @@ async function saveRow(
   key: string,
   value: string | number | boolean,
   message: string,
+  detail?: string,
 ): Promise<boolean> {
   await invalidate($);
   // A saved row hot-reloads this module, which drops this environment's later toasts, so
   // the confirmation is left for the reloaded environment to show at its session.start.
-  await $.store.set(PENDING_NOTICE_KEY, { message, at: await $.clock.now(), row: menuRow });
+  await $.store.set(PENDING_NOTICE_KEY, {
+    message,
+    detail,
+    at: await $.clock.now(),
+    row: menuRow,
+  });
   const result = await $.config.set({ key, value });
   if (result.deny !== undefined) {
     await $.store.delete(PENDING_NOTICE_KEY);
-    $.ui.toast(`Not saved: ${result.deny}`, { timeoutMs: 8000 });
+    warn($, `Not saved: ${result.deny}`);
     return false;
   }
   if (key === API_KEY_KEY && typeof value === "string") {
@@ -649,6 +664,7 @@ async function saveRow(
 async function showPendingNotice($: EngineInterface): Promise<void> {
   const pending = (await $.store.get(PENDING_NOTICE_KEY)) as {
     message?: unknown;
+    detail?: unknown;
     at?: unknown;
     row?: unknown;
   };
@@ -656,7 +672,9 @@ async function showPendingNotice($: EngineInterface): Promise<void> {
   await $.store.delete(PENDING_NOTICE_KEY);
   const fresh = typeof pending.at === "number" && (await $.clock.now()) - pending.at < 30000;
   if (fresh && typeof pending.message === "string") {
+    // The toast keeps a headline a host shows whole; the transcript line carries the detail.
     $.ui.toast(pending.message, { timeoutMs: 6000 });
+    if (typeof pending.detail === "string") $.ui.log(`${pending.message} ${pending.detail}`);
   }
   if (fresh && typeof pending.row === "string" && (await paneOpen($))) {
     showMenu(pending.row);
@@ -791,7 +809,8 @@ async function changeMode($: EngineInterface, mode: Mode, fromPane = false): Pro
       $,
       MODE_KEY,
       "auto",
-      "Automatic mode saved (all sessions). A TypeSafe key is still required.",
+      "Automatic mode saved (all sessions).",
+      "A TypeSafe key is still required.",
     );
     return;
   }
@@ -799,7 +818,8 @@ async function changeMode($: EngineInterface, mode: Mode, fromPane = false): Pro
     $,
     MODE_KEY,
     mode,
-    `${mode === "hint" ? "Hints only" : "Off"} saved (all sessions). Claude Code's built-in compaction is unchanged.`,
+    `${mode === "hint" ? "Hints only" : "Off"} saved (all sessions).`,
+    "Claude Code's built-in compaction is unchanged.",
   );
 }
 
@@ -809,24 +829,31 @@ async function changeMinimum($: EngineInterface, text: string): Promise<boolean>
   const { context } = await $.session.usage();
   const warning =
     count >= context.window
-      ? ` Warning: this is at or above the active model's ${formatTokens(context.window)}-token window, so advice will not trigger before Claude Code's own compaction.`
-      : "";
+      ? `Warning: this is at or above the active model's ${formatTokens(context.window)}-token window, so advice will not trigger before Claude Code's own compaction.`
+      : undefined;
   return saveRow(
     $,
     MINIMUM_KEY,
     count,
-    `Minimum context saved: ${formatTokens(count)} tokens (all sessions).${warning}`,
+    `Minimum context saved: ${formatTokens(count)} tokens (all sessions).`,
+    warning,
   );
 }
 
 async function changeLogRequests($: EngineInterface, enabled: boolean): Promise<void> {
+  if (!enabled) {
+    await saveRow($, LOG_KEY, false, "TypeSafe request logging off (all sessions).");
+    return;
+  }
+  const path = await sessionLogPath($);
   await saveRow(
     $,
     LOG_KEY,
-    enabled,
-    enabled
-      ? `TypeSafe request logging on (all sessions). ${(await sessionLogPath($)) ?? "HOME is not set, so nothing is written."}`
-      : "TypeSafe request logging off (all sessions).",
+    true,
+    "TypeSafe request logging on (all sessions).",
+    path === undefined
+      ? "HOME is not set, so nothing is written."
+      : `This session logs to ${path}.`,
   );
 }
 
@@ -835,7 +862,8 @@ async function changeSavedApiKey($: EngineInterface, text: string): Promise<bool
     $,
     API_KEY_KEY,
     parseSavedApiKey(text),
-    "TypeSafe API key saved (all sessions). Status shows the source, never the value.",
+    "TypeSafe API key saved (all sessions).",
+    "Status shows the source, never the value.",
   );
 }
 
@@ -844,7 +872,8 @@ async function clearSavedApiKey($: EngineInterface): Promise<boolean> {
     $,
     API_KEY_KEY,
     "",
-    "Saved TypeSafe API key cleared (all sessions). Launch environment and .env still apply.",
+    "Saved TypeSafe API key cleared (all sessions).",
+    "Launch environment and .env still apply.",
   );
 }
 
@@ -1015,7 +1044,7 @@ export const register: Register = (on, options) => {
         throw new Error(USAGE);
       }
     } catch (error) {
-      $.ui.toast(errorMessage(error), { timeoutMs: 8000 });
+      warn($, errorMessage(error));
     }
     return {};
   });
@@ -1068,7 +1097,7 @@ export const register: Register = (on, options) => {
     };
     const run = (action: () => Promise<unknown>) => {
       void action()
-        .catch((error) => $.ui.toast(errorMessage(error), { timeoutMs: 8000 }))
+        .catch((error) => warn($, errorMessage(error)))
         .finally(redraw);
     };
     const back = () => {
