@@ -664,6 +664,26 @@ describe("turn-end gates", () => {
     expect([stored(w).compacted, stored(w).judgedTokens]).toEqual([true, null]);
   });
 
+  test("the first response after a compaction sets its baseline, not a long first turn's end", async ($, on) => {
+    const w = world(on);
+    await $.session.start(interactiveStart);
+    await $.session.compact({ trigger: "manual", messages: MESSAGES });
+    w.stepTokens = 60000;
+    const step = $.turn.step({ turnId: "t", index: 0, model: "m", messageCount: 1 } as never);
+    for await (const _ of step);
+    // A later step of the same long turn does not move it.
+    w.stepTokens = 90000;
+    const later = $.turn.step({ turnId: "t", index: 1, model: "m", messageCount: 2 } as never);
+    for await (const _ of later);
+    expect(stored(w).baseline).toBe(60000);
+    w.usage.tokens = 80000;
+    for (const ask of ["a", "b", "c"]) {
+      w.messages = longConversation(ask);
+      await turnEnd($, w);
+    }
+    expect(w.journal.requests).toHaveLength(1);
+  });
+
   test("after a judgment that did not advise, re-ask waits for 20k more tokens or 3 exchanges that add 5k", async ($, on) => {
     const w = world(on);
     w.respond = async () => ({

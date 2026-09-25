@@ -300,6 +300,18 @@ export function installAdviser(pi: ExtensionAPI, options: Options): void {
   }
   pi.on("turn_end", (_event, ctx) => {
     if (!ctx.isIdle() && hintVisible) invalidate(ctx);
+    // The first response after a compaction sets its baseline, before a long first run of
+    // tool calls can lift it; `settled` still takes it when no response reported usage.
+    if (!active(ctx)) return;
+    const s = restoreState(ctx.sessionManager.getBranch());
+    const tokens = ctx.getContextUsage()?.tokens;
+    if (
+      s.compactionId &&
+      s.baseline === null &&
+      typeof tokens === "number" &&
+      Number.isFinite(tokens)
+    )
+      persist({ ...s, baseline: tokens });
   });
   pi.on("agent_settled", (_event, ctx) => {
     void settled(ctx).catch(() =>

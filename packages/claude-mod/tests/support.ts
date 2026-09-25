@@ -71,6 +71,8 @@ export type World = {
     autoCompactEnabled?: boolean;
   };
   messages: SessionMessage[];
+  /** The context a model response reports as its request usage; undefined reports none. */
+  stepTokens?: number;
   /** What TypeSafe answers; the default is a confident checkpoint. */
   respond: (body: string) => Promise<{ status: number; text: string } | { deny: string }>;
   /** What the engine's compaction answers for this mod's own request. */
@@ -213,6 +215,26 @@ export function world(on: On, options: WorldOptions = {}): World {
   on("session.start", async (_$, e) => ({ cwd: e.cwd }));
   on("turn.start", async (_$, e) => ({ turnId: e.turnId }));
   on("turn.complete", async (_$, e) => ({ text: e.answer }));
+  // biome-ignore lint/correctness/useYield: the bottom of the chain answers without streaming.
+  on("turn.step", async function* (_$, e) {
+    return {
+      turnId: e.turnId,
+      index: e.index,
+      answer: "",
+      toolUses: [],
+      stopReason: "end_turn" as const,
+      usage:
+        w.stepTokens === undefined
+          ? null
+          : {
+              model: "claude-test",
+              input_tokens: w.stepTokens,
+              output_tokens: 0,
+              cache_read_input_tokens: 0,
+              cache_creation_input_tokens: 0,
+            },
+    };
+  });
   on("session.id", async () => ({ value: w.sessionId }));
   on("session.usage", async (_$, e) => {
     journal.usageReads += 1;

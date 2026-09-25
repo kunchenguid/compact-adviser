@@ -145,6 +145,9 @@ let compactions = 0;
 let pendingEpoch: number | undefined;
 // Whether this environment has found the session's latest request-log part yet.
 let logPartResumed = false;
+// Whether the next main-loop response may be the first since a compaction: its context is
+// the post-compaction baseline (the turn end's is later, and a long first turn inflates it).
+let baselinePending = false;
 let hintVisible = false;
 let diagnostic = "";
 // What the latest settled turn end came to, for `/compact-adviser status` only.
@@ -555,6 +558,7 @@ async function judgeCheckpoint($: EngineInterface, epoch: number): Promise<void>
     note(epoch, "compact");
     generation++;
     await $.store.set(key, initialState(true, after));
+    baselinePending = true;
     const completed =
       tokens.before !== undefined && tokens.after !== undefined
         ? `compaction completed: ${formatTokens(tokens.before)} to ${formatTokens(tokens.after)} tokens.`
@@ -879,6 +883,7 @@ export const register: Register = (on, options) => {
     compactions = 0;
     pendingEpoch = undefined;
     logPartResumed = false;
+    baselinePending = true;
     hintVisible = false;
     lastCheck = undefined;
     logProblem = undefined;
@@ -942,8 +947,28 @@ export const register: Register = (on, options) => {
     try {
       const key = sessionKey(await $.session.id());
       await $.store.set(key, initialState(true, await $.clock.now()));
+      baselinePending = true;
     } catch {
       // The cooldown record stays as it was; the next judgment re-reads fresh usage.
+    }
+    return result;
+  });
+
+  // A turn end still takes the baseline when no response reported usage (see completeExchange).
+  on("turn.step", async function* ($, e, next) {
+    const result = yield* next(e);
+    if (!baselinePending || e.agentId !== undefined || result.usage === null) return result;
+    baselinePending = false;
+    if (!(await isActivated($)) || !interactive) return result;
+    const u = result.usage;
+    const tokens = u.input_tokens + u.cache_read_input_tokens + u.cache_creation_input_tokens;
+    try {
+      const { key, state } = await loadState($);
+      if (state.compacted && state.baseline === null) {
+        await $.store.set(key, { ...state, baseline: tokens });
+      }
+    } catch {
+      // The next turn end takes the baseline instead.
     }
     return result;
   });

@@ -9,7 +9,7 @@ const { status, output: raw } = run(["plugin", "validate", "--strict", PACKAGE])
 // bare form so the check pins what is hooked, not how a given host version spells it.
 const output = raw.replace(/\{(\w+)="([^"]*)"\}/g, "{$1=$2}");
 const expected = [
-  "hooks: session.start, turn.start, turn.complete, session.compact, command.run{command=compact-adviser}, config.describe{key=compact-adviser.typesafeApiKey}, ui.close{id=compact-adviser}, ui.render{component=Pane}",
+  "hooks: session.start, turn.start, turn.complete, session.compact, turn.step, command.run{command=compact-adviser}, config.describe{key=compact-adviser.typesafeApiKey}, ui.close{id=compact-adviser}, ui.render{component=Pane}",
   "env reads: CLAUDE_CODE_ENABLE_FUNCTION_HOOKS, COMPACT_ADVISER_DISABLE, COMPACT_ADVISER_TEST_ENDPOINT, HOME, TYPESAFE_API_KEY",
   "env writes: nothing",
   "$.fs.exists (via appendTypeSafeLog, resumeLogPart)",

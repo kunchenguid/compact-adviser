@@ -461,6 +461,24 @@ test("compaction resets the session, and the next checkpoint waits for the new b
   });
 });
 
+test("the first request after a compaction sets its baseline, not a long first turn's end", async () => {
+  await withLab(async (lab) => {
+    const environment_ = environment(lab, { fetch: fakeTypesafe().fetch });
+    const store = new SessionStore(adviserRoot({ CODEX_HOME: lab.home }));
+    await handle({ hook_event_name: "PostCompact", session_id: "s1" }, environment_);
+    writeRollout(lab.transcript, [
+      ...settledRollout({ tokens: 300000 }),
+      { type: "compacted", payload: { replacement_history: [] } },
+      tokenCount(60000),
+      userMessage("Next step."),
+      assistantMessage("Done and committed."),
+      tokenCount(90000),
+    ]);
+    await handle(stop(lab), environment_);
+    assert.equal(store.read("s1", 0).state.baseline, 60000);
+  });
+});
+
 test("SessionStart resumed from a compaction resets, and an ordinary one does not", async () => {
   await withLab(async (lab) => {
     const environment_ = environment(lab);

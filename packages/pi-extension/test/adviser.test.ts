@@ -486,6 +486,28 @@ test("unknown post-compaction usage and 20k growth plus three exchanges survive 
   assert.equal(h.calls, 1);
 });
 
+test("the first response after a compaction sets its baseline, not a long first run's end", async (t) => {
+  const h = harness(t);
+  h.enable();
+  const kept = h.sm.getLeafId();
+  assert.ok(kept);
+  const compact = h.sm.appendCompaction("Durable summary", kept, 45000);
+  await h.fire("session_compact", { compactionEntry: h.sm.getEntry(compact) });
+  h.next("Older continued exploration ".repeat(5000));
+  h.tokens = 45000;
+  await h.fire("turn_end");
+  // Later responses of the same run do not move it.
+  h.tokens = 64000;
+  await h.fire("turn_end");
+  await h.fire("agent_settled");
+  for (const ask of ["second", "third"]) {
+    h.next(ask);
+    h.tokens = 65000;
+    await h.fire("agent_settled");
+  }
+  assert.equal(h.calls, 1);
+});
+
 test("hint deduplication, snooze and dismissal survive reload", async (t) => {
   const h = harness(t);
   h.enable();
