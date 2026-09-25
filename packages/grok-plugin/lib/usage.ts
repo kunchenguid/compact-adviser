@@ -7,6 +7,7 @@
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { contextPressure } from "./checkpoint.ts";
 
 export interface ContextUsage {
   /** Tokens the conversation occupies right now, or undefined when nothing could read it. */
@@ -23,12 +24,10 @@ function count(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined;
 }
 
-/** Context tokens over the model's window, or NaN when either is unknown (strictest floor). */
-export function usageFraction(usage: ContextUsage): number {
-  if (usage.tokens === undefined || usage.window === undefined || usage.window <= 0) {
-    return Number.NaN;
-  }
-  return usage.tokens / usage.window;
+/** Context tokens over the budget or the window; NaN when neither is known (strictest floor). */
+export function usageFraction(usage: ContextUsage, budget: number): number {
+  if (usage.tokens === undefined) return Number.NaN;
+  return contextPressure(usage.tokens, usage.window ?? Number.NaN, budget);
 }
 
 /** `signals.json` written next to the transcript. Undocumented fields, so every one is checked. */

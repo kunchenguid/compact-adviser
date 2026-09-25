@@ -7,23 +7,28 @@
  * decides, not how any of the files is written.
  */
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
+import * as claudeCheckpoint from "../../claude-mod/lib/checkpoint.ts";
 import * as claudeDisable from "../../claude-mod/lib/disable.ts";
 import * as claude from "../../claude-mod/lib/judge.ts";
 import * as claudeLog from "../../claude-mod/lib/log.ts";
 import * as claudeSnapshot from "../../claude-mod/lib/snapshot.ts";
 import * as claudeState from "../../claude-mod/lib/state.ts";
+import * as codexCheckpoint from "../../codex-plugin/src/checkpoint.ts";
 import * as codexDisable from "../../codex-plugin/src/disable.ts";
 import * as codex from "../../codex-plugin/src/judge.ts";
 import * as codexLog from "../../codex-plugin/src/log.ts";
 import * as codexRollout from "../../codex-plugin/src/rollout.ts";
 import * as codexSnapshot from "../../codex-plugin/src/snapshot.ts";
 import * as codexState from "../../codex-plugin/src/state.ts";
+import * as grokCheckpoint from "../../grok-plugin/lib/checkpoint.ts";
 import * as grokDisable from "../../grok-plugin/lib/disable.ts";
 import * as grok from "../../grok-plugin/lib/judge.ts";
 import * as grokLog from "../../grok-plugin/lib/log.ts";
 import * as grokSnapshot from "../../grok-plugin/lib/snapshot.ts";
 import * as grokState from "../../grok-plugin/lib/state.ts";
+import * as checkpoint from "../src/checkpoint.ts";
 import * as piContext from "../src/context.ts";
 import * as piDisable from "../src/disable.ts";
 import * as pi from "../src/judge.ts";
@@ -340,6 +345,10 @@ test("every package writes the same TypeSafe log line shape", () => {
       other.responseLogLine(body, judgment, Number.NaN, at),
       piLog.responseLogLine(body, judgment, Number.NaN, at),
     );
+    assert.equal(
+      other.responseLogLine(body, judgment, 0.2, at, undefined, 450000),
+      piLog.responseLogLine(body, judgment, 0.2, at, undefined, 450000),
+    );
     assert.equal(other.errorLogLine("timeout", body, at), piLog.errorLogLine("timeout", body, at));
     assert.equal(
       other.errorLogLine("input", undefined, at),
@@ -358,6 +367,8 @@ test("every package writes the same TypeSafe log line shape", () => {
 
 test("every package applies the same cooldownReason gates", () => {
   const waiting = "Waiting for 20k new tokens and 3 completed exchanges after compaction";
+  const rejudge =
+    "Waiting for 20k new tokens, or 3 completed exchanges that change the context by 5k, since the last judgment";
   const cases: Array<{
     name: string;
     tokens: number;
@@ -369,6 +380,8 @@ test("every package applies the same cooldownReason gates", () => {
       retryAfter?: number;
       lastHintAt?: number | null;
       baseline?: number | null;
+      judgedTokens?: number | null;
+      judgedAt?: number | null;
     };
     reason: string | undefined;
   }> = [
@@ -421,6 +434,54 @@ test("every package applies the same cooldownReason gates", () => {
       patch: { completed: 3, baseline: 5000 },
       reason: undefined,
     },
+    {
+      name: "re-ask gate: short of tokens and exchanges",
+      tokens: 119999,
+      now: 0,
+      compacted: false,
+      patch: { completed: 6, judgedTokens: 100000, judgedAt: 4 },
+      reason: rejudge,
+    },
+    {
+      name: "re-ask gate: 20k more tokens",
+      tokens: 120000,
+      now: 0,
+      compacted: false,
+      patch: { completed: 5, judgedTokens: 100000, judgedAt: 4 },
+      reason: undefined,
+    },
+    {
+      name: "re-ask gate: 3 more exchanges and 5k more tokens",
+      tokens: 105000,
+      now: 0,
+      compacted: false,
+      patch: { completed: 7, judgedTokens: 100000, judgedAt: 4 },
+      reason: undefined,
+    },
+    {
+      name: "re-ask gate: 3 more exchanges that barely changed the context",
+      tokens: 104999,
+      now: 0,
+      compacted: false,
+      patch: { completed: 9, judgedTokens: 100000, judgedAt: 4 },
+      reason: rejudge,
+    },
+    {
+      name: "re-ask gate: 3 more exchanges after the context shrank 5k",
+      tokens: 95000,
+      now: 0,
+      compacted: false,
+      patch: { completed: 7, judgedTokens: 100000, judgedAt: 4 },
+      reason: undefined,
+    },
+    {
+      name: "re-ask gate: context shrank",
+      tokens: 90000,
+      now: 0,
+      compacted: false,
+      patch: { completed: 5, judgedTokens: 100000, judgedAt: 4 },
+      reason: rejudge,
+    },
   ];
   for (const c of cases) {
     const pi = {
@@ -437,6 +498,229 @@ test("every package applies the same cooldownReason gates", () => {
     }
     const grok = { ...grokState.initialState(c.compacted, c.now), ...c.patch };
     assert.equal(grokState.cooldownReason(grok, c.tokens, c.now), c.reason, `grok ${c.name}`);
+  }
+});
+
+test("every package ships the same checkpoint policy file", () => {
+  const read = (path: string) => readFileSync(new URL(path, import.meta.url), "utf8");
+  const pi = read("../src/checkpoint.ts");
+  for (const path of [
+    "../../claude-mod/lib/checkpoint.ts",
+    "../../codex-plugin/src/checkpoint.ts",
+    "../../grok-plugin/lib/checkpoint.ts",
+  ])
+    assert.equal(read(path), pi, path);
+});
+
+test("a verdict resolves and updates the gates the same way for every mode", () => {
+  const cases: Array<{
+    fresh: boolean;
+    qualifies: boolean;
+    mode: "hint" | "auto" | "off";
+    autoAcknowledged: boolean;
+    resolution: checkpoint.Resolution;
+    judged: [number | null, number | null];
+    hint: [number | null, string | null];
+  }> = [
+    {
+      fresh: false,
+      qualifies: true,
+      mode: "hint",
+      autoAcknowledged: false,
+      resolution: "discard",
+      judged: [90000, 1],
+      hint: [null, null],
+    },
+    {
+      fresh: true,
+      qualifies: true,
+      mode: "off",
+      autoAcknowledged: true,
+      resolution: "discard",
+      judged: [90000, 1],
+      hint: [null, null],
+    },
+    {
+      fresh: true,
+      qualifies: false,
+      mode: "hint",
+      autoAcknowledged: false,
+      resolution: "wait",
+      judged: [150000, 4],
+      hint: [null, null],
+    },
+    {
+      fresh: true,
+      qualifies: false,
+      mode: "auto",
+      autoAcknowledged: true,
+      resolution: "wait",
+      judged: [150000, 4],
+      hint: [null, null],
+    },
+    {
+      fresh: true,
+      qualifies: true,
+      mode: "auto",
+      autoAcknowledged: false,
+      resolution: "unconfirmed",
+      judged: [150000, 4],
+      hint: [null, null],
+    },
+    {
+      fresh: true,
+      qualifies: true,
+      mode: "hint",
+      autoAcknowledged: false,
+      resolution: "hint",
+      judged: [null, null],
+      hint: [4, "fp"],
+    },
+    {
+      fresh: true,
+      qualifies: true,
+      mode: "auto",
+      autoAcknowledged: true,
+      resolution: "compact",
+      judged: [null, null],
+      hint: [null, null],
+    },
+  ];
+  const before = {
+    ...piState.initialState(null),
+    completed: 4,
+    failures: 2,
+    retryAfter: 9,
+    judgedTokens: 90000,
+    judgedAt: 1,
+  };
+  for (const [host, policy] of [
+    ["pi", checkpoint],
+    ["claude", claudeCheckpoint],
+    ["codex", codexCheckpoint],
+    ["grok", grokCheckpoint],
+  ] as const) {
+    for (const c of cases) {
+      const name = `${host} ${c.mode} fresh=${c.fresh} qualifies=${c.qualifies} ack=${c.autoAcknowledged}`;
+      const resolution = policy.resolve(c);
+      assert.equal(resolution, c.resolution, name);
+      const after = policy.judged(before, resolution, 150000, "fp");
+      assert.deepEqual(
+        [
+          after.failures,
+          after.retryAfter,
+          after.judgedTokens,
+          after.judgedAt,
+          after.lastHintAt,
+          after.lastHintKey,
+        ],
+        [0, 0, ...c.judged, ...c.hint],
+        name,
+      );
+    }
+  }
+});
+
+test("a context budget only relaxes the floor, on every host", () => {
+  const cases: [
+    tokens: number,
+    limit: number,
+    budget: number,
+    pressure: number,
+    effective: number,
+  ][] = [
+    [160000, 167000, 0, 160000 / 167000, 0],
+    [45000, 272000, 50000, 45000 / 50000, 50000],
+    // A budget above the host's limit leaves the limit in charge.
+    [160000, 167000, 450000, 160000 / 167000, 0],
+    [160000, 450000, 450000, 160000 / 450000, 450000],
+    // An unknown limit takes the budget; without either, usage is unknown.
+    [160000, Number.NaN, 450000, 160000 / 450000, 450000],
+    [5, 0, 100, 0.05, 100],
+    [160000, Number.NaN, 0, Number.NaN, 0],
+  ];
+  for (const [host, policy] of [
+    ["pi", checkpoint],
+    ["claude", claudeCheckpoint],
+    ["codex", codexCheckpoint],
+    ["grok", grokCheckpoint],
+  ] as const) {
+    for (const [tokens, limit, budget, pressure, effective] of cases) {
+      const name = `${host} ${tokens}/${limit}/${budget}`;
+      assert.equal(policy.contextPressure(tokens, limit, budget), pressure, name);
+      assert.equal(policy.effectiveBudget(limit, budget), effective, name);
+    }
+  }
+});
+
+test("Pi restores pre-gate and invalid gate entries like every other package", () => {
+  const entry = (data: Record<string, unknown>) =>
+    [{ type: "custom", customType: piState.STATE_TYPE, data }] as never;
+  const legacy = {
+    version: 1,
+    compactionId: null,
+    baseline: null,
+    completed: 2,
+    lastSettled: null,
+    lastHintAt: null,
+    lastHintKey: null,
+    snoozeUntil: 0,
+    retryAfter: 0,
+    failures: 0,
+  };
+  const restored = piState.restoreState(entry(legacy));
+  assert.deepEqual(
+    [restored.snoozeUntil, restored.judgedTokens, restored.judgedAt],
+    [0, null, null],
+  );
+  for (const bad of [
+    { judgedAt: -1 },
+    { judgedTokens: -1 },
+    { judgedTokens: Number.NaN },
+    { judgedTokens: "9" },
+  ])
+    assert.equal(
+      piState.restoreState(entry({ ...legacy, ...bad })).snoozeUntil,
+      3,
+      JSON.stringify(bad),
+    );
+});
+
+test("every package restores pre-gate records the same way", () => {
+  const legacy = {
+    version: 1,
+    compacted: false,
+    baseline: null,
+    completed: 2,
+    lastHintAt: null,
+    lastHintKey: null,
+    snoozeUntil: 0,
+    retryAfter: 0,
+    failures: 0,
+    updatedAt: 0,
+  };
+  for (const [name, other] of [
+    ["claude", claudeState],
+    ["codex", codexState],
+    ["grok", grokState],
+  ] as const) {
+    const restored = other.restoreState(legacy, 0);
+    assert.deepEqual(
+      [restored.snoozeUntil, restored.judgedTokens, restored.judgedAt],
+      [0, null, null],
+      `${name} legacy`,
+    );
+    for (const bad of [
+      { judgedAt: -1 },
+      { judgedTokens: -1 },
+      { judgedTokens: Number.NaN },
+      { judgedTokens: "9" },
+    ])
+      assert.equal(
+        other.restoreState({ ...legacy, ...bad }, 0).snoozeUntil,
+        3,
+        `${name} ${JSON.stringify(bad)}`,
+      );
   }
 });
 

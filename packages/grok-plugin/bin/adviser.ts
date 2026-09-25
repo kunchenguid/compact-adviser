@@ -34,9 +34,11 @@ import {
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
+import { effectiveBudget, judged, resolve } from "../lib/checkpoint.ts";
 import {
   DEFAULT_MINIMUM,
   formatTokens,
+  parseBudget,
   parseMinimum,
   parseMode,
   parseSavedApiKey,
@@ -100,6 +102,7 @@ const USAGE = `compact-adviser (Grok)
   status                     what the adviser would do right now
   mode hint|off              hint shows advice; off disables it (Grok's own auto-compact is unaffected)
   threshold <tokens|default> minimum context tokens before a checkpoint is judged
+  budget <tokens|off>        relax the hint floor toward this context size, or the window if smaller
   key <value>|key clear      save or clear the TypeSafe API key from a shell (TYPESAFE_API_KEY still wins)
   log on|off                 TypeSafe request logging, off by default
   snooze                     no advice for three more completed exchanges in this session
@@ -333,11 +336,16 @@ async function runStop(payload: HookPayload): Promise<void> {
   if (transcript.unreadableLines !== 0) return;
   if (!transcript.messages.length) return;
   const view = snapshot(transcript.messages, [activeKey], transcript.hasImages);
-  if (view.conversationTokens <= MINIMUM_CONVERSATION_TOKENS) return;
 
   // `contextTokensUsed` is the honest number when signals.json is readable; the local estimate
   // stands in when it is not, so an undocumented field going away weakens the gate, not the product.
   const tokens = usage.tokens ?? view.conversationTokens;
+  if (state.compacted && state.baseline === null) {
+    // No readable usage after the compaction: the same estimate the gate reads is the baseline.
+    state = { ...state, baseline: tokens };
+    saveSessionState(statePath, state);
+  }
+  if (view.conversationTokens <= MINIMUM_CONVERSATION_TOKENS) return;
   if (tokens < settings.minContextTokens) return;
   if (cooldownReason(state, tokens, now) !== undefined) return;
 
@@ -370,13 +378,13 @@ async function runStop(payload: HookPayload): Promise<void> {
     if (settings.logRequests) {
       appendLog(sessionId, errorLogLine(loggedJudgeErrorKind(error), loggedBody));
     }
-    saveSessionState(statePath, backoff(state, now));
+    saveSessionState(statePath, backoff(loadSessionState(statePath, Date.now()), Date.now()));
     saveDiagnostic(diagnosticPath(dataDir(env()), sessionId), loggedJudgeErrorKind(error));
     clearVerdict(verdict);
     return;
   }
 
-  const fraction = usageFraction(usage);
+  const fraction = usageFraction(usage, settings.contextBudgetTokens);
   if (settings.logRequests) {
     appendLog(
       sessionId,
@@ -386,22 +394,36 @@ async function runStop(payload: HookPayload): Promise<void> {
         fraction,
         undefined,
         profile,
+        effectiveBudget(usage.window ?? Number.NaN, settings.contextBudgetTokens),
       ),
     );
   }
-  state = { ...state, failures: 0, retryAfter: 0, updatedAt: now };
   clearDiagnostic(diagnosticPath(dataDir(env()), sessionId));
-  let profileChanged = true;
+  // Another hook process (a compaction, a later Stop) may have written this session's record
+  // or the settings while TypeSafe answered: judge against what is on disk now.
+  const after = Date.now();
+  let latest: Settings | undefined;
   try {
-    profileChanged = settingsOrThrow().profile !== settings.profile;
+    latest = settingsOrThrow();
   } catch {}
-  if (profileChanged || !qualifies(judgment, fraction, profile)) {
-    saveSessionState(statePath, state);
+  const current = loadSessionState(statePath, after);
+  const resolution = resolve({
+    fresh:
+      latest !== undefined &&
+      latest.profile === settings.profile &&
+      latest.contextBudgetTokens === settings.contextBudgetTokens &&
+      tokens >= latest.minContextTokens &&
+      cooldownReason(current, tokens, after) === undefined,
+    qualifies: qualifies(judgment, fraction, profile),
+    mode: latest?.mode ?? "off",
+    autoAcknowledged: false,
+  });
+  state = { ...judged(current, resolution, tokens, fingerprint), updatedAt: after };
+  saveSessionState(statePath, state);
+  if (resolution !== "hint") {
     clearVerdict(verdict);
     return;
   }
-  state = { ...state, lastHintAt: state.completed, lastHintKey: fingerprint };
-  saveSessionState(statePath, state);
   saveVerdict(verdict, {
     version: 1,
     sessionId,
@@ -612,6 +634,7 @@ function statusText(): string {
   const lines = [
     `Mode: ${settings.mode} (Grok is hint-only; nothing outside a session can run /compact).`,
     `Minimum context: ${formatTokens(settings.minContextTokens)} tokens.`,
+    `Budget: ${settings.contextBudgetTokens > 0 ? `${formatTokens(settings.contextBudgetTokens)} tokens` : "off"}.`,
     `${formatKeyStatus(key.source)}.`,
     `Request log: ${settings.logRequests ? requestLogPath(dataDir(env()), "<session-id>") : "off"}.`,
     `Settings file: ${settingsPath(env())}.`,
@@ -622,12 +645,12 @@ function statusText(): string {
     const state = loadSessionState(sessionStatePath(sessionId, env()), Date.now());
     const dir = findSessionDir(process.cwd(), sessionId, env());
     const usage = readSignalsUsage(dir);
-    const fraction = usageFraction(usage);
+    const fraction = usageFraction(usage, settings.contextBudgetTokens);
     lines.push(
       `Session ${sessionId}: ${state.completed} completed exchange(s) since the last compaction.`,
       `Context: ${usage.tokens === undefined ? "unknown" : formatTokens(usage.tokens)}${
         Number.isFinite(fraction)
-          ? ` (${Math.round(fraction * 100)}% of the window; hint floor ${floorFor(fraction, parseProfile(settings.profile)).toFixed(2)})`
+          ? ` (${Math.round(fraction * 100)}% of the ${effectiveBudget(usage.window ?? Number.NaN, settings.contextBudgetTokens) > 0 ? "budget" : "window"}; hint floor ${floorFor(fraction, parseProfile(settings.profile)).toFixed(2)})`
           : ` (usage unknown; hint floor ${floorFor(Number.NaN, parseProfile(settings.profile)).toFixed(2)})`
       }.`,
       `Cooldown: ${
@@ -688,6 +711,12 @@ function runCommand(argv: readonly string[]): string {
     case "threshold": {
       const count = value === "default" ? DEFAULT_MINIMUM : parseMinimum(value);
       return `Minimum context saved: ${formatTokens(updateSettings({ minContextTokens: count }).minContextTokens)} tokens.`;
+    }
+    case "budget": {
+      const count = updateSettings({ contextBudgetTokens: parseBudget(value) }).contextBudgetTokens;
+      return count > 0
+        ? `Context budget saved: ${formatTokens(count)} tokens.`
+        : "Context budget off: the hint floor follows the model's window.";
     }
     case "key":
       if (value === "clear") {

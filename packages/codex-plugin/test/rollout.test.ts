@@ -285,10 +285,15 @@ test("usage comes from the last token_count record and degrades to NaN", () => {
   const rollout = mapRecords([tokenCount(10), tokenCount(95941, 258400)]);
   assert.equal(rollout.tokens, 95941);
   assert.equal(rollout.window, 258400);
-  assert.equal(usageFraction(rollout), 95941 / 258400);
-  assert.ok(Number.isNaN(usageFraction({ tokens: 5, window: 0 })));
-  assert.ok(Number.isNaN(usageFraction({ tokens: undefined, window: 1000 })));
-  assert.ok(Number.isNaN(usageFraction(mapRecords([]))));
+  assert.equal(usageFraction(rollout, 0), 95941 / 258400);
+  // A budget replaces the window as the denominator.
+  assert.equal(usageFraction(rollout, 120000), 95941 / 120000);
+  // A budget above the window leaves the window in charge, and needs no window to be known.
+  assert.equal(usageFraction(rollout, 450000), 95941 / 258400);
+  assert.equal(usageFraction({ tokens: 50000, window: undefined }, 100000), 0.5);
+  assert.ok(Number.isNaN(usageFraction({ tokens: 5, window: 0 }, 0)));
+  assert.ok(Number.isNaN(usageFraction({ tokens: undefined, window: 1000 }, 120000)));
+  assert.ok(Number.isNaN(usageFraction(mapRecords([]), 0)));
 });
 
 test("unknown, malformed, and unparsable records are skipped, not fatal", () => {
@@ -684,4 +689,17 @@ test("a mixed text-and-image user message keeps the text and marks images", () =
   const view = snapshot(rollout.messages);
   assert.equal(view.state.coverage.hasImages, true);
   assert.equal(view.state.userConstraints[0]?.text, "Look at this screenshot.");
+});
+
+test("the first request after the latest compaction is the post-compaction baseline", () => {
+  const compacted = { type: "compacted", payload: { replacement_history: [] } };
+  assert.equal(
+    mapRecords([tokenCount(300000), tokenCount(310000)]).tokensAfterCompaction,
+    undefined,
+  );
+  const once = mapRecords([tokenCount(300000), compacted, tokenCount(60000), tokenCount(90000)]);
+  assert.deepEqual([once.tokens, once.tokensAfterCompaction], [90000, 60000]);
+  const twice = mapRecords([compacted, tokenCount(60000), compacted, tokenCount(40000)]);
+  assert.equal(twice.tokensAfterCompaction, 40000);
+  assert.equal(mapRecords([tokenCount(60000), compacted]).tokensAfterCompaction, undefined);
 });

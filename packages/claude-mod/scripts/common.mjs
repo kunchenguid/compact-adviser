@@ -8,10 +8,22 @@ import { fileURLToPath } from "node:url";
 export const PACKAGE = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 export const CLAUDE = process.env.COMPACT_TEST_CLAUDE_BIN || "claude";
 
+/**
+ * The launching shell's environment minus anything that would change what is under test:
+ * the host's own session variables and the adviser's inputs (a developer's real
+ * TYPESAFE_API_KEY would otherwise beat the fixture's .env key). Tests pass what they need
+ * back through `extra`.
+ */
 export function claudeEnv(extra = {}) {
   const env = { ...process.env };
   for (const name of Object.keys(env)) {
-    if (name === "CLAUDECODE" || name === "CLAUDE_CONFIG_DIR" || name.startsWith("CLAUDE_CODE_")) {
+    if (
+      name === "CLAUDECODE" ||
+      name === "CLAUDE_CONFIG_DIR" ||
+      name.startsWith("CLAUDE_CODE_") ||
+      name === "TYPESAFE_API_KEY" ||
+      name.startsWith("COMPACT_ADVISER_")
+    ) {
       delete env[name];
     }
   }

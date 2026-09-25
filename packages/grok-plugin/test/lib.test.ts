@@ -10,6 +10,7 @@ import { join } from "node:path";
 import test from "node:test";
 import {
   DEFAULT_SETTINGS,
+  parseBudget,
   parseMode,
   parseSettings,
   readSettings,
@@ -359,9 +360,17 @@ test("a verdict expires with the turn, the window, and the clock", () => {
 });
 
 test("unknown usage takes the strictest floor rather than a guess", () => {
-  assert.ok(Number.isNaN(usageFraction({ source: "unknown" })));
-  assert.ok(Number.isNaN(usageFraction({ tokens: 10, source: "signals" })));
-  assert.equal(usageFraction({ tokens: 50000, window: 500000, source: "signals" }), 0.1);
+  assert.ok(Number.isNaN(usageFraction({ source: "unknown" }, 0)));
+  assert.ok(Number.isNaN(usageFraction({ source: "unknown" }, 450000)));
+  assert.ok(Number.isNaN(usageFraction({ tokens: 10, source: "signals" }, 0)));
+  assert.equal(usageFraction({ tokens: 50000, window: 500000, source: "signals" }, 0), 0.1);
+  // A budget replaces the window, and needs no window to be known.
+  assert.equal(usageFraction({ tokens: 50000, window: 500000, source: "signals" }, 100000), 0.5);
+  assert.equal(usageFraction({ tokens: 50000, source: "signals" }, 100000), 0.5);
+  assert.equal(parseBudget(" 450000 "), 450000);
+  assert.equal(parseBudget("off"), 0);
+  for (const bad of ["", "-1", "1.5", "450k"]) assert.throws(() => parseBudget(bad), bad);
+  assert.throws(() => parseSettings({ version: 1, contextBudgetTokens: -1 }), /context budget/);
   assert.equal(readSignalsUsage(undefined).source, "unknown");
   assert.deepEqual(readPayloadUsage({ context_window: { context_tokens: 7 } }), {
     tokens: 7,

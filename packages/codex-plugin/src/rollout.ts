@@ -6,6 +6,7 @@
 // and an empty transcript simply yields nothing to judge. Nothing in this file throws.
 
 import { closeSync, openSync, readSync, statSync } from "node:fs";
+import { contextPressure } from "./checkpoint.ts";
 import type { MessageLike, ToolUseLike } from "./snapshot.ts";
 import { MESSAGE_LIMIT, SUMMARY_PREFIX } from "./snapshot.ts";
 
@@ -37,6 +38,12 @@ export interface Rollout {
   tokens: number | undefined;
   /** The active model's context window, or undefined when it was not recorded. */
   window: number | undefined;
+  /**
+   * The first token count recorded after the latest compaction, where Codex records the size of
+   * the compacted history: the post-compaction baseline. Undefined with no compaction in the read
+   * records or no count since.
+   */
+  tokensAfterCompaction: number | undefined;
   /** True when earlier records were dropped by the read window or message cap. */
   truncated: boolean;
 }
@@ -46,22 +53,15 @@ export const EMPTY_ROLLOUT: Readonly<Rollout> = Object.freeze({
   messages: [],
   tokens: undefined,
   window: undefined,
+  tokensAfterCompaction: undefined,
   truncated: false,
 });
 
-/** Context usage as a fraction of the window, or NaN when either number is unusable. */
-export function usageFraction(rollout: Pick<Rollout, "tokens" | "window">): number {
+/** Context usage over the budget or the window; NaN when neither is known (strictest floor). */
+export function usageFraction(rollout: Pick<Rollout, "tokens" | "window">, budget: number): number {
   const { tokens, window } = rollout;
-  if (
-    typeof tokens !== "number" ||
-    !Number.isFinite(tokens) ||
-    typeof window !== "number" ||
-    !Number.isFinite(window) ||
-    window <= 0
-  ) {
-    return Number.NaN;
-  }
-  return tokens / window;
+  if (typeof tokens !== "number") return Number.NaN;
+  return contextPressure(tokens, window ?? Number.NaN, budget);
 }
 
 /** Reads the first line, and the last `MAX_ROLLOUT_BYTES`, dropping a partial line between. */
@@ -804,11 +804,15 @@ export function mapRecords(records: readonly unknown[]): Rollout {
   let originator: string | undefined;
   let tokens: number | undefined;
   let window: number | undefined;
+  let compacted = false;
+  let tokensAfterCompaction: number | undefined;
 
   for (const record of records) {
     const entry = record as { type?: unknown; payload?: unknown } | null;
     if (entry?.type === "compacted") {
       applyCompacted(entry.payload, messages, pending);
+      compacted = true;
+      tokensAfterCompaction = undefined;
       continue;
     }
 
@@ -823,7 +827,10 @@ export function mapRecords(records: readonly unknown[]): Rollout {
     if (entry?.type === "event_msg" && payload.type === "token_count") {
       const info = (payload.info ?? null) as Record<string, unknown> | null;
       const last = (info?.last_token_usage ?? null) as Record<string, unknown> | null;
-      if (typeof last?.total_tokens === "number") tokens = last.total_tokens;
+      if (typeof last?.total_tokens === "number") {
+        tokens = last.total_tokens;
+        if (compacted && tokensAfterCompaction === undefined) tokensAfterCompaction = tokens;
+      }
       if (typeof info?.model_context_window === "number") window = info.model_context_window;
       continue;
     }
@@ -838,6 +845,7 @@ export function mapRecords(records: readonly unknown[]): Rollout {
     messages: messages.slice(-MESSAGE_LIMIT),
     tokens,
     window,
+    tokensAfterCompaction,
     truncated,
   };
 }

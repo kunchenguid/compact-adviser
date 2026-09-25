@@ -9,6 +9,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { HINT } from "../lib/statusline.ts";
+import { resetSessionState } from "../lib/store.ts";
 import {
   lab,
   PACKAGE_ROOT,
@@ -101,6 +102,110 @@ test("a profile that turns invalid while the judge is pending retires the hint a
   assert.equal(settled.retryAfter, 0);
 });
 
+test("a below-floor judgment discarded by a profile change mid-flight does not start the re-ask wait", async (t) => {
+  const { l, fixture } = await judgeTurn(t);
+  fixture.verdict = { finished: 0.6, handsOn: 0.6 };
+  fixture.onRequest = () =>
+    writeFileSync(
+      join(l.dataDir, "settings.json"),
+      JSON.stringify({
+        version: 1,
+        profile: JSON.stringify({ version: 1, coordinationWeight: 0.5, floors: [[0, 0.9]] }),
+      }),
+    );
+  await runCli(["hook", "stop"], { lab: l, stdin: stopPayload(l), env: keyed(fixture) });
+  assert.equal(fixture.bodies.length, 1);
+  const statePath = join(l.dataDir, "sessions", `${l.sessionId}.json`);
+  const state = JSON.parse(readFileSync(statePath, "utf8")) as {
+    judgedTokens: number | null;
+    judgedAt: number | null;
+  };
+  assert.deepEqual([state.judgedTokens, state.judgedAt], [null, null]);
+});
+
+test("a compaction that lands while TypeSafe answers keeps its reset", async (t) => {
+  const { l, fixture } = await judgeTurn(t);
+  fixture.verdict = { finished: 0.6, handsOn: 0.6 };
+  // What the PostCompact hook does, run synchronously inside the in-flight request.
+  fixture.onRequest = () =>
+    resetSessionState(join(l.dataDir, "sessions", `${l.sessionId}.json`), Date.now());
+  await runCli(["hook", "stop"], { lab: l, stdin: stopPayload(l), env: keyed(fixture) });
+  assert.equal(fixture.bodies.length, 1);
+  const state = JSON.parse(
+    readFileSync(join(l.dataDir, "sessions", `${l.sessionId}.json`), "utf8"),
+  ) as { compacted: boolean; completed: number; judgedTokens: number | null };
+  assert.deepEqual([state.compacted, state.completed, state.judgedTokens], [true, 0, null]);
+});
+
+for (const [name, settings] of [
+  ["a raised minimum", { version: 1, minContextTokens: 900000 }],
+  ["mode off", { version: 1, mode: "off" }],
+  ["a changed budget", { version: 1, contextBudgetTokens: 450000 }],
+] as const) {
+  test(`${name} saved while TypeSafe answers discards the verdict`, async (t) => {
+    const { l, fixture } = await judgeTurn(t);
+    fixture.onRequest = () =>
+      writeFileSync(join(l.dataDir, "settings.json"), JSON.stringify(settings));
+    await runCli(["hook", "stop"], { lab: l, stdin: stopPayload(l), env: keyed(fixture) });
+    assert.equal(fixture.bodies.length, 1);
+    const state = JSON.parse(
+      readFileSync(join(l.dataDir, "sessions", `${l.sessionId}.json`), "utf8"),
+    ) as { lastHintKey: string | null; judgedTokens: number | null };
+    assert.deepEqual([state.lastHintKey, state.judgedTokens], [null, null]);
+    const row = await runCli(["status-line"], { lab: l, stdin: statusPayload(l) });
+    assert.ok(!row.stdout.includes(HINT));
+  });
+}
+
+// 0.8 x (0.5 + 0.5 x 0.8) = 0.72: under the 0.80 floor at 30% of the 500k window, over the
+// 0.50 floor at 94% of a 160k budget. A 2M budget above the window must not tighten 88% of it.
+for (const [budget, tokens, saved, share, hint, logged] of [
+  ["off", 150000, "Context budget off", "30% of the window; hint floor 0.80", false, undefined],
+  [
+    "160000",
+    150000,
+    "Context budget saved: 160,000",
+    "94% of the budget; hint floor 0.50",
+    true,
+    160000,
+  ],
+  [
+    "2000000",
+    440000,
+    "Context budget saved: 2,000,000",
+    "88% of the window; hint floor 0.51",
+    true,
+    undefined,
+  ],
+] as const) {
+  test(`budget ${budget} decides the hint floor the Stop hook gates with`, async (t) => {
+    const { l, fixture } = await judgeTurn(t, { tokens });
+    fixture.verdict = { finished: 0.8, handsOn: 0.8 };
+    assert.match((await runCli(["budget", budget], { lab: l })).stdout, new RegExp(saved));
+    await runCli(["log", "on"], { lab: l });
+    const status = await runCli(["status"], { lab: l });
+    assert.ok(status.stdout.includes(share), status.stdout);
+    await runCli(["hook", "stop"], { lab: l, stdin: stopPayload(l), env: keyed(fixture) });
+    assert.equal(fixture.bodies.length, 1);
+    const row = await runCli(["status-line"], {
+      lab: l,
+      stdin: statusPayload(l, {
+        context_window: { context_tokens: tokens, context_window_size: 500000 },
+      }),
+    });
+    assert.equal(row.stdout.includes(HINT), hint);
+    const lines = readFileSync(
+      join(l.dataDir, `compact-adviser-requests-${l.sessionId}.jsonl`),
+      "utf8",
+    )
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line) as { budget?: number; qualifies?: boolean });
+    assert.equal(lines.at(-1)?.budget, logged);
+    assert.equal(lines.at(-1)?.qualifies, hint);
+  });
+}
+
 test("the judge sees the person's own words, not Grok's prompt envelopes", async (t) => {
   const { l, fixture } = await judgeTurn(t);
   await runCli(["hook", "stop"], { lab: l, stdin: stopPayload(l), env: keyed(fixture) });
@@ -121,6 +226,35 @@ test("a judgment below the floor leaves the row without a hint", async (t) => {
   const row = await runCli(["status-line"], { lab: l, stdin: statusPayload(l) });
   assert.ok(!row.stdout.includes(HINT));
   assert.match(row.stdout, /project │ Grok 4\.6/);
+});
+
+test("after a judgment below the floor, re-ask waits for 20k more tokens or 3 exchanges that change it by 5k", async (t) => {
+  const { l, fixture } = await judgeTurn(t);
+  // 0.6 x (0.5 + 0.5 x 0.6) = 0.48, under every floor this test reaches.
+  fixture.verdict = { finished: 0.6, handsOn: 0.6 };
+  const turn = async (marker: string, tokens: number) => {
+    writeHistory(l, workedHistory(marker));
+    writeSignals(l, tokens);
+    await runCli(["hook", "stop"], {
+      lab: l,
+      stdin: stopPayload(l, { promptId: `prompt-${marker}` }),
+      env: keyed(fixture),
+    });
+  };
+  await turn("one", 150000);
+  assert.equal(fixture.bodies.length, 1);
+  await turn("two", 169999);
+  await turn("three", 169999);
+  assert.equal(fixture.bodies.length, 1);
+  await turn("four", 170000);
+  assert.equal(fixture.bodies.length, 2);
+  await turn("five", 170000);
+  await turn("six", 170000);
+  assert.equal(fixture.bodies.length, 2);
+  await turn("seven", 174999);
+  assert.equal(fixture.bodies.length, 2);
+  await turn("eight", 175000);
+  assert.equal(fixture.bodies.length, 3);
 });
 
 test("no TypeSafe key means no request at all", async (t) => {
@@ -240,6 +374,63 @@ test("a compaction retires the hint and holds the next judgments", async (t) => 
   });
   assert.equal(fixture.bodies.length, 1, "post-compaction cooldown holds the next checkpoint");
   assert.match((await runCli(["status"], { lab: l })).stdout, /Waiting for 20k new tokens/);
+});
+
+test("after a compaction with no readable signals, the local estimate sets the baseline", async (t) => {
+  const l = lab(t);
+  const fixture = await typesafeFixture(t);
+  await runCli(["threshold", "25000"], { lab: l });
+  await runCli(["hook", "compact"], {
+    lab: l,
+    stdin: JSON.stringify({ hook_event_name: "PostCompact", sessionId: l.sessionId }),
+  });
+  const turns = ["one", "two", "three"];
+  for (const [i, marker] of turns.entries()) {
+    const history = turns
+      .slice(0, i + 1)
+      .flatMap((m, j) => workedHistory(m).slice(j === 0 ? 0 : 1));
+    writeHistory(l, history);
+    await runCli(["hook", "stop"], {
+      lab: l,
+      stdin: stopPayload(l, { promptId: `prompt-${marker}` }),
+      env: keyed(fixture),
+    });
+    // Held for the first two exchanges, then judged: the baseline is set, not null forever.
+    assert.equal(fixture.bodies.length, i < 2 ? 0 : 1, `after exchange ${i + 1}`);
+  }
+});
+
+test("without readable signals, the first stop after a compaction sets the baseline even with little history", async (t) => {
+  const l = lab(t);
+  const fixture = await typesafeFixture(t);
+  await runCli(["threshold", "25000"], { lab: l });
+  await runCli(["hook", "compact"], {
+    lab: l,
+    stdin: JSON.stringify({ hook_event_name: "PostCompact", sessionId: l.sessionId }),
+  });
+  const short = workedHistory("one").map((record) =>
+    record.type === "assistant" ? { ...record, content: "Working on it." } : record,
+  );
+  for (const [marker, history] of [
+    ["one", short],
+    ["two", short],
+    ["three", workedHistory("one")],
+  ] as const) {
+    writeHistory(l, history);
+    await runCli(["hook", "stop"], {
+      lab: l,
+      stdin: stopPayload(l, { promptId: `prompt-${marker}` }),
+      env: keyed(fixture),
+    });
+    if (marker === "one") {
+      const state = JSON.parse(
+        readFileSync(join(l.dataDir, "sessions", `${l.sessionId}.json`), "utf8"),
+      ) as { baseline: number | null };
+      assert.ok(state.baseline !== null && state.baseline < 20000, `baseline ${state.baseline}`);
+    }
+  }
+  // 20k past the short first stop and three exchanges: judged, not held until 20k past the third.
+  assert.equal(fixture.bodies.length, 1);
 });
 
 test("the next prompt retires the hint", async (t) => {

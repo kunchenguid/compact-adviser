@@ -4,11 +4,13 @@ import type {
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
+import { contextPressure, effectiveBudget, judged, resolve } from "./checkpoint.ts";
 import {
   type Config,
   ConfigStore,
   DEFAULT_CONFIG,
   type Mode,
+  parseBudget,
   parseMinimum,
   parseSavedApiKey,
 } from "./config.ts";
@@ -39,7 +41,7 @@ import {
 const LABEL = "compact-adviser";
 const HINT = "Compact adviser: work appears completed or recorded. Run /compact to save tokens.";
 const USAGE =
-  "Use /compact-adviser, auto, hint, off, status, threshold <tokens|default>, snooze or dismiss.";
+  "Use /compact-adviser, auto, hint, off, status, threshold <tokens|default>, budget <tokens|off>, snooze or dismiss.";
 interface Options {
   agentDir: string;
   version: string;
@@ -86,6 +88,8 @@ export function installAdviser(pi: ExtensionAPI, options: Options): void {
   let compacting = false;
   let automaticCompaction = false;
   let hintVisible = false;
+  // Whether a turn_end may still owe this branch its post-compaction baseline.
+  let baselinePending = true;
   let diagnostic = "";
   const active = (ctx: ExtensionContext) => ctx.mode === "tui" && ctx.hasUI;
   function persist(state: SessionState) {
@@ -108,6 +112,7 @@ export function installAdviser(pi: ExtensionAPI, options: Options): void {
   }
   function invalidate(ctx: ExtensionContext) {
     generation++;
+    baselinePending = true;
     request?.abort();
     request = undefined;
     if (hintVisible && active(ctx)) ctx.ui.setWidget(LABEL, undefined);
@@ -136,18 +141,11 @@ export function installAdviser(pi: ExtensionAPI, options: Options): void {
       return undefined;
     return usage.tokens;
   }
-  /** Context tokens over the model's window, or NaN when Pi does not know it (strictest floor). */
-  function usageFraction(ctx: ExtensionContext): number {
+  /** Context tokens over the budget or the model's window; NaN when unknown (strictest floor). */
+  function usageFraction(ctx: ExtensionContext, c: Config): number {
     const usage = ctx.getContextUsage();
-    if (
-      !usage ||
-      usage.tokens === null ||
-      !Number.isFinite(usage.tokens) ||
-      !Number.isFinite(usage.contextWindow) ||
-      usage.contextWindow <= 0
-    )
-      return Number.NaN;
-    return usage.tokens / usage.contextWindow;
+    if (!usage || usage.tokens === null) return Number.NaN;
+    return contextPressure(usage.tokens, usage.contextWindow, c.contextBudgetTokens);
   }
   function sessionIdentity(ctx: ExtensionContext) {
     return JSON.stringify([
@@ -199,6 +197,12 @@ export function installAdviser(pi: ExtensionAPI, options: Options): void {
       configIdentity = JSON.stringify(config);
     const current = () =>
       !controller.signal.aborted && generation === epoch && sessionIdentity(ctx) === identity;
+    // The usage of the context judged: a stale answer's log line must not describe a newer one.
+    const fraction = usageFraction(ctx, config),
+      budget = effectiveBudget(
+        ctx.getContextUsage()?.contextWindow ?? Number.NaN,
+        config.contextBudgetTokens,
+      );
     try {
       const result = await evaluate(
         view.state,
@@ -206,38 +210,43 @@ export function installAdviser(pi: ExtensionAPI, options: Options): void {
         controller.signal,
         profile,
       );
-      if (!current()) return;
+      // Every answered request gets its outcome logged, even one a newer turn has made stale.
       if (config.logRequests) {
         try {
           appendResponseLog(
             options.agentDir,
             loggedBody ?? requestBody(view.state, profile),
             result,
-            usageFraction(ctx),
+            fraction,
             profile,
+            budget,
           );
         } catch {
           // Response logging must not replace the gate decision.
         }
       }
+      if (!current()) return;
       // No await between this final cross-session configuration/state check and compact().
       const latest = store.read();
-      if (JSON.stringify(latest) !== configIdentity || eligible(ctx, latest, state) === undefined)
-        return;
-      state = { ...state, failures: 0, retryAfter: 0 };
-      const auto = latest.mode === "auto";
-      if (!qualifies(result, usageFraction(ctx), profile)) {
-        persist(state);
-        return;
-      }
-      if (auto && !latest.autoAcknowledged) {
-        persist(state);
+      const judgedTokens = eligible(ctx, latest, state);
+      if (JSON.stringify(latest) !== configIdentity || judgedTokens === undefined) {
+        // Still this session and leaf, so the answer clears the backoff; it decides nothing else.
+        persist(
+          judged(restoreState(ctx.sessionManager.getBranch()), "discard", 0, view.checkpointKey),
+        );
         return;
       }
+      const resolution = resolve({
+        fresh: true,
+        qualifies: qualifies(result, fraction, profile),
+        mode: latest.mode,
+        autoAcknowledged: latest.autoAcknowledged,
+      });
+      state = judged(state, resolution, judgedTokens, view.checkpointKey);
+      persist(state);
+      if (resolution !== "hint" && resolution !== "compact") return;
       diagnostic = "";
-      if (!auto) {
-        state = { ...state, lastHintAt: state.completed, lastHintKey: view.checkpointKey };
-        persist(state);
+      if (resolution === "hint") {
         ctx.ui.setWidget(LABEL, (_tui, theme) => new Text(theme.fg("warning", HINT), 0, 0));
         hintVisible = true;
       } else {
@@ -259,7 +268,11 @@ export function installAdviser(pi: ExtensionAPI, options: Options): void {
             compacting = false;
             automaticCompaction = false;
             const latestState = restoreState(ctx.sessionManager.getBranch());
-            persist({ ...latestState, retryAfter: now() + 60000 });
+            // A compaction that did not happen did not act: the re-ask gate holds this checkpoint.
+            persist({
+              ...judged(latestState, "wait", judgedTokens, view.checkpointKey),
+              retryAfter: now() + 60000,
+            });
             notice(
               ctx,
               "Compaction failed or was cancelled. No immediate retry; Pi remains in control.",
@@ -268,14 +281,15 @@ export function installAdviser(pi: ExtensionAPI, options: Options): void {
         });
       }
     } catch (error) {
-      if (!current()) return;
-      if (config.logRequests) {
+      // A request this module cancelled has no TypeSafe outcome to log.
+      if (config.logRequests && !controller.signal.aborted) {
         try {
           appendErrorLog(options.agentDir, error, loggedBody);
         } catch {
           // Error logging must not replace backoff.
         }
       }
+      if (!current()) return;
       const failures = Math.min(state.failures + 1, 6);
       persist({ ...state, failures, retryAfter: now() + Math.min(300000, 5000 * 2 ** failures) });
       notice(
@@ -290,6 +304,18 @@ export function installAdviser(pi: ExtensionAPI, options: Options): void {
   }
   pi.on("turn_end", (_event, ctx) => {
     if (!ctx.isIdle() && hintVisible) invalidate(ctx);
+    // The first response after a compaction sets its baseline, before a long first run of
+    // tool calls can lift it; `settled` still takes it when no response reported usage.
+    if (!baselinePending || !active(ctx)) return;
+    const s = restoreState(ctx.sessionManager.getBranch());
+    if (!s.compactionId || s.baseline !== null) {
+      baselinePending = false;
+      return;
+    }
+    const tokens = ctx.getContextUsage()?.tokens;
+    if (typeof tokens !== "number" || !Number.isFinite(tokens)) return;
+    persist({ ...s, baseline: tokens });
+    baselinePending = false;
   });
   pi.on("agent_settled", (_event, ctx) => {
     void settled(ctx).catch(() =>
@@ -408,13 +434,24 @@ export function installAdviser(pi: ExtensionAPI, options: Options): void {
         "warning",
       );
   }
+  function budget(ctx: ExtensionCommandContext, text: string) {
+    const count = parseBudget(text);
+    save(
+      ctx,
+      { contextBudgetTokens: count },
+      count > 0
+        ? `Context budget saved: ${count.toLocaleString("en-US")} tokens (all sessions).`
+        : "Context budget off (all sessions): the hint floor follows the model's window.",
+    );
+  }
   function status(ctx: ExtensionCommandContext) {
     const c = store.read(),
       s = restoreState(ctx.sessionManager.getBranch()),
-      t = ctx.getContextUsage()?.tokens,
-      u = usageFraction(ctx);
+      usage = ctx.getContextUsage(),
+      t = usage?.tokens,
+      u = usageFraction(ctx, c);
     ctx.ui.notify(
-      `Mode: ${c.mode}. Minimum: ${c.minContextTokens.toLocaleString("en-US")} tokens. Context: ${t ?? "unknown"}${Number.isFinite(u) ? ` (${Math.round(u * 100)}% of the window; hint floor ${floorFor(u, parseProfile(c.profile)).toFixed(2)})` : ""}. ${formatKeyStatus(resolvedKey(ctx.cwd).source)}. ${typeof t === "number" ? (cooldownReason(s, t, now()) ?? "No cooldown; semantic checks still apply.") : "Waiting for fresh model usage."} Request log: ${c.logRequests ? requestLogPath(options.agentDir) : "off"}. Settings: ${store.path}`,
+      `Mode: ${c.mode}. Minimum: ${c.minContextTokens.toLocaleString("en-US")} tokens. Budget: ${c.contextBudgetTokens > 0 ? `${c.contextBudgetTokens.toLocaleString("en-US")} tokens` : "off"}. Context: ${t ?? "unknown"}${Number.isFinite(u) ? ` (${Math.round(u * 100)}% of the ${effectiveBudget(usage?.contextWindow ?? Number.NaN, c.contextBudgetTokens) > 0 ? "budget" : "window"}; hint floor ${floorFor(u, parseProfile(c.profile)).toFixed(2)})` : ""}. ${formatKeyStatus(resolvedKey(ctx.cwd).source)}. ${typeof t === "number" ? `${cooldownReason(s, t, now()) ?? "No cooldown; semantic checks still apply"}.` : "Waiting for fresh model usage."} Request log: ${c.logRequests ? requestLogPath(options.agentDir) : "off"}. Settings: ${store.path}`,
       "info",
     );
   }
@@ -510,7 +547,18 @@ export function installAdviser(pi: ExtensionAPI, options: Options): void {
   pi.registerCommand("compact-adviser", {
     description: "Configure persistent compaction advice, experimental auto, and token minimum",
     getArgumentCompletions: (prefix) =>
-      ["auto", "hint", "off", "status", "threshold ", "threshold default", "snooze", "dismiss"]
+      [
+        "auto",
+        "hint",
+        "off",
+        "status",
+        "threshold ",
+        "threshold default",
+        "budget ",
+        "budget off",
+        "snooze",
+        "dismiss",
+      ]
         .filter((v) => v.startsWith(prefix))
         .map((value) => ({ value, label: value })),
     handler: async (args, ctx) => {
@@ -522,6 +570,7 @@ export function installAdviser(pi: ExtensionAPI, options: Options): void {
         else if (["auto", "hint", "off"].includes(command) && !value)
           await changeMode(ctx, command as Mode);
         else if (command === "threshold" && value) minimum(ctx, value);
+        else if (command === "budget" && value) budget(ctx, value);
         else if (command === "status" && !value) status(ctx);
         else if (["snooze", "dismiss"].includes(command) && !value) {
           const s = restoreState(ctx.sessionManager.getBranch());

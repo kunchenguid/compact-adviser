@@ -42,6 +42,8 @@ export function responseLogLine(
   usage: number,
   at = new Date().toISOString(),
   profile?: JudgeProfile,
+  /** The context budget the usage is measured against; recorded only when it applies. */
+  budget = 0,
 ): string {
   return `${JSON.stringify({
     at,
@@ -53,6 +55,7 @@ export function responseLogLine(
     },
     score: score(judgment, profile),
     usage: Number.isFinite(usage) ? usage : null,
+    ...(budget > 0 ? { budget } : {}),
     floor: floorFor(usage, profile),
     qualifies: qualifies(judgment, usage, profile),
   })}\n`;

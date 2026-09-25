@@ -41,12 +41,25 @@ function hinted(w: World) {
   return w.journal.statuses.some((s) => typeof s === "string" && s.includes(HINT));
 }
 
-/** Drain `$.clock.after(0, …)` plus the async judgment it starts. */
+/**
+ * Drain `$.clock.after(0, …)` plus the async judgment it starts. The checkpoint
+ * fingerprint is a `crypto.subtle` digest, which settles on a host task rather than a
+ * microtask, so each round also waits out one digest of its own. A loaded machine can take
+ * many rounds, so draining ends only once the visible world has stayed still for a while.
+ */
 async function drain(w: World) {
-  for (let i = 0; i < 50; i++) {
+  const seen = () =>
+    JSON.stringify([w.journal, [...w.store], [...w.rows]], (_key, value) =>
+      typeof value === "function" ? undefined : value,
+    );
+  let last = seen();
+  for (let quiet = 0, round = 0; quiet < 100 && round < 10000; round++) {
     await w.clock.settle();
+    await crypto.subtle.digest("SHA-256", new Uint8Array());
     await Promise.resolve();
-    await Promise.resolve();
+    const now = seen();
+    quiet = now === last ? quiet + 1 : 0;
+    last = now;
   }
 }
 
@@ -152,6 +165,110 @@ describe("turn-end gates", () => {
     expect(w.journal.suggestions).toEqual([]);
     expect(w.journal.compactions).toHaveLength(0);
     expect(w.journal.fsWrites).toHaveLength(0);
+  });
+
+  test("a request log that exists but cannot be read is never overwritten", async ($, on) => {
+    const w = world(on, { logRequests: true });
+    w.logFiles.set(
+      "/tmp/fixture-home/.claude/compact-adviser-requests-session-1.jsonl",
+      "earlier line\n",
+    );
+    w.unreadableLogs.add("/tmp/fixture-home/.claude/compact-adviser-requests-session-1.jsonl");
+    await $.session.start(interactiveStart);
+    await turnEnd($, w);
+    expect(w.journal.requests).toHaveLength(1);
+    expect(hinted(w)).toBe(true);
+    expect(w.journal.fsWrites).toHaveLength(0);
+    expect(
+      w.logFiles.get("/tmp/fixture-home/.claude/compact-adviser-requests-session-1.jsonl"),
+    ).toBe("earlier line\n");
+    await $.command.run(commandRun("status"));
+    expect(w.journal.logs.at(-1)).toContain(
+      "Request log: paused; the existing log could not be read, so it was left untouched.",
+    );
+  });
+
+  test("a request log near the host's 4 MiB read limit rolls over to a numbered part", async ($, on) => {
+    const w = world(on, { logRequests: true });
+    w.logFiles.set(
+      "/tmp/fixture-home/.claude/compact-adviser-requests-session-1.jsonl",
+      "earlier line\n",
+    );
+    w.logSizes.set(
+      "/tmp/fixture-home/.claude/compact-adviser-requests-session-1.jsonl",
+      4 * 1024 * 1024 - 100,
+    );
+    await $.session.start(interactiveStart);
+    await turnEnd($, w);
+    expect(
+      w.logFiles.get("/tmp/fixture-home/.claude/compact-adviser-requests-session-1.jsonl"),
+    ).toBe("earlier line\n");
+    const part =
+      w.logFiles.get("/tmp/fixture-home/.claude/compact-adviser-requests-session-1.2.jsonl") ?? "";
+    expect(part.trim().split("\n")).toHaveLength(2);
+    await $.command.run(commandRun("status"));
+    expect(w.journal.logs.at(-1)).toContain(
+      "Request log: /tmp/fixture-home/.claude/compact-adviser-requests-session-1.2.jsonl.",
+    );
+  });
+
+  test("a reloaded environment keeps appending to the latest log part", async ($, on) => {
+    const w = world(on, { logRequests: true });
+    w.logFiles.set(
+      "/tmp/fixture-home/.claude/compact-adviser-requests-session-1.jsonl",
+      "old line\n",
+    );
+    w.logSizes.set(
+      "/tmp/fixture-home/.claude/compact-adviser-requests-session-1.jsonl",
+      4 * 1024 * 1024 - 200000,
+    );
+    w.logFiles.set(
+      "/tmp/fixture-home/.claude/compact-adviser-requests-session-1.2.jsonl",
+      "newer line\n",
+    );
+    await $.session.start(interactiveStart);
+    await $.command.run(commandRun("status"));
+    expect(w.journal.logs.at(-1)).toContain(
+      "Request log: /tmp/fixture-home/.claude/compact-adviser-requests-session-1.2.jsonl.",
+    );
+    await turnEnd($, w);
+    expect(
+      w.logFiles.get("/tmp/fixture-home/.claude/compact-adviser-requests-session-1.jsonl"),
+    ).toBe("old line\n");
+    expect(
+      (w.logFiles.get("/tmp/fixture-home/.claude/compact-adviser-requests-session-1.2.jsonl") ?? "")
+        .trim()
+        .split("\n"),
+    ).toHaveLength(3);
+  });
+
+  test("turning logging on names the log part this session already rolled over to", async ($, on) => {
+    const w = world(on);
+    const base = "/tmp/fixture-home/.claude/compact-adviser-requests-session-1";
+    w.logFiles.set(`${base}.jsonl`, "old line\n");
+    w.logFiles.set(`${base}.2.jsonl`, "newer line\n");
+    await $.session.start(interactiveStart);
+    await $.command.run(commandRun(""));
+    await $.ui.render(pane);
+    await $.ui.press({ plugin: PLUGIN, key: "menu:logRequests" });
+    await drain(w);
+    await $.ui.render(pane);
+    await $.ui.press({ plugin: PLUGIN, key: "logging:on" });
+    await drain(w);
+    expect(w.journal.logs.at(-1)).toBe(
+      `TypeSafe request logging on (all sessions). This session logs to ${base}.2.jsonl.`,
+    );
+  });
+
+  test("without HOME the request log is not written anywhere", async ($, on) => {
+    const w = world(on, { logRequests: true, home: undefined });
+    await $.session.start(interactiveStart);
+    await turnEnd($, w);
+    expect(w.journal.requests).toHaveLength(1);
+    expect(hinted(w)).toBe(true);
+    expect(w.journal.fsWrites).toHaveLength(0);
+    await $.command.run(commandRun("status"));
+    expect(w.journal.logs.at(-1)).toContain("Request log: unavailable, HOME is not set.");
   });
 
   test("optional request logging writes the TypeSafe body and never the key", async ($, on) => {
@@ -463,6 +580,323 @@ describe("turn-end gates", () => {
     expect(hinted(w)).toBe(false);
   });
 
+  test("a turn that settles while an older judgment runs is judged once that one ends", async ($, on) => {
+    const w = world(on);
+    let calls = 0;
+    w.respond = async () => {
+      calls++;
+      if (calls === 1) {
+        // Turn 2 starts and settles while turn 1's judgment is in flight.
+        await $.turn.start({ turnId: "two", origin: { kind: "composer" } } as never);
+        w.messages = longConversation("second unit");
+        await $.turn.complete(answered());
+      }
+      return { status: 200, text: JSON.stringify(jevAnswer()) };
+    };
+    await $.session.start(interactiveStart);
+    await turnEnd($, w);
+    expect(w.journal.requests).toHaveLength(2);
+    expect(hinted(w)).toBe(true);
+  });
+
+  test("the request log keeps the outcome of a judgment a newer turn made stale", async ($, on) => {
+    const w = world(on, { logRequests: true });
+    let calls = 0;
+    w.respond = async () => {
+      calls++;
+      if (calls > 2) return { status: 200, text: JSON.stringify(jevAnswer()) };
+      await $.turn.start({ turnId: `stale-${calls}`, origin: { kind: "composer" } } as never);
+      w.messages = longConversation(`unit ${calls}`);
+      await $.turn.complete(answered());
+      return calls === 1
+        ? { status: 200, text: JSON.stringify(jevAnswer()) }
+        : { status: 500, text: "" };
+    };
+    await $.session.start(interactiveStart);
+    await turnEnd($, w);
+    expect(w.journal.requests).toHaveLength(3);
+    const lines = (
+      w.logFiles.get("/tmp/fixture-home/.claude/compact-adviser-requests-session-1.jsonl") ?? ""
+    )
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
+    expect(lines.map((line) => line.kind).sort()).toEqual([
+      "error",
+      "request",
+      "request",
+      "request",
+      "response",
+      "response",
+    ]);
+    expect(new Set(lines.map((line) => line.id)).size).toBe(3);
+    // The stale failure is logged but is not this turn's backoff.
+    expect(stored(w).failures).toBe(0);
+  });
+
+  test("status says a checkpoint is being judged, and why a late answer was discarded", async ($, on) => {
+    const w = world(on);
+    w.respond = async () => {
+      await $.command.run(commandRun("status"));
+      // Usage drops below the minimum while TypeSafe answers, with no new turn.
+      w.usage.tokens = 10000;
+      return { status: 200, text: JSON.stringify(jevAnswer()) };
+    };
+    await $.session.start(interactiveStart);
+    await turnEnd($, w);
+    expect(w.journal.logs.at(-1)).toContain("Last turn end: being judged.");
+    await $.command.run(commandRun("status"));
+    expect(w.journal.logs.at(-1)).toContain(
+      "Last turn end: judgment discarded, context below the minimum.",
+    );
+    expect(hinted(w)).toBe(false);
+  });
+
+  for (const interrupt of ["compact", "snooze"] as const) {
+    test(`a ${interrupt} during a judgment leaves no turn end reading as being judged`, async ($, on) => {
+      const w = world(on);
+      w.respond = async () => {
+        if (interrupt === "compact") {
+          await $.session.compact({ trigger: "manual", messages: MESSAGES });
+        } else {
+          await $.command.run(commandRun("snooze"));
+        }
+        return { status: 200, text: JSON.stringify(jevAnswer()) };
+      };
+      await $.session.start(interactiveStart);
+      await turnEnd($, w);
+      await $.command.run(commandRun("status"));
+      const status = w.journal.logs.at(-1) ?? "";
+      expect(status).not.toContain("being judged");
+      expect(status).toContain(
+        interrupt === "compact"
+          ? "Last turn end: judgment discarded, a compaction started."
+          : "Last turn end: judgment discarded, settings or session changed meanwhile.",
+      );
+      // The cooldown sentence ends before the next one starts.
+      expect(status).toMatch(/(after compaction|Snoozed)\. Last turn end:/);
+      expect(hinted(w)).toBe(false);
+      if (interrupt === "snooze")
+        expect(stored(w).snoozeUntil).toBe((stored(w).completed as number) + 4);
+    });
+  }
+
+  for (const [budget, hint, status] of [
+    [0, false, "Budget: off. Context: 60,000 (36% of the context limit; hint floor 0.77)"],
+    [65000, true, "Budget: 65,000 tokens. Context: 60,000 (92% of the budget; hint floor 0.50)"],
+    // A budget above the 167k auto-compact point leaves that point in charge.
+    [
+      450000,
+      false,
+      "Budget: 450,000 tokens. Context: 60,000 (36% of the context limit; hint floor 0.77)",
+    ],
+  ] as const) {
+    test(`a context budget of ${budget} decides how relaxed the floor is`, async ($, on) => {
+      const w = world(on);
+      w.rows.set(`${PLUGIN}.contextBudgetTokens`, budget);
+      w.respond = async () => ({
+        status: 200,
+        text: JSON.stringify(jevAnswer({ completed: 0.8, handsOn: 0.5 })),
+      });
+      await $.session.start(interactiveStart);
+      await turnEnd($, w);
+      expect(w.journal.requests).toHaveLength(1);
+      // Score 0.6: short of the floor at 60k of the 167k auto-compact point, past it at
+      // 60k of a 65k budget.
+      expect(hinted(w)).toBe(hint);
+      await $.command.run(commandRun("status"));
+      expect(w.journal.logs.at(-1)).toContain(status);
+    });
+  }
+
+  test("a turn queued behind a judgment is gated again before its own request", async ($, on) => {
+    const w = world(on);
+    let calls = 0;
+    w.respond = async () => {
+      calls++;
+      if (calls === 1) {
+        // A turn end with no turn start: it queues behind this judgment, whose "not yet"
+        // then starts the re-ask wait that the queued turn has not grown past.
+        w.messages = longConversation("second unit");
+        w.usage.tokens = 61000;
+        await $.turn.complete(answered());
+      }
+      return { status: 200, text: JSON.stringify(jevAnswer({ completed: 0.1 })) };
+    };
+    await $.session.start(interactiveStart);
+    await turnEnd($, w);
+    expect(w.journal.requests).toHaveLength(1);
+    await $.command.run(commandRun("status"));
+    expect(w.journal.logs.at(-1)).toContain(
+      "Last turn end: not checked, cooldown: Waiting for 20k",
+    );
+  });
+
+  test("a compaction that starts before a queued turn is asked leaves it not checked, not discarded", async ($, on) => {
+    const w = world(on);
+    let calls = 0;
+    w.respond = async () => {
+      calls++;
+      if (calls === 1) {
+        // A turn end with no turn start queues behind this judgment; a host compaction then
+        // starts before it is asked, and is vetoed.
+        w.messages = longConversation("second unit");
+        await $.turn.complete(answered());
+        w.hostCompact = async () => ({ skip: "another plugin vetoed" });
+        await $.session.compact({ trigger: "manual", messages: MESSAGES });
+      }
+      return { status: 200, text: JSON.stringify(jevAnswer()) };
+    };
+    await $.session.start(interactiveStart);
+    await turnEnd($, w);
+    expect(w.journal.requests).toHaveLength(1);
+    await $.command.run(commandRun("status"));
+    expect(w.journal.logs.at(-1)).toContain("Last turn end: not checked, a compaction started.");
+  });
+
+  test("a request log pauses after its last part instead of growing without end", async ($, on) => {
+    const w = world(on, { logRequests: true });
+    const base = "/tmp/fixture-home/.claude/compact-adviser-requests-session-1";
+    for (let part = 1; part <= 100; part++) {
+      const path = part === 1 ? `${base}.jsonl` : `${base}.${part}.jsonl`;
+      w.logFiles.set(path, "full\n");
+      w.logSizes.set(path, 4 * 1024 * 1024);
+    }
+    await $.session.start(interactiveStart);
+    await turnEnd($, w);
+    expect(w.journal.requests).toHaveLength(1);
+    expect(w.logFiles.has(`${base}.101.jsonl`)).toBe(false);
+    expect(w.logFiles.get(`${base}.100.jsonl`)).toBe("full\n");
+    await $.command.run(commandRun("status"));
+    expect(w.journal.logs.at(-1)).toContain("Request log: paused after 100 log parts.");
+  });
+
+  test("an answer discarded by a settings change still clears the TypeSafe backoff", async ($, on) => {
+    const w = world(on);
+    w.respond = async () => ({ status: 500, text: "" });
+    await $.session.start(interactiveStart);
+    await turnEnd($, w);
+    expect(stored(w).failures).toBe(1);
+    await w.clock.advance(60000);
+    w.respond = async () => {
+      w.rows.set(`${PLUGIN}.minContextTokens`, 41000);
+      return { status: 200, text: JSON.stringify(jevAnswer({ completed: 0.1 })) };
+    };
+    w.messages = longConversation("next");
+    await turnEnd($, w);
+    expect(w.journal.requests).toHaveLength(2);
+    expect([stored(w).failures, stored(w).judgedTokens]).toEqual([0, null]);
+  });
+
+  test("a compaction clears the re-ask wait a judgment started", async ($, on) => {
+    const w = world(on);
+    w.respond = async () => ({
+      status: 200,
+      text: JSON.stringify(jevAnswer({ completed: 0.1 })),
+    });
+    await $.session.start(interactiveStart);
+    await turnEnd($, w);
+    expect(stored(w).judgedTokens).toBe(60000);
+    await $.session.compact({ trigger: "manual", messages: MESSAGES });
+    expect([stored(w).compacted, stored(w).judgedTokens]).toEqual([true, null]);
+  });
+
+  test("the first response after a compaction sets its baseline, not a long first turn's end", async ($, on) => {
+    const w = world(on);
+    await $.session.start(interactiveStart);
+    await $.session.compact({ trigger: "manual", messages: MESSAGES });
+    w.stepTokens = 60000;
+    const step = $.turn.step({ turnId: "t", index: 0, model: "m", messageCount: 1 } as never);
+    for await (const _ of step);
+    // A later step of the same long turn does not move it.
+    w.stepTokens = 90000;
+    const later = $.turn.step({ turnId: "t", index: 1, model: "m", messageCount: 2 } as never);
+    for await (const _ of later);
+    expect(stored(w).baseline).toBe(60000);
+    w.usage.tokens = 80000;
+    for (const ask of ["a", "b", "c"]) {
+      w.messages = longConversation(ask);
+      await turnEnd($, w);
+    }
+    expect(w.journal.requests).toHaveLength(1);
+  });
+
+  test("after a judgment that did not advise, re-ask waits for 20k more tokens or 3 exchanges that change it by 5k", async ($, on) => {
+    const w = world(on);
+    w.respond = async () => ({
+      status: 200,
+      text: JSON.stringify(jevAnswer({ completed: 0.1 })),
+    });
+    await $.session.start(interactiveStart);
+    await turnEnd($, w);
+    expect(w.journal.requests).toHaveLength(1);
+    expect(stored(w).judgedTokens).toBe(60000);
+    // Two more exchanges with under 20k of growth stay gated.
+    w.usage.tokens = 79999;
+    w.messages = longConversation("a");
+    await turnEnd($, w);
+    w.messages = longConversation("b");
+    await turnEnd($, w);
+    expect(w.journal.requests).toHaveLength(1);
+    // 20k of growth reopens it.
+    w.usage.tokens = 80000;
+    w.messages = longConversation("c");
+    await turnEnd($, w);
+    expect(w.journal.requests).toHaveLength(2);
+    // So does the third completed exchange, once the context has grown 5k.
+    for (const ask of ["d", "e"]) {
+      w.messages = longConversation(ask);
+      await turnEnd($, w);
+    }
+    expect(w.journal.requests).toHaveLength(2);
+    w.usage.tokens = 84999;
+    w.messages = longConversation("f");
+    await turnEnd($, w);
+    expect(w.journal.requests).toHaveLength(2);
+    w.usage.tokens = 85000;
+    w.messages = longConversation("g");
+    await turnEnd($, w);
+    expect(w.journal.requests).toHaveLength(3);
+  });
+
+  test("a stored record from before the re-ask gate restores without a snooze", async ($, on) => {
+    const w = world(on, {
+      store: {
+        [`session:${SESSION}`]: {
+          version: 1,
+          compacted: false,
+          baseline: null,
+          completed: 2,
+          lastHintAt: null,
+          lastHintKey: null,
+          snoozeUntil: 0,
+          retryAfter: 0,
+          failures: 0,
+          updatedAt: START,
+        },
+      },
+    });
+    await $.session.start(interactiveStart);
+    await turnEnd($, w);
+    expect(w.journal.requests).toHaveLength(1);
+    expect(stored(w).snoozeUntil).toBe(0);
+  });
+
+  test("a judgment discarded by a settings change mid-flight does not start the re-ask wait", async ($, on) => {
+    const w = world(on);
+    w.respond = async () => {
+      w.rows.set(`${PLUGIN}.minContextTokens`, 41000);
+      return { status: 200, text: JSON.stringify(jevAnswer({ completed: 0.1 })) };
+    };
+    await $.session.start(interactiveStart);
+    await turnEnd($, w);
+    expect(w.journal.requests).toHaveLength(1);
+    expect(stored(w).judgedTokens).toBeNull();
+    w.messages = longConversation("next");
+    await turnEnd($, w);
+    expect(w.journal.requests).toHaveLength(2);
+  });
+
   test("no repeat at the same checkpoint; a new checkpoint can hint immediately", async ($, on) => {
     const w = world(on);
     await $.session.start(interactiveStart);
@@ -565,6 +999,8 @@ describe("turn-end gates", () => {
       await $.session.start(interactiveStart);
       await turnEnd($, w);
       expect(w.journal.toasts).toContain(message);
+      // Hosts cut a long toast short; the transcript keeps the whole explanation.
+      expect(w.journal.logs).toContain(message);
       expect(stored(w).retryAfter).toBe(START + 10000);
       w.messages = longConversation("next");
       await turnEnd($, w);
@@ -585,6 +1021,7 @@ describe("turn-end gates", () => {
     await $.session.start(interactiveStart);
     await turnEnd($, w);
     expect(w.journal.toasts).toContain(JUDGE_DISABLED_NETWORK_MESSAGE);
+    expect(w.journal.logs).toContain(JUDGE_DISABLED_NETWORK_MESSAGE);
     expect(hinted(w)).toBe(false);
   });
 
@@ -628,6 +1065,51 @@ describe("compaction cooldown", () => {
     w.usage.tokens = 65000;
     await turn($, w, "a3");
     expect(w.journal.requests).toHaveLength(1);
+  });
+
+  test("a turn end during a host compaction is not judged", async ($, on) => {
+    const w = world(on);
+    await $.session.start(interactiveStart);
+    w.hostCompact = async () => {
+      await turnEnd($, w);
+      return { messages: MESSAGES, tokensBefore: 50000, tokensAfter: 4000 };
+    };
+    await $.session.compact({ trigger: "manual", messages: MESSAGES });
+    expect(w.journal.requests).toHaveLength(0);
+  });
+
+  test("a vetoed host compaction keeps the hint and the session's counters", async ($, on) => {
+    const w = world(on);
+    await $.session.start(interactiveStart);
+    await turnEnd($, w);
+    expect(hinted(w)).toBe(true);
+    w.hostCompact = async () => ({ skip: "another plugin vetoed" });
+    await $.session.compact({ trigger: "manual", messages: MESSAGES });
+    expect(w.journal.statuses.at(-1)).toBe(HINT);
+    expect(stored(w).compacted).toBe(false);
+  });
+
+  test("a subagent's response or one without usage leaves the baseline to the next main one", async ($, on) => {
+    const w = world(on);
+    await $.session.start(interactiveStart);
+    await $.session.compact({ trigger: "manual", messages: MESSAGES });
+    const steps = [
+      { stepTokens: 50000, agentId: "sub" },
+      { stepTokens: undefined, agentId: undefined },
+      { stepTokens: 70000, agentId: undefined },
+    ];
+    for (const [index, step] of steps.entries()) {
+      w.stepTokens = step.stepTokens;
+      const run = $.turn.step({
+        turnId: "t",
+        index,
+        model: "m",
+        messageCount: index + 1,
+        ...(step.agentId ? { agentId: step.agentId } : {}),
+      } as never);
+      for await (const _ of run);
+    }
+    expect(stored(w).baseline).toBe(70000);
   });
 
   test("a precompute or a subagent's compaction does not reset the session", async ($, on) => {
@@ -688,6 +1170,15 @@ describe("automatic mode", () => {
     expect(w.journal.compactions).toHaveLength(1);
   });
 
+  test("a checkpoint while automatic mode is unconfirmed starts the re-ask wait", async ($, on) => {
+    const w = world(on, { mode: "auto" });
+    await $.session.start(interactiveStart);
+    await turnEnd($, w);
+    expect(w.journal.requests).toHaveLength(1);
+    expect(w.journal.compactions).toHaveLength(0);
+    expect(stored(w).judgedTokens).toBe(60000);
+  });
+
   test("hint-level confidence also compacts in auto mode", async ($, on) => {
     const w = autoWorld(on);
     w.respond = async () => ({
@@ -716,6 +1207,20 @@ describe("automatic mode", () => {
     expect(w.journal.compactions).toHaveLength(1);
   });
 
+  test("a compaction refused because a new turn started is dropped, not reported as a failure", async ($, on) => {
+    const w = autoWorld(on);
+    w.compact = async () => {
+      await $.turn.start({ turnId: "next", origin: { kind: "composer" } } as never);
+      throw new Error("a turn is running");
+    };
+    await $.session.start(interactiveStart);
+    await turnEnd($, w);
+    expect(w.journal.compactions).toHaveLength(1);
+    expect(stored(w).retryAfter).toBe(0);
+    expect(w.journal.toasts.some((t) => t.startsWith("Compaction failed"))).toBe(false);
+    expect(w.journal.statuses.at(-1)).toBeUndefined();
+  });
+
   test("a vetoed or failed compaction backs off for a minute without resetting counters", async ($, on) => {
     const w = autoWorld(on);
     w.compact = async () => ({ skip: "another plugin vetoed" });
@@ -725,12 +1230,18 @@ describe("automatic mode", () => {
     const state = stored(w);
     expect(state.retryAfter).toBe(START + 60000);
     expect(state.compacted).toBe(false);
+    // A compaction that did not happen did not act, so the re-ask gate holds this checkpoint.
+    expect(state.judgedTokens).toBe(60000);
     expect(w.journal.toasts).toContain(
       "Compaction failed or was cancelled. No immediate retry; Claude Code remains in control.",
     );
     w.compact = async () => Promise.reject(new Error("summarization produced empty response"));
     await w.clock.advance(60000);
     w.messages = [...w.messages, { role: "user", text: "more", toolUses: [] }];
+    await turnEnd($, w);
+    expect(w.journal.compactions).toHaveLength(1);
+    w.usage.tokens = 80000;
+    w.messages = [...w.messages, { role: "user", text: "more still", toolUses: [] }];
     await turnEnd($, w);
     expect(w.journal.compactions).toHaveLength(2);
     expect(stored(w).retryAfter).toBe(START + 120000);
@@ -744,6 +1255,7 @@ describe("commands", () => {
     await $.command.run(commandRun("threshold 60000"));
     expect(w.rows.get(`${PLUGIN}.minContextTokens`)).toBe(60000);
     expect(w.journal.toasts.at(-1)).toBe("Minimum context saved: 60,000 tokens (all sessions).");
+    expect(w.journal.logs).toHaveLength(0);
     for (const bad of ["40k", "0", "-5", "1.5", "4e4", "lots"]) {
       await $.command.run(commandRun(`threshold ${bad}`));
       expect(w.journal.toasts.at(-1)).toBe(
@@ -755,13 +1267,31 @@ describe("commands", () => {
     expect(w.rows.get(`${PLUGIN}.minContextTokens`)).toBe(40000);
   });
 
+  test("budget saves a whole token count or off; invalid input keeps the setting", async ($, on) => {
+    const w = world(on);
+    await $.session.start(interactiveStart);
+    await $.command.run(commandRun("budget 65000"));
+    expect(w.rows.get(`${PLUGIN}.contextBudgetTokens`)).toBe(65000);
+    expect(w.journal.toasts.at(-1)).toBe("Context budget saved: 65,000 tokens (all sessions).");
+    await $.command.run(commandRun("budget 450k"));
+    expect(w.journal.toasts.at(-1)).toBe(
+      "Enter a whole number of tokens, for example 450000, or off.",
+    );
+    expect(w.rows.get(`${PLUGIN}.contextBudgetTokens`)).toBe(65000);
+    await $.command.run(commandRun("budget off"));
+    expect(w.rows.get(`${PLUGIN}.contextBudgetTokens`)).toBe(0);
+    expect(w.journal.toasts.at(-1)).toBe("Context budget off (all sessions).");
+  });
+
   test("a minimum at or above the model window saves with a warning, never clamped", async ($, on) => {
     const w = world(on);
     await $.session.start(interactiveStart);
     await $.command.run(commandRun("threshold 250000"));
     expect(w.rows.get(`${PLUGIN}.minContextTokens`)).toBe(250000);
-    expect(w.journal.toasts.at(-1)).toContain(
-      "at or above the active model's 200,000-token window",
+    // The toast keeps the headline a host can show whole; the warning goes to the transcript.
+    expect(w.journal.toasts.at(-1)).toBe("Minimum context saved: 250,000 tokens (all sessions).");
+    expect(w.journal.logs.at(-1)).toBe(
+      "Minimum context saved: 250,000 tokens (all sessions). Warning: this is at or above the active model's 200,000-token window, so advice will not trigger before Claude Code's own compaction.",
     );
   });
 
@@ -769,10 +1299,13 @@ describe("commands", () => {
     // Claude Code reloads the module after a saved row and drops the old environment's
     // toasts; the reloaded environment shows the confirmation at its session.start.
     const w = world(on, {
-      store: { pendingNotice: { message: "Off saved (all sessions).", at: START - 1000 } },
+      store: {
+        pendingNotice: { message: "Off saved (all sessions).", detail: "More.", at: START - 1000 },
+      },
     });
     await $.session.start(interactiveStart);
     expect(w.journal.toasts).toEqual(["Off saved (all sessions)."]);
+    expect(w.journal.logs).toEqual(["Off saved (all sessions). More."]);
     expect(w.store.has("pendingNotice")).toBe(false);
     await $.session.start(interactiveStart);
     expect(w.journal.toasts).toHaveLength(1);
@@ -794,6 +1327,7 @@ describe("commands", () => {
     await $.command.run(commandRun("off"));
     expect(w.rows.get(`${PLUGIN}.mode`)).toBe("hint");
     expect(w.journal.toasts.at(-1)).toBe("Not saved: a managed setting owns this row");
+    expect(w.journal.logs.at(-1)).toBe("Not saved: a managed setting owns this row");
   });
 
   test("auto asks once; cancelling keeps the mode, confirming persists across sessions", async ($, on) => {
@@ -810,7 +1344,8 @@ describe("commands", () => {
     expect(w.rows.get(`${PLUGIN}.mode`)).toBe("auto");
     expect(w.journal.asks).toHaveLength(3);
     expect(w.journal.asks[0]).toContain("Compaction is lossy");
-    expect(w.journal.toasts.at(-1)).toBe(
+    expect(w.journal.toasts.at(-1)).toBe("Automatic mode saved (all sessions).");
+    expect(w.journal.logs.at(-1)).toBe(
       "Automatic mode saved (all sessions). A TypeSafe key is still required.",
     );
     await $.command.run(commandRun("hint"));
@@ -825,11 +1360,13 @@ describe("commands", () => {
     await $.session.start(interactiveStart);
     await $.command.run(commandRun("off"));
     expect(w.rows.get(`${PLUGIN}.mode`)).toBe("off");
-    expect(w.journal.toasts.at(-1)).toBe(
+    expect(w.journal.toasts.at(-1)).toBe("Off saved (all sessions).");
+    expect(w.journal.logs.at(-1)).toBe(
       "Off saved (all sessions). Claude Code's built-in compaction is unchanged.",
     );
     await $.command.run(commandRun("hint"));
-    expect(w.journal.toasts.at(-1)).toBe(
+    expect(w.journal.toasts.at(-1)).toBe("Hints only saved (all sessions).");
+    expect(w.journal.logs.at(-1)).toBe(
       "Hints only saved (all sessions). Claude Code's built-in compaction is unchanged.",
     );
   });
@@ -839,11 +1376,11 @@ describe("commands", () => {
     await $.session.start(interactiveStart);
     await $.command.run(commandRun("sharing on"));
     expect(w.journal.toasts.at(-1)).toBe(
-      "Use /compact-adviser, auto, hint, off, status, threshold <tokens|default>, snooze or dismiss.",
+      "Use /compact-adviser, auto, hint, off, status, threshold <tokens|default>, budget <tokens|off>, snooze or dismiss.",
     );
     await $.command.run(commandRun("sharing off"));
     expect(w.journal.toasts.at(-1)).toBe(
-      "Use /compact-adviser, auto, hint, off, status, threshold <tokens|default>, snooze or dismiss.",
+      "Use /compact-adviser, auto, hint, off, status, threshold <tokens|default>, budget <tokens|off>, snooze or dismiss.",
     );
     expect(w.journal.asks).toHaveLength(0);
   });
@@ -854,7 +1391,7 @@ describe("commands", () => {
     await $.command.run(commandRun("status"));
     const line = w.journal.logs.at(-1) ?? "";
     expect(line).toBe(
-      "Mode: hint. Minimum: 40,000 tokens. Context: 60,000 (36% of the context limit; hint floor 0.77). Key: env. No cooldown; semantic checks still apply. Claude Code auto-compacts at 167,000 tokens. Request log: off. Settings: /config (compact-adviser rows) and /compact-adviser.",
+      "Mode: hint. Minimum: 40,000 tokens. Budget: off. Context: 60,000 (36% of the context limit; hint floor 0.77). Key: env. No cooldown; semantic checks still apply. Claude Code auto-compacts at 167,000 tokens. Request log: off. Settings: /config (compact-adviser rows) and /compact-adviser.",
     );
     expect(line.includes(KEY)).toBe(false);
   });
@@ -868,6 +1405,66 @@ describe("commands", () => {
       line.includes("/tmp/fixture-home/.claude/compact-adviser-requests-session-1.jsonl"),
     ).toBe(true);
     expect(line.includes(KEY)).toBe(false);
+  });
+
+  test("status says why the last turn end did or did not advise", async ($, on) => {
+    const w = world(on, { minimum: 100000 });
+    const last = () => (w.journal.logs.at(-1) ?? "").match(/Last turn end: [^.]*\./)?.[0];
+    await $.session.start(interactiveStart);
+    await $.command.run(commandRun("status"));
+    expect(last()).toBeUndefined();
+    await turnEnd($, w);
+    await $.command.run(commandRun("status"));
+    expect(last()).toBe("Last turn end: not checked, context below the minimum.");
+    await turnEnd($, w, { ...answered(), isAborted: true });
+    await $.command.run(commandRun("status"));
+    expect(last()).toBe("Last turn end: not checked, the turn was interrupted.");
+    w.usage.tokens = 150000;
+    w.respond = async () => ({
+      status: 200,
+      text: JSON.stringify(jevAnswer({ completed: 0.1 })),
+    });
+    await turnEnd($, w);
+    await $.command.run(commandRun("status"));
+    expect(last()).toBe("Last turn end: judged, not a checkpoint yet.");
+    await turnEnd($, w);
+    await $.command.run(commandRun("status"));
+    expect(last()).toBe(
+      "Last turn end: not checked, cooldown: Waiting for 20k new tokens, or 3 completed exchanges that change the context by 5k, since the last judgment.",
+    );
+    w.usage.tokens = 170000;
+    w.respond = async () => ({ status: 200, text: JSON.stringify(jevAnswer()) });
+    w.messages = longConversation("next unit");
+    await turnEnd($, w);
+    await $.command.run(commandRun("status"));
+    expect(last()).toBe("Last turn end: judged a checkpoint; hint shown.");
+    w.respond = async () => ({ status: 500, text: "" });
+    w.messages = longConversation("another unit");
+    await turnEnd($, w);
+    await $.command.run(commandRun("status"));
+    expect(last()).toBe("Last turn end: the judgment failed; context left unchanged.");
+    await turnEnd($, w);
+    await $.command.run(commandRun("status"));
+    expect(last()).toBe("Last turn end: not checked, cooldown: TypeSafe backoff.");
+  });
+
+  test("a late judgment from an earlier turn never overwrites the latest turn's reason", async ($, on) => {
+    const w = world(on);
+    w.respond = async () => {
+      // Turn 2 starts and settles below the minimum while turn 1's judgment is in flight.
+      await $.turn.start({ turnId: "two", origin: { kind: "composer" } } as never);
+      w.usage.tokens = 10000;
+      await $.turn.complete(answered());
+      return { status: 200, text: JSON.stringify(jevAnswer()) };
+    };
+    await $.session.start(interactiveStart);
+    await turnEnd($, w);
+    expect(w.journal.requests).toHaveLength(1);
+    expect(hinted(w)).toBe(false);
+    await $.command.run(commandRun("status"));
+    expect(w.journal.logs.at(-1)).toContain(
+      "Last turn end: not checked, context below the minimum.",
+    );
   });
 
   test("snooze suppresses advice for three exchanges; dismiss clears the hint", async ($, on) => {
@@ -893,7 +1490,7 @@ describe("commands", () => {
     await $.session.start(interactiveStart);
     await $.command.run(commandRun("threshold"));
     expect(w.journal.toasts.at(-1)).toBe(
-      "Use /compact-adviser, auto, hint, off, status, threshold <tokens|default>, snooze or dismiss.",
+      "Use /compact-adviser, auto, hint, off, status, threshold <tokens|default>, budget <tokens|off>, snooze or dismiss.",
     );
   });
 });
@@ -945,7 +1542,10 @@ describe("settings pane", () => {
     await $.ui.press({ plugin: PLUGIN, key: "logging:on" });
     await drain(w);
     expect(w.rows.get(`${PLUGIN}.logRequests`)).toBe(true);
-    expect(w.journal.toasts.at(-1)).toContain("TypeSafe request logging on (all sessions).");
+    expect(w.journal.toasts.at(-1)).toBe("TypeSafe request logging on (all sessions).");
+    expect(w.journal.logs.at(-1)).toMatch(
+      /^TypeSafe request logging on \(all sessions\)\. This session logs to .*compact-adviser-requests-.*\.jsonl\.$/,
+    );
     tree = await $.ui.render(pane);
     expect(rows(tree)[2]).toBe("Log TypeSafe requests On");
     // The ring goes back to the row that was opened, so the arrows continue from there.
@@ -1008,7 +1608,8 @@ describe("settings pane", () => {
     await $.ui.press({ plugin: PLUGIN, key: "mode:auto" });
     await drain(w);
     expect(w.rows.get(`${PLUGIN}.mode`)).toBe("auto");
-    expect(w.journal.toasts.at(-1)).toBe(
+    expect(w.journal.toasts.at(-1)).toBe("Automatic mode saved (all sessions).");
+    expect(w.journal.logs.at(-1)).toBe(
       "Automatic mode saved (all sessions). A TypeSafe key is still required.",
     );
     expect(rows(await $.ui.render(pane))[0]).toBe("Mode Automatic (experimental)");
@@ -1027,7 +1628,7 @@ describe("settings pane", () => {
     await $.ui.press({ plugin: PLUGIN, key: "menu:status" });
     await drain(w);
     expect(text(await $.ui.render(pane))).toContain(
-      "Mode: off. Minimum: 40,000 tokens. Context: 60,000 (36% of the context limit; hint floor 0.77). Key: env.",
+      "Mode: off. Minimum: 40,000 tokens. Budget: off. Context: 60,000 (36% of the context limit; hint floor 0.77). Key: env.",
     );
     expect(text(await $.ui.render(pane))).not.toContain("Sharing:");
     await $.ui.press({ plugin: PLUGIN, key: "menu:close" });
@@ -1062,7 +1663,8 @@ describe("settings pane", () => {
     await $.ui.press({ plugin: PLUGIN, key: "clearKey" });
     await drain(w);
     expect(w.rows.get(`${PLUGIN}.typesafeApiKey`)).toBe("");
-    expect(w.journal.toasts.at(-1)).toBe(
+    expect(w.journal.toasts.at(-1)).toBe("Saved TypeSafe API key cleared (all sessions).");
+    expect(w.journal.logs.at(-1)).toBe(
       "Saved TypeSafe API key cleared (all sessions). Launch environment and .env still apply.",
     );
     expect(w.journal.toasts.every((line) => !line.includes(secret))).toBe(true);
