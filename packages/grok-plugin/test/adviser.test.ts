@@ -326,6 +326,30 @@ test("a compaction retires the hint and holds the next judgments", async (t) => 
   assert.match((await runCli(["status"], { lab: l })).stdout, /Waiting for 20k new tokens/);
 });
 
+test("after a compaction with no readable signals, the local estimate sets the baseline", async (t) => {
+  const l = lab(t);
+  const fixture = await typesafeFixture(t);
+  await runCli(["threshold", "25000"], { lab: l });
+  await runCli(["hook", "compact"], {
+    lab: l,
+    stdin: JSON.stringify({ hook_event_name: "PostCompact", sessionId: l.sessionId }),
+  });
+  const turns = ["one", "two", "three"];
+  for (const [i, marker] of turns.entries()) {
+    const history = turns
+      .slice(0, i + 1)
+      .flatMap((m, j) => workedHistory(m).slice(j === 0 ? 0 : 1));
+    writeHistory(l, history);
+    await runCli(["hook", "stop"], {
+      lab: l,
+      stdin: stopPayload(l, { promptId: `prompt-${marker}` }),
+      env: keyed(fixture),
+    });
+    // Held for the first two exchanges, then judged: the baseline is set, not null forever.
+    assert.equal(fixture.bodies.length, i < 2 ? 0 : 1, `after exchange ${i + 1}`);
+  }
+});
+
 test("the next prompt retires the hint", async (t) => {
   const { l, fixture } = await judgeTurn(t);
   await runCli(["hook", "stop"], { lab: l, stdin: stopPayload(l), env: keyed(fixture) });

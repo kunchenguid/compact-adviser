@@ -339,6 +339,11 @@ async function runStop(payload: HookPayload): Promise<void> {
   // `contextTokensUsed` is the honest number when signals.json is readable; the local estimate
   // stands in when it is not, so an undocumented field going away weakens the gate, not the product.
   const tokens = usage.tokens ?? view.conversationTokens;
+  if (state.compacted && state.baseline === null) {
+    // No readable usage after the compaction: the same estimate the gate reads is the baseline.
+    state = { ...state, baseline: tokens };
+    saveSessionState(statePath, state);
+  }
   if (tokens < settings.minContextTokens) return;
   if (cooldownReason(state, tokens, now) !== undefined) return;
 
