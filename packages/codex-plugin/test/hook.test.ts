@@ -148,7 +148,7 @@ test("a materially different next checkpoint is judged again straight away", asy
   });
 });
 
-test("after a judgment below the floor, re-ask waits for 20k more tokens or 3 exchanges that add 5k", async () => {
+test("after a judgment below the floor, re-ask waits for 20k more tokens or 3 exchanges that change it by 5k", async () => {
   await withLab(async (lab) => {
     // 0.6 x (0.5 + 0.5 x 0.6) = 0.48, under every floor this test reaches.
     const typesafe = fakeTypesafe(() => ({ body: jevAnswer(0.6, 0.6) }));

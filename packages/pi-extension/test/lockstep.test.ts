@@ -361,7 +361,7 @@ test("every package writes the same TypeSafe log line shape", () => {
 test("every package applies the same cooldownReason gates", () => {
   const waiting = "Waiting for 20k new tokens and 3 completed exchanges after compaction";
   const rejudge =
-    "Waiting for 20k new tokens, or 3 completed exchanges and 5k new tokens, since the last judgment";
+    "Waiting for 20k new tokens, or 3 completed exchanges that change the context by 5k, since the last judgment";
   const cases: Array<{
     name: string;
     tokens: number;

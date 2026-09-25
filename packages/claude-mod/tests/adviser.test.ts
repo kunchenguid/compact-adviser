@@ -684,7 +684,7 @@ describe("turn-end gates", () => {
     expect(w.journal.requests).toHaveLength(1);
   });
 
-  test("after a judgment that did not advise, re-ask waits for 20k more tokens or 3 exchanges that add 5k", async ($, on) => {
+  test("after a judgment that did not advise, re-ask waits for 20k more tokens or 3 exchanges that change it by 5k", async ($, on) => {
     const w = world(on);
     w.respond = async () => ({
       status: 200,
@@ -1219,7 +1219,7 @@ describe("commands", () => {
     await turnEnd($, w);
     await $.command.run(commandRun("status"));
     expect(last()).toBe(
-      "Last turn end: not checked, cooldown: Waiting for 20k new tokens, or 3 completed exchanges and 5k new tokens, since the last judgment.",
+      "Last turn end: not checked, cooldown: Waiting for 20k new tokens, or 3 completed exchanges that change the context by 5k, since the last judgment.",
     );
     w.usage.tokens = 170000;
     w.respond = async () => ({ status: 200, text: JSON.stringify(jevAnswer()) });
