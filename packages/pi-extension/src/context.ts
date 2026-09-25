@@ -528,7 +528,9 @@ function sanitizeText(
 }
 
 export function snapshot(ctx: ExtensionContext, secrets: readonly (string | undefined)[] = []) {
-  const messages = buildSessionContext(ctx.sessionManager.buildContextEntries()).messages;
+  const messages = buildSessionContext(ctx.sessionManager.buildContextEntries()).messages.filter(
+    (m) => String(m.role) !== "system",
+  );
   const conversationTokens = messages.reduce((sum, m) => sum + estimateTokens(m), 0);
   const paths = new Map<string, { path: string; name: string }>();
   const commands = new Map<string, string>();

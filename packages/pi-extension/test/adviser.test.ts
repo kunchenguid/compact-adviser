@@ -287,6 +287,27 @@ test("auto still compacts when recent content exceeds coverage", async (t) => {
   assert.equal(h.compactions.length, 1);
 });
 
+test("auto holds back while the conversation still fits inside Pi's recent tail", async (t) => {
+  const h = harness(t);
+  h.sm.newSession();
+  h.enable("auto");
+  h.next("Earlier work. ".repeat(6000));
+  await h.fire("agent_settled");
+  assert.equal(h.calls, 0);
+  assert.equal(h.compactions.length, 0);
+});
+
+test("auto asks Jev and compacts once the conversation clears Pi's recent tail by half again", async (t) => {
+  const h = harness(t);
+  h.sm.newSession();
+  h.enable("auto");
+  h.next("Earlier work. ".repeat(6000));
+  h.next("Later work. ".repeat(6000));
+  await h.fire("agent_settled");
+  assert.equal(h.calls, 1);
+  assert.equal(h.compactions.length, 1);
+});
+
 test("late answers are discarded on all native invalidation events", async (t) => {
   for (const event of [
     "before_agent_start",

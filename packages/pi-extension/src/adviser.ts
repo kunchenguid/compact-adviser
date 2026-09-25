@@ -3,6 +3,7 @@ import type {
   ExtensionCommandContext,
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
+import { DEFAULT_COMPACTION_SETTINGS } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import {
   type Config,
@@ -39,6 +40,7 @@ import {
 } from "./state.ts";
 
 const LABEL = "compact-adviser";
+const MINIMUM_CONVERSATION_TOKENS = Math.ceil(1.5 * DEFAULT_COMPACTION_SETTINGS.keepRecentTokens);
 const HINT = "Compact adviser: work appears completed or recorded. Run /compact to save tokens.";
 const USAGE =
   "Use /compact-adviser, auto, hint, off, status, threshold <tokens|default>, snooze or dismiss.";
@@ -188,7 +190,11 @@ export function installAdviser(pi: ExtensionAPI, options: Options): void {
     if (request || eligible(ctx, config, state) === undefined) return;
     const profile = parseProfile(config.profile);
     const view = snapshot(ctx, [key(ctx.cwd), savedApiKey(store)]);
-    if (view.conversationTokens <= 20000 || view.checkpointKey === state.lastHintKey) return;
+    if (
+      view.conversationTokens <= MINIMUM_CONVERSATION_TOKENS ||
+      view.checkpointKey === state.lastHintKey
+    )
+      return;
     let loggedBody: string | undefined;
     if (config.logRequests) {
       try {
