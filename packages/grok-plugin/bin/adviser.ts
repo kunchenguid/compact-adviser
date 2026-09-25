@@ -74,7 +74,13 @@ import {
 } from "../lib/paths.ts";
 import { parseProfile } from "../lib/profile.ts";
 import { snapshot } from "../lib/snapshot.ts";
-import { backoff, completeExchange, cooldownReason, SESSION_RETENTION_MS } from "../lib/state.ts";
+import {
+  backoff,
+  completeExchange,
+  cooldownReason,
+  recordJudgment,
+  SESSION_RETENTION_MS,
+} from "../lib/state.ts";
 import { parsePayload, statusLine } from "../lib/statusline.ts";
 import {
   clearDiagnostic,
@@ -389,13 +395,21 @@ async function runStop(payload: HookPayload): Promise<void> {
       ),
     );
   }
-  state = { ...state, failures: 0, retryAfter: 0, updatedAt: now };
   clearDiagnostic(diagnosticPath(dataDir(env()), sessionId));
   let profileChanged = true;
   try {
     profileChanged = settingsOrThrow().profile !== settings.profile;
   } catch {}
-  if (profileChanged || !qualifies(judgment, fraction, profile)) {
+  // A judgment discarded because the profile changed meanwhile clears the backoff but does
+  // not start the re-ask gate: only a verdict that applied and did not qualify does.
+  if (profileChanged) {
+    saveSessionState(statePath, { ...state, failures: 0, retryAfter: 0, updatedAt: now });
+    clearVerdict(verdict);
+    return;
+  }
+  const acted = qualifies(judgment, fraction, profile);
+  state = { ...recordJudgment(state, tokens, acted), updatedAt: now };
+  if (!acted) {
     saveSessionState(statePath, state);
     clearVerdict(verdict);
     return;

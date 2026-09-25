@@ -523,6 +523,62 @@ describe("turn-end gates", () => {
     expect(hinted(w)).toBe(false);
   });
 
+  test("after a judgment that did not advise, re-ask waits for 20k more tokens or 3 exchanges", async ($, on) => {
+    const w = world(on);
+    w.respond = async () => ({
+      status: 200,
+      text: JSON.stringify(jevAnswer({ completed: 0.1 })),
+    });
+    await $.session.start(interactiveStart);
+    await turnEnd($, w);
+    expect(w.journal.requests).toHaveLength(1);
+    expect(stored(w).judgedTokens).toBe(60000);
+    // Two more exchanges with under 20k of growth stay gated.
+    w.usage.tokens = 79999;
+    w.messages = longConversation("a");
+    await turnEnd($, w);
+    w.messages = longConversation("b");
+    await turnEnd($, w);
+    expect(w.journal.requests).toHaveLength(1);
+    // 20k of growth reopens it.
+    w.usage.tokens = 80000;
+    w.messages = longConversation("c");
+    await turnEnd($, w);
+    expect(w.journal.requests).toHaveLength(2);
+    // So does the third completed exchange, even without growth.
+    for (const ask of ["d", "e"]) {
+      w.messages = longConversation(ask);
+      await turnEnd($, w);
+    }
+    expect(w.journal.requests).toHaveLength(2);
+    w.messages = longConversation("f");
+    await turnEnd($, w);
+    expect(w.journal.requests).toHaveLength(3);
+  });
+
+  test("a stored record from before the re-ask gate restores without a snooze", async ($, on) => {
+    const w = world(on, {
+      store: {
+        [`session:${SESSION}`]: {
+          version: 1,
+          compacted: false,
+          baseline: null,
+          completed: 2,
+          lastHintAt: null,
+          lastHintKey: null,
+          snoozeUntil: 0,
+          retryAfter: 0,
+          failures: 0,
+          updatedAt: START,
+        },
+      },
+    });
+    await $.session.start(interactiveStart);
+    await turnEnd($, w);
+    expect(w.journal.requests).toHaveLength(1);
+    expect(stored(w).snoozeUntil).toBe(0);
+  });
+
   test("no repeat at the same checkpoint; a new checkpoint can hint immediately", async ($, on) => {
     const w = world(on);
     await $.session.start(interactiveStart);
@@ -964,6 +1020,12 @@ describe("commands", () => {
     await turnEnd($, w);
     await $.command.run(commandRun("status"));
     expect(last()).toBe("Last turn end: judged, not a checkpoint yet.");
+    await turnEnd($, w);
+    await $.command.run(commandRun("status"));
+    expect(last()).toBe(
+      "Last turn end: not checked, cooldown: Waiting for 20k new tokens or 3 completed exchanges since the last judgment.",
+    );
+    w.usage.tokens = 170000;
     w.respond = async () => ({ status: 200, text: JSON.stringify(jevAnswer()) });
     w.messages = longConversation("next unit");
     await turnEnd($, w);

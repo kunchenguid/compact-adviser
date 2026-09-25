@@ -29,7 +29,13 @@ import { adviserRoot } from "./paths.ts";
 import { parseProfile } from "./profile.ts";
 import { type Rollout, readRollout, usageFraction } from "./rollout.ts";
 import { snapshot } from "./snapshot.ts";
-import { backoff, completeExchange, cooldownReason, initialState } from "./state.ts";
+import {
+  backoff,
+  completeExchange,
+  cooldownReason,
+  initialState,
+  recordJudgment,
+} from "./state.ts";
 import { SessionStore } from "./store.ts";
 
 export const HINT =
@@ -239,14 +245,24 @@ async function onStop(payload: HookPayload, environment: Environment): Promise<H
   const nowAfter = environment.now();
   const latestConfig = new ConfigStore(root).read();
   const current = sessions.read(sessionId, nowAfter).state;
-  const settled = { ...current, failures: 0, retryAfter: 0, updatedAt: nowAfter };
+  // A judgment discarded because settings or cooldowns changed meanwhile clears the backoff
+  // but does not start the re-ask gate: only a verdict that applied and did not qualify does.
   if (
     latestConfig.mode === "off" ||
     tokens < latestConfig.minContextTokens ||
     cooldownReason(current, tokens, nowAfter) !== undefined ||
-    latestConfig.profile !== config.profile ||
-    !qualifies(result, fraction, profile)
+    latestConfig.profile !== config.profile
   ) {
+    sessions.write(
+      sessionId,
+      { ...current, failures: 0, retryAfter: 0, updatedAt: nowAfter },
+      usage,
+    );
+    return {};
+  }
+  const acted = qualifies(result, fraction, profile);
+  const settled = { ...recordJudgment(current, tokens, acted), updatedAt: nowAfter };
+  if (!acted) {
     sessions.write(sessionId, settled, usage);
     return {};
   }

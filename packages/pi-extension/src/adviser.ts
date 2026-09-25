@@ -31,6 +31,7 @@ import {
   cooldownReason,
   initialState,
   lastResponse,
+  recordJudgment,
   restoreState,
   type SessionState,
   STATE_TYPE,
@@ -222,15 +223,13 @@ export function installAdviser(pi: ExtensionAPI, options: Options): void {
       }
       // No await between this final cross-session configuration/state check and compact().
       const latest = store.read();
-      if (JSON.stringify(latest) !== configIdentity || eligible(ctx, latest, state) === undefined)
-        return;
-      state = { ...state, failures: 0, retryAfter: 0 };
+      const judgedTokens = eligible(ctx, latest, state);
+      if (JSON.stringify(latest) !== configIdentity || judgedTokens === undefined) return;
       const auto = latest.mode === "auto";
-      if (!qualifies(result, usageFraction(ctx), profile)) {
-        persist(state);
-        return;
-      }
-      if (auto && !latest.autoAcknowledged) {
+      const qualified = qualifies(result, usageFraction(ctx), profile);
+      const acted = qualified && (!auto || latest.autoAcknowledged);
+      state = recordJudgment(state, judgedTokens, acted);
+      if (!acted) {
         persist(state);
         return;
       }

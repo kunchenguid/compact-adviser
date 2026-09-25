@@ -60,6 +60,32 @@ test("a new checkpoint can be judged immediately; the same checkpoint is not", a
   assert.equal(h.calls, 2);
 });
 
+test("after a judgment that did not advise, re-ask waits for 20k more tokens or 3 exchanges", async (t) => {
+  const h = harness(t, async () => parseJudgment(apiResponse(0.1, 0.99)));
+  h.enable();
+  h.tokens = 45000;
+  await h.fire("agent_settled");
+  assert.equal(h.calls, 1);
+  h.tokens = 64999;
+  for (const ask of ["a", "b"]) {
+    h.next(ask);
+    await h.fire("agent_settled");
+  }
+  assert.equal(h.calls, 1);
+  h.tokens = 65000;
+  h.next("c");
+  await h.fire("agent_settled");
+  assert.equal(h.calls, 2);
+  for (const ask of ["d", "e"]) {
+    h.next(ask);
+    await h.fire("agent_settled");
+  }
+  assert.equal(h.calls, 2);
+  h.next("f");
+  await h.fire("agent_settled");
+  assert.equal(h.calls, 3);
+});
+
 test("the hint floor slides with context usage: a finished coordinating unit hints only once the window is fuller", async (t) => {
   // finished but coordinating scores 0.5: below the 0.87 floor at 17 % of the
   // 272k window, at the 0.50 floor from 90 % on. Same judgment, different window fill.

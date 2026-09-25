@@ -13,6 +13,7 @@ import {
   assistantMessage,
   environment,
   fakeTypesafe,
+  jevAnswer,
   type Lab,
   makeLab,
   sessionMeta,
@@ -144,6 +145,35 @@ test("a materially different next checkpoint is judged again straight away", asy
     ]);
     assert.deepEqual(await handle(stop(lab), environment_), { systemMessage: HINT });
     assert.equal(typesafe.requests.length, 2);
+  });
+});
+
+test("after a judgment below the floor, re-ask waits for 20k more tokens or 3 exchanges", async () => {
+  await withLab(async (lab) => {
+    // 0.6 x (0.5 + 0.5 x 0.6) = 0.48, under every floor this test reaches.
+    const typesafe = fakeTypesafe(() => ({ body: jevAnswer(0.6, 0.6) }));
+    const environment_ = environment(lab, { fetch: typesafe.fetch });
+    const turn = async (ask: string, tokens: number) => {
+      writeRollout(lab.transcript, [
+        ...settledRollout({ tokens: 70000 }),
+        userMessage(ask),
+        assistantMessage(`Done: ${ask}.`),
+        tokenCount(tokens),
+      ]);
+      return handle(stop(lab), environment_);
+    };
+    await turn("first", 70000);
+    assert.equal(typesafe.requests.length, 1);
+    await turn("second", 89999);
+    await turn("third", 89999);
+    assert.equal(typesafe.requests.length, 1);
+    await turn("fourth", 90000);
+    assert.equal(typesafe.requests.length, 2);
+    await turn("fifth", 90000);
+    await turn("sixth", 90000);
+    assert.equal(typesafe.requests.length, 2);
+    await turn("seventh", 90000);
+    assert.equal(typesafe.requests.length, 3);
   });
 });
 

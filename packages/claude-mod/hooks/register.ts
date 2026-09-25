@@ -64,6 +64,7 @@ import {
   completeExchange,
   cooldownReason,
   initialState,
+  recordJudgment,
   restoreState,
   type SessionState,
   sessionKey,
@@ -380,22 +381,26 @@ async function judgeCheckpoint($: EngineInterface, epoch: number): Promise<void>
     }
     // The epoch check sits right before the write: a turn that completed during the awaits
     // above has stored a newer record, which `current` must not overwrite.
+    const judgedTokens = context.tokens;
     if (
+      typeof judgedTokens !== "number" ||
       JSON.stringify(latest) !== JSON.stringify(initial) ||
-      (await ineligibility($, latest, current, context.tokens, now)) !== undefined ||
+      (await ineligibility($, latest, current, judgedTokens, now)) !== undefined ||
       epoch !== generation
     ) {
       note(epoch, "judgment discarded, settings or session changed meanwhile");
       return;
     }
-    let state: SessionState = { ...current, failures: 0, retryAfter: 0, updatedAt: now };
     const auto = latest.mode === "auto";
-    if (!qualifies(result, usageFraction(context), profile)) {
+    const qualified = qualifies(result, usageFraction(context), profile);
+    const acted = qualified && (!auto || latest.autoAcknowledged);
+    let state: SessionState = { ...recordJudgment(current, judgedTokens, acted), updatedAt: now };
+    if (!qualified) {
       note(epoch, "judged, not a checkpoint yet");
       await $.store.set(key, state);
       return;
     }
-    if (auto && !latest.autoAcknowledged) {
+    if (!acted) {
       note(epoch, "judged a checkpoint; automatic mode is not confirmed (/compact-adviser auto)");
       await $.store.set(key, state);
       return;

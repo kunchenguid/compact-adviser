@@ -358,6 +358,7 @@ test("every package writes the same TypeSafe log line shape", () => {
 
 test("every package applies the same cooldownReason gates", () => {
   const waiting = "Waiting for 20k new tokens and 3 completed exchanges after compaction";
+  const rejudge = "Waiting for 20k new tokens or 3 completed exchanges since the last judgment";
   const cases: Array<{
     name: string;
     tokens: number;
@@ -369,6 +370,8 @@ test("every package applies the same cooldownReason gates", () => {
       retryAfter?: number;
       lastHintAt?: number | null;
       baseline?: number | null;
+      judgedTokens?: number | null;
+      judgedAt?: number | null;
     };
     reason: string | undefined;
   }> = [
@@ -421,6 +424,38 @@ test("every package applies the same cooldownReason gates", () => {
       patch: { completed: 3, baseline: 5000 },
       reason: undefined,
     },
+    {
+      name: "re-ask gate: short of tokens and exchanges",
+      tokens: 119999,
+      now: 0,
+      compacted: false,
+      patch: { completed: 6, judgedTokens: 100000, judgedAt: 4 },
+      reason: rejudge,
+    },
+    {
+      name: "re-ask gate: 20k more tokens",
+      tokens: 120000,
+      now: 0,
+      compacted: false,
+      patch: { completed: 5, judgedTokens: 100000, judgedAt: 4 },
+      reason: undefined,
+    },
+    {
+      name: "re-ask gate: 3 more exchanges",
+      tokens: 100000,
+      now: 0,
+      compacted: false,
+      patch: { completed: 7, judgedTokens: 100000, judgedAt: 4 },
+      reason: undefined,
+    },
+    {
+      name: "re-ask gate: context shrank",
+      tokens: 90000,
+      now: 0,
+      compacted: false,
+      patch: { completed: 5, judgedTokens: 100000, judgedAt: 4 },
+      reason: rejudge,
+    },
   ];
   for (const c of cases) {
     const pi = {
@@ -438,6 +473,66 @@ test("every package applies the same cooldownReason gates", () => {
     const grok = { ...grokState.initialState(c.compacted, c.now), ...c.patch };
     assert.equal(grokState.cooldownReason(grok, c.tokens, c.now), c.reason, `grok ${c.name}`);
   }
+});
+
+test("every package records a judgment and restores pre-gate records the same way", () => {
+  const legacy = {
+    version: 1,
+    compacted: false,
+    baseline: null,
+    completed: 2,
+    lastHintAt: null,
+    lastHintKey: null,
+    snoozeUntil: 0,
+    retryAfter: 0,
+    failures: 0,
+    updatedAt: 0,
+  };
+  type Gated = {
+    completed: number;
+    failures: number;
+    retryAfter: number;
+    snoozeUntil: number;
+    judgedTokens: number | null;
+    judgedAt: number | null;
+  };
+  function check<S extends Gated>(
+    name: string,
+    initial: S,
+    record: (state: S, tokens: number, acted: boolean) => S,
+    restore: (value: unknown, now: number) => S,
+  ) {
+    const quiet = record({ ...initial, completed: 4, failures: 2, retryAfter: 9 }, 150000, false);
+    assert.deepEqual(
+      [quiet.failures, quiet.retryAfter, quiet.judgedTokens, quiet.judgedAt],
+      [0, 0, 150000, 4],
+      `${name} quiet`,
+    );
+    const acted = record(quiet, 160000, true);
+    assert.deepEqual([acted.judgedTokens, acted.judgedAt], [null, null], `${name} acted`);
+    const restored = restore(legacy, 0);
+    assert.deepEqual(
+      [restored.snoozeUntil, restored.judgedTokens, restored.judgedAt],
+      [0, null, null],
+      `${name} legacy`,
+    );
+    assert.equal(restore({ ...legacy, judgedAt: -1 }, 0).snoozeUntil, 3, `${name} invalid`);
+  }
+  check(
+    "claude",
+    claudeState.initialState(false, 0),
+    claudeState.recordJudgment,
+    claudeState.restoreState,
+  );
+  check(
+    "codex",
+    codexState.initialState(false, 0),
+    codexState.recordJudgment,
+    codexState.restoreState,
+  );
+  check("grok", grokState.initialState(false, 0), grokState.recordJudgment, grokState.restoreState);
+  const pi = piState.recordJudgment({ ...piState.initialState(null), completed: 4 }, 150000, false);
+  assert.deepEqual([pi.judgedTokens, pi.judgedAt], [150000, 4]);
 });
 
 test("every package reads the same COMPACT_ADVISER_DISABLE values the same way", () => {

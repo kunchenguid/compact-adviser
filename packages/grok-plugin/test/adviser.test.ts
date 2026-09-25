@@ -123,6 +123,33 @@ test("a judgment below the floor leaves the row without a hint", async (t) => {
   assert.match(row.stdout, /project │ Grok 4\.6/);
 });
 
+test("after a judgment below the floor, re-ask waits for 20k more tokens or 3 exchanges", async (t) => {
+  const { l, fixture } = await judgeTurn(t);
+  // 0.6 x (0.5 + 0.5 x 0.6) = 0.48, under every floor this test reaches.
+  fixture.verdict = { finished: 0.6, handsOn: 0.6 };
+  const turn = async (marker: string, tokens: number) => {
+    writeHistory(l, workedHistory(marker));
+    writeSignals(l, tokens);
+    await runCli(["hook", "stop"], {
+      lab: l,
+      stdin: stopPayload(l, { promptId: `prompt-${marker}` }),
+      env: keyed(fixture),
+    });
+  };
+  await turn("one", 150000);
+  assert.equal(fixture.bodies.length, 1);
+  await turn("two", 169999);
+  await turn("three", 169999);
+  assert.equal(fixture.bodies.length, 1);
+  await turn("four", 170000);
+  assert.equal(fixture.bodies.length, 2);
+  await turn("five", 170000);
+  await turn("six", 170000);
+  assert.equal(fixture.bodies.length, 2);
+  await turn("seven", 170000);
+  assert.equal(fixture.bodies.length, 3);
+});
+
 test("no TypeSafe key means no request at all", async (t) => {
   const { l, fixture } = await judgeTurn(t);
   const stop = await runCli(["hook", "stop"], {

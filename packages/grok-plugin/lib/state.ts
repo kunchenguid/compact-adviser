@@ -18,6 +18,9 @@ export interface SessionState {
   completed: number;
   lastHintAt: number | null;
   lastHintKey: string | null;
+  /** Context tokens and `completed` at the latest judgment that did not act; null when none. */
+  judgedTokens: number | null;
+  judgedAt: number | null;
   /**
    * The turn this session's Stop gate has already handled. A later serial run of the same
    * turn is skipped so it does not ask TypeSafe again.
@@ -41,6 +44,8 @@ export function initialState(compacted: boolean, now: number): SessionState {
     completed: 0,
     lastHintAt: null,
     lastHintKey: null,
+    judgedTokens: null,
+    judgedAt: null,
     lastPromptId: null,
     snoozeUntil: 0,
     retryAfter: 0,
@@ -70,6 +75,11 @@ export function restoreState(value: unknown, now: number): SessionState {
     !(s.lastHintAt === null || count(s.lastHintAt)) ||
     !(s.lastHintKey === null || typeof s.lastHintKey === "string") ||
     !(
+      s.judgedTokens == null ||
+      (typeof s.judgedTokens === "number" && Number.isFinite(s.judgedTokens) && s.judgedTokens >= 0)
+    ) ||
+    !(s.judgedAt == null || count(s.judgedAt)) ||
+    !(
       s.lastPromptId === undefined ||
       s.lastPromptId === null ||
       typeof s.lastPromptId === "string"
@@ -78,7 +88,13 @@ export function restoreState(value: unknown, now: number): SessionState {
   ) {
     return { ...initialState(true, now), snoozeUntil: 3 };
   }
-  return { ...(s as SessionState), lastPromptId: s.lastPromptId ?? null };
+  // Records written before the re-ask gate existed carry neither judged field.
+  return {
+    ...(s as SessionState),
+    lastPromptId: s.lastPromptId ?? null,
+    judgedTokens: s.judgedTokens ?? null,
+    judgedAt: s.judgedAt ?? null,
+  };
 }
 
 export function cooldownReason(
@@ -93,7 +109,28 @@ export function cooldownReason(
     (state.baseline === null || tokens - state.baseline < 20000 || state.completed < 3)
   )
     return "Waiting for 20k new tokens and 3 completed exchanges after compaction";
+  if (
+    state.judgedTokens !== null &&
+    state.judgedAt !== null &&
+    tokens - state.judgedTokens < 20000 &&
+    state.completed - state.judgedAt < 3
+  )
+    return "Waiting for 20k new tokens or 3 completed exchanges since the last judgment";
   return undefined;
+}
+
+/**
+ * A completed judgment clears the backoff. One that did not act (no hint, no compaction)
+ * also starts the re-ask gate at this checkpoint's size and exchange count.
+ */
+export function recordJudgment(state: SessionState, tokens: number, acted: boolean): SessionState {
+  return {
+    ...state,
+    failures: 0,
+    retryAfter: 0,
+    judgedTokens: acted ? null : tokens,
+    judgedAt: acted ? null : state.completed,
+  };
 }
 
 /** Records one completed exchange, taking the post-compaction baseline from fresh usage. */
