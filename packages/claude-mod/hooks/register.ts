@@ -94,6 +94,8 @@ let diagnostic = "";
 let lastCheck: string | undefined;
 // Why request logging stopped in this environment; set once a log exists but cannot be read.
 let logProblem: string | undefined;
+// The request-log part appends go to; a part that would outgrow the host's read limit rolls over.
+let logPart = 1;
 // The settings pane: one list of rows, as the Pi extension's menu, each opening a view
 // of its own; Enter on an option or a saved value returns to the list. A save hot-reloads
 // the module, so this scratch resets to the list on its own.
@@ -185,31 +187,41 @@ function judgeFailureMessage(error: unknown): string {
  * This session's request log, or undefined without HOME: request bodies carry transcript
  * text, so they are never written into the working directory instead.
  */
-async function sessionLogPath($: EngineInterface): Promise<string | undefined> {
+async function sessionLogPath($: EngineInterface, part = logPart): Promise<string | undefined> {
   const home = await $.env.get("HOME");
   if (home === undefined || home.trim() === "") return undefined;
-  return requestLogPath(home, await $.session.id());
+  const path = requestLogPath(home, await $.session.id());
+  return part === 1 ? path : path.replace(/\.jsonl$/, `.${part}.jsonl`);
 }
 
+/** `$.fs.read` refuses files over 4 MiB; a log part stops growing before it gets there. */
+const LOG_PART_BYTES = 4 * 1024 * 1024;
+/** Parts per session before logging pauses: 400 MiB of request bodies. */
+const MAX_LOG_PARTS = 100;
+
 /**
- * `$.fs.write` replaces the whole file, so an append is read-then-write. A log that exists
- * but cannot be read (the host refuses reads over 4 MiB) is left untouched and logging
- * pauses, rather than the rewrite replacing it with one line.
+ * `$.fs.write` replaces the whole file, so an append is read-then-write. A part that the line
+ * would push past the host's read limit is left as it is and the line starts the next part.
+ * A part that exists but cannot be read anyway is never rewritten: logging pauses instead.
  */
 async function appendTypeSafeLog($: EngineInterface, line: string): Promise<void> {
   if (logProblem !== undefined) return;
-  const path = await sessionLogPath($);
-  if (path === undefined) return;
-  let existing = "";
-  if (await $.fs.exists(path)) {
+  const lineBytes = new TextEncoder().encode(line).byteLength;
+  for (; logPart <= MAX_LOG_PARTS; logPart++) {
+    const path = await sessionLogPath($);
+    if (path === undefined) return;
+    if (!(await $.fs.exists(path))) return $.fs.write(path, line);
+    if ((await $.fs.stat(path)).size + lineBytes > LOG_PART_BYTES) continue;
+    let existing: string;
     try {
       existing = await $.fs.read(path);
     } catch {
       logProblem = "paused; the existing log could not be read, so it was left untouched";
       return;
     }
+    return $.fs.write(path, `${existing}${line}`);
   }
-  await $.fs.write(path, `${existing}${line}`);
+  logProblem = `paused after ${MAX_LOG_PARTS} log parts`;
 }
 
 async function requestLogStatus($: EngineInterface, config: Config): Promise<string> {
@@ -278,6 +290,14 @@ async function ineligibility(
   return undefined;
 }
 
+/**
+ * Records what a turn end came to, but only while that turn is still the latest: a judgment
+ * that returns after a newer turn has settled must not replace that turn's own reason.
+ */
+function note(epoch: number, text: string): void {
+  if (epoch === generation) lastCheck = text;
+}
+
 /** The scheduled half of a turn end: judge, then hint or (opt-in) compact. */
 async function judgeCheckpoint($: EngineInterface, epoch: number): Promise<void> {
   if (epoch !== generation || judging || compacting) return;
@@ -292,12 +312,12 @@ async function judgeCheckpoint($: EngineInterface, epoch: number): Promise<void>
     ]);
     const view = snapshot(messages, [activeKey, readSavedApiKey(rows, loadedOptions)]);
     if (view.conversationTokens <= 20000) {
-      lastCheck = "not checked, too little conversation history";
+      note(epoch, "not checked, too little conversation history");
       return;
     }
     const fingerprint = await checkpointKey(view.checkpointText);
     if ((await loadState($)).state.lastHintKey === fingerprint) {
-      lastCheck = "not checked, already advised at this checkpoint";
+      note(epoch, "not checked, already advised at this checkpoint");
       return;
     }
     let loggedBody: string | undefined;
@@ -323,11 +343,8 @@ async function judgeCheckpoint($: EngineInterface, epoch: number): Promise<void>
         profile,
       );
     } catch (error) {
-      if (epoch !== generation) {
-        lastCheck = "judgment discarded, a new turn started";
-        return;
-      }
-      lastCheck = "the judgment failed; context left unchanged";
+      if (epoch !== generation) return;
+      note(epoch, "the judgment failed; context left unchanged");
       if (initial.logRequests) {
         try {
           await appendTypeSafeLog($, errorLogLine(loggedJudgeErrorKind(error), loggedBody));
@@ -340,10 +357,7 @@ async function judgeCheckpoint($: EngineInterface, epoch: number): Promise<void>
       notice($, judgeFailureMessage(error));
       return;
     }
-    if (epoch !== generation) {
-      lastCheck = "judgment discarded, a new turn started";
-      return;
-    }
+    if (epoch !== generation) return;
     const latest = await loadConfig($);
     const { key, state: current } = await loadState($);
     const now = await $.clock.now();
@@ -371,18 +385,18 @@ async function judgeCheckpoint($: EngineInterface, epoch: number): Promise<void>
       (await ineligibility($, latest, current, context.tokens, now)) !== undefined ||
       epoch !== generation
     ) {
-      lastCheck = "judgment discarded, settings or session changed meanwhile";
+      note(epoch, "judgment discarded, settings or session changed meanwhile");
       return;
     }
     let state: SessionState = { ...current, failures: 0, retryAfter: 0, updatedAt: now };
     const auto = latest.mode === "auto";
     if (!qualifies(result, usageFraction(context), profile)) {
-      lastCheck = "judged, not a checkpoint yet";
+      note(epoch, "judged, not a checkpoint yet");
       await $.store.set(key, state);
       return;
     }
     if (auto && !latest.autoAcknowledged) {
-      lastCheck = "judged a checkpoint; automatic mode is not confirmed (/compact-adviser auto)";
+      note(epoch, "judged a checkpoint; automatic mode is not confirmed (/compact-adviser auto)");
       await $.store.set(key, state);
       return;
     }
@@ -391,7 +405,7 @@ async function judgeCheckpoint($: EngineInterface, epoch: number): Promise<void>
       state = { ...state, lastHintAt: state.completed, lastHintKey: fingerprint };
       await $.store.set(key, state);
       if (epoch !== generation) return;
-      lastCheck = "judged a checkpoint; hint shown";
+      note(epoch, "judged a checkpoint; hint shown");
       hintVisible = true;
       // Claude Code prefixes $.ui.status with the plugin name; do not repeat it.
       $.ui.status(HINT);
@@ -418,12 +432,11 @@ async function judgeCheckpoint($: EngineInterface, epoch: number): Promise<void>
     const after = await $.clock.now();
     if (failure !== undefined && epoch !== generation) {
       // The host refuses a compaction once a turn runs: stale work, not a failure to report.
-      lastCheck = "judged a checkpoint; compaction dropped, a new turn started";
       clearStatus($);
       return;
     }
     if (failure !== undefined) {
-      lastCheck = "judged a checkpoint; compaction failed";
+      note(epoch, "judged a checkpoint; compaction failed");
       const { state: latestState } = await loadState($);
       await $.store.set(key, { ...latestState, retryAfter: after + 60000, updatedAt: after });
       notice(
@@ -433,8 +446,8 @@ async function judgeCheckpoint($: EngineInterface, epoch: number): Promise<void>
       clearStatus($);
       return;
     }
+    note(epoch, "judged a checkpoint; compacted");
     generation++;
-    lastCheck = "judged a checkpoint; compacted";
     await $.store.set(key, initialState(true, after));
     const completed =
       tokens.before !== undefined && tokens.after !== undefined
@@ -465,9 +478,9 @@ async function settle($: EngineInterface): Promise<void> {
     notice($, error instanceof Error ? error.message : "Cannot read compact-adviser settings.");
     return;
   }
-  const skip = judging
-    ? "a judgment is already running"
-    : await ineligibility($, config, state, context.tokens, now);
+  const skip =
+    (await ineligibility($, config, state, context.tokens, now)) ??
+    (judging ? "a judgment is already running" : undefined);
   if (skip !== undefined) {
     lastCheck = `not checked, ${skip}`;
     return;
@@ -762,6 +775,7 @@ export const register: Register = (on, options) => {
     hintVisible = false;
     lastCheck = undefined;
     logProblem = undefined;
+    logPart = 1;
     await $.command.register({
       name: COMMAND,
       description: "Configure persistent compaction advice, experimental auto, and token minimum",

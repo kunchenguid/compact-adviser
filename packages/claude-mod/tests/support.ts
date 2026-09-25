@@ -81,6 +81,8 @@ export type World = {
   /** Request logs on disk by path; a path in `unreadableLogs` exists but its read rejects, as over 4 MiB. */
   logFiles: Map<string, string>;
   unreadableLogs: Set<string>;
+  /** A size `$.fs.stat` reports for a log in place of its text's, to stand in for a large file. */
+  logSizes: Map<string, number>;
 };
 
 export type WorldOptions = {
@@ -205,6 +207,7 @@ export function world(on: On, options: WorldOptions = {}): World {
     },
     logFiles: jsonlFiles,
     unreadableLogs: new Set(),
+    logSizes: new Map(),
   };
 
   on("session.start", async (_$, e) => ({ cwd: e.cwd }));
@@ -330,6 +333,16 @@ export function world(on: On, options: WorldOptions = {}): World {
   on("fs.exists", async (_$, e, next) => {
     if (/compact-adviser-requests[^/]*\.jsonl$/.test(String(e.path))) {
       return { value: jsonlFiles.has(String(e.path)) };
+    }
+    return next(e);
+  });
+  on("fs.stat", async (_$, e, next) => {
+    const path = String(e.path);
+    if (/compact-adviser-requests[^/]*\.jsonl$/.test(path)) {
+      const text = jsonlFiles.get(path);
+      if (text === undefined) throw new Error("ENOENT");
+      const size = w.logSizes.get(path) ?? new TextEncoder().encode(text).byteLength;
+      return { value: { kind: "file" as const, size, mtimeMs: 0, isLink: false } };
     }
     return next(e);
   });

@@ -179,6 +179,30 @@ describe("turn-end gates", () => {
     );
   });
 
+  test("a request log near the host's 4 MiB read limit rolls over to a numbered part", async ($, on) => {
+    const w = world(on, { logRequests: true });
+    w.logFiles.set(
+      "/tmp/fixture-home/.claude/compact-adviser-requests-session-1.jsonl",
+      "earlier line\n",
+    );
+    w.logSizes.set(
+      "/tmp/fixture-home/.claude/compact-adviser-requests-session-1.jsonl",
+      4 * 1024 * 1024 - 100,
+    );
+    await $.session.start(interactiveStart);
+    await turnEnd($, w);
+    expect(
+      w.logFiles.get("/tmp/fixture-home/.claude/compact-adviser-requests-session-1.jsonl"),
+    ).toBe("earlier line\n");
+    const part =
+      w.logFiles.get("/tmp/fixture-home/.claude/compact-adviser-requests-session-1.2.jsonl") ?? "";
+    expect(part.trim().split("\n")).toHaveLength(2);
+    await $.command.run(commandRun("status"));
+    expect(w.journal.logs.at(-1)).toContain(
+      "Request log: /tmp/fixture-home/.claude/compact-adviser-requests-session-1.2.jsonl.",
+    );
+  });
+
   test("without HOME the request log is not written anywhere", async ($, on) => {
     const w = world(on, { logRequests: true, home: undefined });
     await $.session.start(interactiveStart);
@@ -953,6 +977,25 @@ describe("commands", () => {
     await turnEnd($, w);
     await $.command.run(commandRun("status"));
     expect(last()).toBe("Last turn end: not checked, cooldown: TypeSafe backoff.");
+  });
+
+  test("a late judgment from an earlier turn never overwrites the latest turn's reason", async ($, on) => {
+    const w = world(on);
+    w.respond = async () => {
+      // Turn 2 starts and settles below the minimum while turn 1's judgment is in flight.
+      await $.turn.start({ turnId: "two", origin: { kind: "composer" } } as never);
+      w.usage.tokens = 10000;
+      await $.turn.complete(answered());
+      return { status: 200, text: JSON.stringify(jevAnswer()) };
+    };
+    await $.session.start(interactiveStart);
+    await turnEnd($, w);
+    expect(w.journal.requests).toHaveLength(1);
+    expect(hinted(w)).toBe(false);
+    await $.command.run(commandRun("status"));
+    expect(w.journal.logs.at(-1)).toContain(
+      "Last turn end: not checked, context below the minimum.",
+    );
   });
 
   test("snooze suppresses advice for three exchanges; dismiss clears the hint", async ($, on) => {
