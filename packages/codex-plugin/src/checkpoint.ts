@@ -85,9 +85,10 @@ export function resolve(verdict: {
 }
 
 /**
- * The gates after a verdict. Any answer clears the backoff. One that did not act starts the
- * re-ask gate at this checkpoint; one that acted clears it, and a hint also marks the
- * checkpoint so it is not advised twice. A discard neither starts nor clears the gate.
+ * The gates after a verdict. Every answer recorded here clears the backoff. One that did not
+ * act starts the re-ask gate at this checkpoint; one that acted clears it, and a hint also
+ * marks the checkpoint so it is not advised twice. A discard neither starts nor clears the
+ * gate; a host whose session may have moved on since the request skips recording it.
  */
 export function judged<G extends Gates>(
   gates: G,

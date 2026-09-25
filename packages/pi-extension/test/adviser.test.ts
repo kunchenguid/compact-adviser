@@ -293,11 +293,17 @@ test("auto compacts at a qualifying checkpoint, errors back off", async (t) => {
   await h.fire("agent_settled");
   assert.equal(h.compactions.length, 1);
   h.compactions[0].onError?.(new Error("fixture cancel"));
+  // A compaction that did not happen did not act, so the re-ask gate holds this checkpoint.
+  assert.notEqual(restoreState(h.sm.getBranch()).judgedTokens, null);
   h.next();
   await h.fire("agent_settled");
   assert.equal(h.calls, 1);
   h.clock = 200000;
   h.next("Later checkpoint");
+  await h.fire("agent_settled");
+  assert.equal(h.calls, 1, "the backoff has passed, but the re-ask gate still holds");
+  h.tokens = 65000;
+  h.next("Checkpoint after more work");
   await h.fire("agent_settled");
   assert.equal(h.calls, 2);
 });

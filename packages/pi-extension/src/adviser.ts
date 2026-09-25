@@ -257,7 +257,11 @@ export function installAdviser(pi: ExtensionAPI, options: Options): void {
             compacting = false;
             automaticCompaction = false;
             const latestState = restoreState(ctx.sessionManager.getBranch());
-            persist({ ...latestState, retryAfter: now() + 60000 });
+            // A compaction that did not happen did not act: the re-ask gate holds this checkpoint.
+            persist({
+              ...judged(latestState, "wait", judgedTokens, view.checkpointKey),
+              retryAfter: now() + 60000,
+            });
             notice(
               ctx,
               "Compaction failed or was cancelled. No immediate retry; Pi remains in control.",
