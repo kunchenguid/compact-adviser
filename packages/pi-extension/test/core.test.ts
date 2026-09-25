@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { readFileSync, statSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
@@ -33,6 +34,23 @@ import {
   responseLogLine,
 } from "../src/log.ts";
 import { apiResponse, assistant, harness, temp, toolResult } from "./helpers.ts";
+
+test("endpoint defaults to TypeSafe and honours a base URL override", () => {
+  const env = { ...process.env };
+  delete env.TYPESAFE_BASE;
+  const script = `import { ENDPOINT } from ${JSON.stringify(new URL("../src/judge.ts", import.meta.url).href)}; console.log(ENDPOINT);`;
+  for (const base of [undefined, "https://proxy.example.test/vendors/typesafe"]) {
+    const output = execFileSync(
+      process.execPath,
+      ["--import", "tsx", "--input-type=module", "-e", script],
+      {
+        env: base === undefined ? env : { ...env, TYPESAFE_BASE: base },
+        encoding: "utf8",
+      },
+    );
+    assert.equal(output.trim(), `${base ?? "https://api.typesafe.ai"}/v1/systemone`);
+  }
+});
 
 test("config defaults, atomic persistence, field merging, contention and invalid files", (t) => {
   const dir = temp(t),
