@@ -4,6 +4,7 @@ import type {
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
+import { judged, resolve } from "./checkpoint.ts";
 import {
   type Config,
   ConfigStore,
@@ -31,7 +32,6 @@ import {
   cooldownReason,
   initialState,
   lastResponse,
-  recordJudgment,
   restoreState,
   type SessionState,
   STATE_TYPE,
@@ -225,18 +225,17 @@ export function installAdviser(pi: ExtensionAPI, options: Options): void {
       const latest = store.read();
       const judgedTokens = eligible(ctx, latest, state);
       if (JSON.stringify(latest) !== configIdentity || judgedTokens === undefined) return;
-      const auto = latest.mode === "auto";
-      const qualified = qualifies(result, usageFraction(ctx), profile);
-      const acted = qualified && (!auto || latest.autoAcknowledged);
-      state = recordJudgment(state, judgedTokens, acted);
-      if (!acted) {
-        persist(state);
-        return;
-      }
+      const resolution = resolve({
+        fresh: true,
+        qualifies: qualifies(result, usageFraction(ctx), profile),
+        mode: latest.mode,
+        autoAcknowledged: latest.autoAcknowledged,
+      });
+      state = judged(state, resolution, judgedTokens, view.checkpointKey);
+      persist(state);
+      if (resolution !== "hint" && resolution !== "compact") return;
       diagnostic = "";
-      if (!auto) {
-        state = { ...state, lastHintAt: state.completed, lastHintKey: view.checkpointKey };
-        persist(state);
+      if (resolution === "hint") {
         ctx.ui.setWidget(LABEL, (_tui, theme) => new Text(theme.fg("warning", HINT), 0, 0));
         hintVisible = true;
       } else {

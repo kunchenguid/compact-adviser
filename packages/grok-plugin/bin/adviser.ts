@@ -34,6 +34,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
+import { judged, resolve } from "../lib/checkpoint.ts";
 import {
   DEFAULT_MINIMUM,
   formatTokens,
@@ -74,13 +75,7 @@ import {
 } from "../lib/paths.ts";
 import { parseProfile } from "../lib/profile.ts";
 import { snapshot } from "../lib/snapshot.ts";
-import {
-  backoff,
-  completeExchange,
-  cooldownReason,
-  recordJudgment,
-  SESSION_RETENTION_MS,
-} from "../lib/state.ts";
+import { backoff, completeExchange, cooldownReason, SESSION_RETENTION_MS } from "../lib/state.ts";
 import { parsePayload, statusLine } from "../lib/statusline.ts";
 import {
   clearDiagnostic,
@@ -400,22 +395,18 @@ async function runStop(payload: HookPayload): Promise<void> {
   try {
     profileChanged = settingsOrThrow().profile !== settings.profile;
   } catch {}
-  // A judgment discarded because the profile changed meanwhile clears the backoff but does
-  // not start the re-ask gate: only a verdict that applied and did not qualify does.
-  if (profileChanged) {
-    saveSessionState(statePath, { ...state, failures: 0, retryAfter: 0, updatedAt: now });
-    clearVerdict(verdict);
-    return;
-  }
-  const acted = qualifies(judgment, fraction, profile);
-  state = { ...recordJudgment(state, tokens, acted), updatedAt: now };
-  if (!acted) {
-    saveSessionState(statePath, state);
-    clearVerdict(verdict);
-    return;
-  }
-  state = { ...state, lastHintAt: state.completed, lastHintKey: fingerprint };
+  const resolution = resolve({
+    fresh: !profileChanged,
+    qualifies: qualifies(judgment, fraction, profile),
+    mode: settings.mode,
+    autoAcknowledged: false,
+  });
+  state = { ...judged(state, resolution, tokens, fingerprint), updatedAt: now };
   saveSessionState(statePath, state);
+  if (resolution !== "hint") {
+    clearVerdict(verdict);
+    return;
+  }
   saveVerdict(verdict, {
     version: 1,
     sessionId,

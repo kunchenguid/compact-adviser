@@ -1,4 +1,5 @@
 import type { SessionEntry } from "@earendil-works/pi-coding-agent";
+import { COOLDOWN_TEXT, cooldown } from "./checkpoint.ts";
 export const STATE_TYPE = "compact-adviser:state";
 export interface SessionState {
   version: 1;
@@ -68,38 +69,12 @@ export function lastResponse(branch: readonly SessionEntry[]) {
   }
   return undefined;
 }
+/** The shared cooldown gates, read against this host's record of the latest compaction. */
 export function cooldownReason(
   state: SessionState,
   tokens: number,
   now: number,
 ): string | undefined {
-  if (now < state.retryAfter) return "TypeSafe backoff";
-  if (state.completed < state.snoozeUntil) return "Snoozed";
-  if (
-    state.compactionId &&
-    (state.baseline === null || tokens - state.baseline < 20000 || state.completed < 3)
-  )
-    return "Waiting for 20k new tokens and 3 completed exchanges after compaction";
-  if (
-    state.judgedTokens !== null &&
-    state.judgedAt !== null &&
-    tokens - state.judgedTokens < 20000 &&
-    state.completed - state.judgedAt < 3
-  )
-    return "Waiting for 20k new tokens or 3 completed exchanges since the last judgment";
-  return undefined;
-}
-
-/**
- * A completed judgment clears the backoff. One that did not act (no hint, no compaction)
- * also starts the re-ask gate at this checkpoint's size and exchange count.
- */
-export function recordJudgment(state: SessionState, tokens: number, acted: boolean): SessionState {
-  return {
-    ...state,
-    failures: 0,
-    retryAfter: 0,
-    judgedTokens: acted ? null : tokens,
-    judgedAt: acted ? null : state.completed,
-  };
+  const reason = cooldown(state, state.compactionId !== null, tokens, now);
+  return reason === undefined ? undefined : COOLDOWN_TEXT[reason];
 }

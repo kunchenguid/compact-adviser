@@ -7,6 +7,7 @@
  * decides, not how any of the files is written.
  */
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import * as claudeDisable from "../../claude-mod/lib/disable.ts";
 import * as claude from "../../claude-mod/lib/judge.ts";
@@ -24,6 +25,7 @@ import * as grok from "../../grok-plugin/lib/judge.ts";
 import * as grokLog from "../../grok-plugin/lib/log.ts";
 import * as grokSnapshot from "../../grok-plugin/lib/snapshot.ts";
 import * as grokState from "../../grok-plugin/lib/state.ts";
+import * as checkpoint from "../src/checkpoint.ts";
 import * as piContext from "../src/context.ts";
 import * as piDisable from "../src/disable.ts";
 import * as pi from "../src/judge.ts";
@@ -475,7 +477,120 @@ test("every package applies the same cooldownReason gates", () => {
   }
 });
 
-test("every package records a judgment and restores pre-gate records the same way", () => {
+test("every package ships the same checkpoint policy file", () => {
+  const read = (path: string) => readFileSync(new URL(path, import.meta.url), "utf8");
+  const pi = read("../src/checkpoint.ts");
+  for (const path of [
+    "../../claude-mod/lib/checkpoint.ts",
+    "../../codex-plugin/src/checkpoint.ts",
+    "../../grok-plugin/lib/checkpoint.ts",
+  ])
+    assert.equal(read(path), pi, path);
+});
+
+test("a verdict resolves and updates the gates the same way for every mode", () => {
+  const cases: Array<{
+    fresh: boolean;
+    qualifies: boolean;
+    mode: "hint" | "auto" | "off";
+    autoAcknowledged: boolean;
+    resolution: checkpoint.Resolution;
+    judged: [number | null, number | null];
+    hint: [number | null, string | null];
+  }> = [
+    {
+      fresh: false,
+      qualifies: true,
+      mode: "hint",
+      autoAcknowledged: false,
+      resolution: "discard",
+      judged: [90000, 1],
+      hint: [null, null],
+    },
+    {
+      fresh: true,
+      qualifies: true,
+      mode: "off",
+      autoAcknowledged: true,
+      resolution: "discard",
+      judged: [90000, 1],
+      hint: [null, null],
+    },
+    {
+      fresh: true,
+      qualifies: false,
+      mode: "hint",
+      autoAcknowledged: false,
+      resolution: "wait",
+      judged: [150000, 4],
+      hint: [null, null],
+    },
+    {
+      fresh: true,
+      qualifies: false,
+      mode: "auto",
+      autoAcknowledged: true,
+      resolution: "wait",
+      judged: [150000, 4],
+      hint: [null, null],
+    },
+    {
+      fresh: true,
+      qualifies: true,
+      mode: "auto",
+      autoAcknowledged: false,
+      resolution: "unconfirmed",
+      judged: [150000, 4],
+      hint: [null, null],
+    },
+    {
+      fresh: true,
+      qualifies: true,
+      mode: "hint",
+      autoAcknowledged: false,
+      resolution: "hint",
+      judged: [null, null],
+      hint: [4, "fp"],
+    },
+    {
+      fresh: true,
+      qualifies: true,
+      mode: "auto",
+      autoAcknowledged: true,
+      resolution: "compact",
+      judged: [null, null],
+      hint: [null, null],
+    },
+  ];
+  const before = {
+    ...piState.initialState(null),
+    completed: 4,
+    failures: 2,
+    retryAfter: 9,
+    judgedTokens: 90000,
+    judgedAt: 1,
+  };
+  for (const c of cases) {
+    const name = `${c.mode} fresh=${c.fresh} qualifies=${c.qualifies} ack=${c.autoAcknowledged}`;
+    const resolution = checkpoint.resolve(c);
+    assert.equal(resolution, c.resolution, name);
+    const after = checkpoint.judged(before, resolution, 150000, "fp");
+    assert.deepEqual(
+      [
+        after.failures,
+        after.retryAfter,
+        after.judgedTokens,
+        after.judgedAt,
+        after.lastHintAt,
+        after.lastHintKey,
+      ],
+      [0, 0, ...c.judged, ...c.hint],
+      name,
+    );
+  }
+});
+
+test("every package restores pre-gate records the same way", () => {
   const legacy = {
     version: 1,
     compacted: false,
@@ -488,51 +603,23 @@ test("every package records a judgment and restores pre-gate records the same wa
     failures: 0,
     updatedAt: 0,
   };
-  type Gated = {
-    completed: number;
-    failures: number;
-    retryAfter: number;
-    snoozeUntil: number;
-    judgedTokens: number | null;
-    judgedAt: number | null;
-  };
-  function check<S extends Gated>(
-    name: string,
-    initial: S,
-    record: (state: S, tokens: number, acted: boolean) => S,
-    restore: (value: unknown, now: number) => S,
-  ) {
-    const quiet = record({ ...initial, completed: 4, failures: 2, retryAfter: 9 }, 150000, false);
-    assert.deepEqual(
-      [quiet.failures, quiet.retryAfter, quiet.judgedTokens, quiet.judgedAt],
-      [0, 0, 150000, 4],
-      `${name} quiet`,
-    );
-    const acted = record(quiet, 160000, true);
-    assert.deepEqual([acted.judgedTokens, acted.judgedAt], [null, null], `${name} acted`);
-    const restored = restore(legacy, 0);
+  for (const [name, other] of [
+    ["claude", claudeState],
+    ["codex", codexState],
+    ["grok", grokState],
+  ] as const) {
+    const restored = other.restoreState(legacy, 0);
     assert.deepEqual(
       [restored.snoozeUntil, restored.judgedTokens, restored.judgedAt],
       [0, null, null],
       `${name} legacy`,
     );
-    assert.equal(restore({ ...legacy, judgedAt: -1 }, 0).snoozeUntil, 3, `${name} invalid`);
+    assert.equal(
+      other.restoreState({ ...legacy, judgedAt: -1 }, 0).snoozeUntil,
+      3,
+      `${name} invalid`,
+    );
   }
-  check(
-    "claude",
-    claudeState.initialState(false, 0),
-    claudeState.recordJudgment,
-    claudeState.restoreState,
-  );
-  check(
-    "codex",
-    codexState.initialState(false, 0),
-    codexState.recordJudgment,
-    codexState.restoreState,
-  );
-  check("grok", grokState.initialState(false, 0), grokState.recordJudgment, grokState.restoreState);
-  const pi = piState.recordJudgment({ ...piState.initialState(null), completed: 4 }, 150000, false);
-  assert.deepEqual([pi.judgedTokens, pi.judgedAt], [150000, 4]);
 });
 
 test("every package reads the same COMPACT_ADVISER_DISABLE values the same way", () => {

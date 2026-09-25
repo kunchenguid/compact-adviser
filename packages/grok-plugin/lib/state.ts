@@ -5,6 +5,8 @@
 // `cooldownReason` must gate identically on every host; packages/pi-extension/test/lockstep.test.ts
 // asserts that.
 
+import { COOLDOWN_TEXT, cooldown } from "./checkpoint.ts";
+
 export const SESSION_PREFIX = "session:";
 export const SESSION_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 
@@ -97,40 +99,14 @@ export function restoreState(value: unknown, now: number): SessionState {
   };
 }
 
+/** The shared cooldown gates, read against this host's record of the latest compaction. */
 export function cooldownReason(
   state: SessionState,
   tokens: number,
   now: number,
 ): string | undefined {
-  if (now < state.retryAfter) return "TypeSafe backoff";
-  if (state.completed < state.snoozeUntil) return "Snoozed";
-  if (
-    state.compacted &&
-    (state.baseline === null || tokens - state.baseline < 20000 || state.completed < 3)
-  )
-    return "Waiting for 20k new tokens and 3 completed exchanges after compaction";
-  if (
-    state.judgedTokens !== null &&
-    state.judgedAt !== null &&
-    tokens - state.judgedTokens < 20000 &&
-    state.completed - state.judgedAt < 3
-  )
-    return "Waiting for 20k new tokens or 3 completed exchanges since the last judgment";
-  return undefined;
-}
-
-/**
- * A completed judgment clears the backoff. One that did not act (no hint, no compaction)
- * also starts the re-ask gate at this checkpoint's size and exchange count.
- */
-export function recordJudgment(state: SessionState, tokens: number, acted: boolean): SessionState {
-  return {
-    ...state,
-    failures: 0,
-    retryAfter: 0,
-    judgedTokens: acted ? null : tokens,
-    judgedAt: acted ? null : state.completed,
-  };
+  const reason = cooldown(state, state.compacted, tokens, now);
+  return reason === undefined ? undefined : COOLDOWN_TEXT[reason];
 }
 
 /** Records one completed exchange, taking the post-compaction baseline from fresh usage. */

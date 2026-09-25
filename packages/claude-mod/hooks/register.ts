@@ -17,6 +17,7 @@
 //   `session.compact` hook never sees its own automatic compaction; that path resets the
 //   session's counters itself.
 import type { EngineInterface, PluginOptions, Register, RenderChildren } from "claude-code";
+import { judged, resolve } from "../lib/checkpoint.ts";
 import {
   API_KEY_KEY,
   CONSENT_STORE_KEY,
@@ -64,7 +65,6 @@ import {
   completeExchange,
   cooldownReason,
   initialState,
-  recordJudgment,
   restoreState,
   type SessionState,
   sessionKey,
@@ -391,24 +391,27 @@ async function judgeCheckpoint($: EngineInterface, epoch: number): Promise<void>
       note(epoch, "judgment discarded, settings or session changed meanwhile");
       return;
     }
-    const auto = latest.mode === "auto";
-    const qualified = qualifies(result, usageFraction(context), profile);
-    const acted = qualified && (!auto || latest.autoAcknowledged);
-    let state: SessionState = { ...recordJudgment(current, judgedTokens, acted), updatedAt: now };
-    if (!qualified) {
+    const resolution = resolve({
+      fresh: true,
+      qualifies: qualifies(result, usageFraction(context), profile),
+      mode: latest.mode,
+      autoAcknowledged: latest.autoAcknowledged,
+    });
+    const state: SessionState = {
+      ...judged(current, resolution, judgedTokens, fingerprint),
+      updatedAt: now,
+    };
+    await $.store.set(key, state);
+    if (resolution === "wait") {
       note(epoch, "judged, not a checkpoint yet");
-      await $.store.set(key, state);
       return;
     }
-    if (!acted) {
+    if (resolution === "unconfirmed") {
       note(epoch, "judged a checkpoint; automatic mode is not confirmed (/compact-adviser auto)");
-      await $.store.set(key, state);
       return;
     }
     diagnostic = "";
-    if (!auto) {
-      state = { ...state, lastHintAt: state.completed, lastHintKey: fingerprint };
-      await $.store.set(key, state);
+    if (resolution === "hint") {
       if (epoch !== generation) return;
       note(epoch, "judged a checkpoint; hint shown");
       hintVisible = true;
@@ -416,7 +419,6 @@ async function judgeCheckpoint($: EngineInterface, epoch: number): Promise<void>
       $.ui.status(HINT);
       return;
     }
-    await $.store.set(key, state);
     // No await between this last identity check and the compaction request.
     if (epoch !== generation || compacting) return;
     compacting = true;

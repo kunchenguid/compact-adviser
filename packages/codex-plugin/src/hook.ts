@@ -14,6 +14,7 @@
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { judged, resolve } from "./checkpoint.ts";
 import { ConfigStore } from "./config.ts";
 import { DISABLE_ENV, disabledByEnv } from "./disable.ts";
 import { parseDotenvKey, type ResolvedTypesafeApiKey, resolveTypesafeApiKey } from "./env.ts";
@@ -29,13 +30,7 @@ import { adviserRoot } from "./paths.ts";
 import { parseProfile } from "./profile.ts";
 import { type Rollout, readRollout, usageFraction } from "./rollout.ts";
 import { snapshot } from "./snapshot.ts";
-import {
-  backoff,
-  completeExchange,
-  cooldownReason,
-  initialState,
-  recordJudgment,
-} from "./state.ts";
+import { backoff, completeExchange, cooldownReason, initialState } from "./state.ts";
 import { SessionStore } from "./store.ts";
 
 export const HINT =
@@ -245,33 +240,21 @@ async function onStop(payload: HookPayload, environment: Environment): Promise<H
   const nowAfter = environment.now();
   const latestConfig = new ConfigStore(root).read();
   const current = sessions.read(sessionId, nowAfter).state;
-  // A judgment discarded because settings or cooldowns changed meanwhile clears the backoff
-  // but does not start the re-ask gate: only a verdict that applied and did not qualify does.
-  if (
-    latestConfig.mode === "off" ||
-    tokens < latestConfig.minContextTokens ||
-    cooldownReason(current, tokens, nowAfter) !== undefined ||
-    latestConfig.profile !== config.profile
-  ) {
-    sessions.write(
-      sessionId,
-      { ...current, failures: 0, retryAfter: 0, updatedAt: nowAfter },
-      usage,
-    );
-    return {};
-  }
-  const acted = qualifies(result, fraction, profile);
-  const settled = { ...recordJudgment(current, tokens, acted), updatedAt: nowAfter };
-  if (!acted) {
-    sessions.write(sessionId, settled, usage);
-    return {};
-  }
+  const resolution = resolve({
+    fresh:
+      tokens >= latestConfig.minContextTokens &&
+      cooldownReason(current, tokens, nowAfter) === undefined &&
+      latestConfig.profile === config.profile,
+    qualifies: qualifies(result, fraction, profile),
+    mode: latestConfig.mode,
+    autoAcknowledged: false,
+  });
   sessions.write(
     sessionId,
-    { ...settled, lastHintAt: settled.completed, lastHintKey: fingerprint },
+    { ...judged(current, resolution, tokens, fingerprint), updatedAt: nowAfter },
     usage,
   );
-  return { systemMessage: HINT };
+  return resolution === "hint" ? { systemMessage: HINT } : {};
 }
 
 /** Compaction resets a session's counters: the wait gate is measured from the new baseline. */
