@@ -350,6 +350,39 @@ test("after a compaction with no readable signals, the local estimate sets the b
   }
 });
 
+test("without readable signals, the first stop after a compaction sets the baseline even with little history", async (t) => {
+  const l = lab(t);
+  const fixture = await typesafeFixture(t);
+  await runCli(["threshold", "25000"], { lab: l });
+  await runCli(["hook", "compact"], {
+    lab: l,
+    stdin: JSON.stringify({ hook_event_name: "PostCompact", sessionId: l.sessionId }),
+  });
+  const short = workedHistory("one").map((record) =>
+    record.type === "assistant" ? { ...record, content: "Working on it." } : record,
+  );
+  for (const [marker, history] of [
+    ["one", short],
+    ["two", short],
+    ["three", workedHistory("one")],
+  ] as const) {
+    writeHistory(l, history);
+    await runCli(["hook", "stop"], {
+      lab: l,
+      stdin: stopPayload(l, { promptId: `prompt-${marker}` }),
+      env: keyed(fixture),
+    });
+    if (marker === "one") {
+      const state = JSON.parse(
+        readFileSync(join(l.dataDir, "sessions", `${l.sessionId}.json`), "utf8"),
+      ) as { baseline: number | null };
+      assert.ok(state.baseline !== null && state.baseline < 20000, `baseline ${state.baseline}`);
+    }
+  }
+  // 20k past the short first stop and three exchanges: judged, not held until 20k past the third.
+  assert.equal(fixture.bodies.length, 1);
+});
+
 test("the next prompt retires the hint", async (t) => {
   const { l, fixture } = await judgeTurn(t);
   await runCli(["hook", "stop"], { lab: l, stdin: stopPayload(l), env: keyed(fixture) });

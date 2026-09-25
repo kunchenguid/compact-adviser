@@ -9,17 +9,20 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
+import * as claudeCheckpoint from "../../claude-mod/lib/checkpoint.ts";
 import * as claudeDisable from "../../claude-mod/lib/disable.ts";
 import * as claude from "../../claude-mod/lib/judge.ts";
 import * as claudeLog from "../../claude-mod/lib/log.ts";
 import * as claudeSnapshot from "../../claude-mod/lib/snapshot.ts";
 import * as claudeState from "../../claude-mod/lib/state.ts";
+import * as codexCheckpoint from "../../codex-plugin/src/checkpoint.ts";
 import * as codexDisable from "../../codex-plugin/src/disable.ts";
 import * as codex from "../../codex-plugin/src/judge.ts";
 import * as codexLog from "../../codex-plugin/src/log.ts";
 import * as codexRollout from "../../codex-plugin/src/rollout.ts";
 import * as codexSnapshot from "../../codex-plugin/src/snapshot.ts";
 import * as codexState from "../../codex-plugin/src/state.ts";
+import * as grokCheckpoint from "../../grok-plugin/lib/checkpoint.ts";
 import * as grokDisable from "../../grok-plugin/lib/disable.ts";
 import * as grok from "../../grok-plugin/lib/judge.ts";
 import * as grokLog from "../../grok-plugin/lib/log.ts";
@@ -587,23 +590,30 @@ test("a verdict resolves and updates the gates the same way for every mode", () 
     judgedTokens: 90000,
     judgedAt: 1,
   };
-  for (const c of cases) {
-    const name = `${c.mode} fresh=${c.fresh} qualifies=${c.qualifies} ack=${c.autoAcknowledged}`;
-    const resolution = checkpoint.resolve(c);
-    assert.equal(resolution, c.resolution, name);
-    const after = checkpoint.judged(before, resolution, 150000, "fp");
-    assert.deepEqual(
-      [
-        after.failures,
-        after.retryAfter,
-        after.judgedTokens,
-        after.judgedAt,
-        after.lastHintAt,
-        after.lastHintKey,
-      ],
-      [0, 0, ...c.judged, ...c.hint],
-      name,
-    );
+  for (const [host, policy] of [
+    ["pi", checkpoint],
+    ["claude", claudeCheckpoint],
+    ["codex", codexCheckpoint],
+    ["grok", grokCheckpoint],
+  ] as const) {
+    for (const c of cases) {
+      const name = `${host} ${c.mode} fresh=${c.fresh} qualifies=${c.qualifies} ack=${c.autoAcknowledged}`;
+      const resolution = policy.resolve(c);
+      assert.equal(resolution, c.resolution, name);
+      const after = policy.judged(before, resolution, 150000, "fp");
+      assert.deepEqual(
+        [
+          after.failures,
+          after.retryAfter,
+          after.judgedTokens,
+          after.judgedAt,
+          after.lastHintAt,
+          after.lastHintKey,
+        ],
+        [0, 0, ...c.judged, ...c.hint],
+        name,
+      );
+    }
   }
 });
 

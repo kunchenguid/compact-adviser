@@ -334,7 +334,6 @@ async function runStop(payload: HookPayload): Promise<void> {
   if (transcript.unreadableLines !== 0) return;
   if (!transcript.messages.length) return;
   const view = snapshot(transcript.messages, [activeKey], transcript.hasImages);
-  if (view.conversationTokens <= MINIMUM_CONVERSATION_TOKENS) return;
 
   // `contextTokensUsed` is the honest number when signals.json is readable; the local estimate
   // stands in when it is not, so an undocumented field going away weakens the gate, not the product.
@@ -344,6 +343,7 @@ async function runStop(payload: HookPayload): Promise<void> {
     state = { ...state, baseline: tokens };
     saveSessionState(statePath, state);
   }
+  if (view.conversationTokens <= MINIMUM_CONVERSATION_TOKENS) return;
   if (tokens < settings.minContextTokens) return;
   if (cooldownReason(state, tokens, now) !== undefined) return;
 

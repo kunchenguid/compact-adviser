@@ -242,6 +242,24 @@ describe("turn-end gates", () => {
     ).toHaveLength(3);
   });
 
+  test("turning logging on names the log part this session already rolled over to", async ($, on) => {
+    const w = world(on);
+    const base = "/tmp/fixture-home/.claude/compact-adviser-requests-session-1";
+    w.logFiles.set(`${base}.jsonl`, "old line\n");
+    w.logFiles.set(`${base}.2.jsonl`, "newer line\n");
+    await $.session.start(interactiveStart);
+    await $.command.run(commandRun(""));
+    await $.ui.render(pane);
+    await $.ui.press({ plugin: PLUGIN, key: "menu:logRequests" });
+    await drain(w);
+    await $.ui.render(pane);
+    await $.ui.press({ plugin: PLUGIN, key: "logging:on" });
+    await drain(w);
+    expect(w.journal.logs.at(-1)).toBe(
+      `TypeSafe request logging on (all sessions). This session logs to ${base}.2.jsonl.`,
+    );
+  });
+
   test("without HOME the request log is not written anywhere", async ($, on) => {
     const w = world(on, { logRequests: true, home: undefined });
     await $.session.start(interactiveStart);
@@ -650,7 +668,11 @@ describe("turn-end gates", () => {
       await $.command.run(commandRun("status"));
       const status = w.journal.logs.at(-1) ?? "";
       expect(status).not.toContain("being judged");
-      expect(status).toContain("Last turn end: judgment discarded");
+      expect(status).toContain(
+        interrupt === "compact"
+          ? "Last turn end: judgment discarded, a compaction is running."
+          : "Last turn end: judgment discarded, settings or session changed meanwhile.",
+      );
       // The cooldown sentence ends before the next one starts.
       expect(status).toMatch(/(after compaction|Snoozed)\. Last turn end:/);
       expect(hinted(w)).toBe(false);
@@ -680,6 +702,28 @@ describe("turn-end gates", () => {
     expect(w.journal.logs.at(-1)).toContain(
       "Last turn end: not checked, cooldown: Waiting for 20k",
     );
+  });
+
+  test("a compaction that starts before a queued turn is asked leaves it not checked, not discarded", async ($, on) => {
+    const w = world(on);
+    let calls = 0;
+    w.respond = async () => {
+      calls++;
+      if (calls === 1) {
+        // A turn end with no turn start queues behind this judgment; a host compaction then
+        // starts before it is asked, and is vetoed.
+        w.messages = longConversation("second unit");
+        await $.turn.complete(answered());
+        w.hostCompact = async () => ({ skip: "another plugin vetoed" });
+        await $.session.compact({ trigger: "manual", messages: MESSAGES });
+      }
+      return { status: 200, text: JSON.stringify(jevAnswer()) };
+    };
+    await $.session.start(interactiveStart);
+    await turnEnd($, w);
+    expect(w.journal.requests).toHaveLength(1);
+    await $.command.run(commandRun("status"));
+    expect(w.journal.logs.at(-1)).toContain("Last turn end: not checked, a compaction is running.");
   });
 
   test("a request log pauses after its last part instead of growing without end", async ($, on) => {
