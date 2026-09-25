@@ -329,10 +329,13 @@ export function installAdviser(pi: ExtensionAPI, options: Options): void {
     compacting = true;
     // The judgment assumes Pi's ordinary recent tail. Inspect the native
     // preparation, not duplicated settings-file discovery, before summarization.
-    if (automaticCompaction && event.preparation.settings.keepRecentTokens < 20000) {
+    if (
+      automaticCompaction &&
+      event.preparation.settings.keepRecentTokens < DEFAULT_COMPACTION_SETTINGS.keepRecentTokens
+    ) {
       notice(
         ctx,
-        "Automatic compaction skipped: Pi is configured to retain less than 20k recent tokens. Use /compact manually if appropriate.",
+        `Automatic compaction skipped: Pi is configured to retain less than ${DEFAULT_COMPACTION_SETTINGS.keepRecentTokens.toLocaleString("en-US")} recent tokens. Use /compact manually if appropriate.`,
       );
       return { cancel: true };
     }
