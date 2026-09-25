@@ -213,8 +213,30 @@ async function waitFor(predicate, what, timeoutMs = 30000) {
   }
   throw new Error(`[${step}] never saw ${what}\n--- screen ---\n${screen()}`);
 }
+// The text inside each boxed card on screen, its wrapped lines joined: from 2.1.282 Claude
+// Code draws a toast as a narrow card that wraps its message.
+function cards(shot) {
+  const lines = shot.split("\n");
+  const found = [];
+  lines.forEach((line, top) => {
+    for (let left = line.indexOf("╭"); left >= 0; left = line.indexOf("╭", left + 1)) {
+      const right = line.indexOf("╮", left);
+      if (right < 0) continue;
+      const inside = [];
+      for (let row = top + 1; row < lines.length && lines[row][left] === "│"; row++) {
+        inside.push(lines[row].slice(left + 1, right));
+      }
+      found.push(inside.join(" ").replace(/\s+/g, " ").trim());
+    }
+  });
+  return found;
+}
 const waitText = (text, timeoutMs) =>
-  waitFor((s) => s.includes(text), JSON.stringify(text), timeoutMs);
+  waitFor(
+    (s) => s.includes(text) || cards(s).some((card) => card.includes(text)),
+    JSON.stringify(text),
+    timeoutMs,
+  );
 
 async function command(text) {
   type(text);
