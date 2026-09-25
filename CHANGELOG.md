@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.9](https://github.com/kunchenguid/compact-adviser/compare/compact-adviser-v0.1.8...compact-adviser-v0.1.9) (2026-09-25)
+
+
+### Bug Fixes
+
+* recognize GNU sed in-place writes ([#52](https://github.com/kunchenguid/compact-adviser/issues/52)) ([f54504a](https://github.com/kunchenguid/compact-adviser/commit/f54504a4b1465d4155ca5b6a9e133f75933ab597))
+* record tee and in-place sed writes that follow a bash reserved word ([#53](https://github.com/kunchenguid/compact-adviser/issues/53)) ([ec2b5dc](https://github.com/kunchenguid/compact-adviser/commit/ec2b5dc5b3906ea782f4e09218355b8bdb223047))
+
 ## [0.1.8](https://github.com/kunchenguid/compact-adviser/compare/compact-adviser-v0.1.7...compact-adviser-v0.1.8) (2026-09-23)
 
 
