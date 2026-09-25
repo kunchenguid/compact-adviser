@@ -18,6 +18,14 @@
 //   session's counters itself.
 import type { EngineInterface, PluginOptions, Register, RenderChildren } from "claude-code";
 import {
+  COOLDOWN_TEXT,
+  type Cooldown,
+  cooldown,
+  judged,
+  type Resolution,
+  resolve,
+} from "../lib/checkpoint.ts";
+import {
   API_KEY_KEY,
   CONSENT_STORE_KEY,
   type Config,
@@ -80,6 +88,51 @@ const LOOPBACK_ENDPOINT = /^http:\/\/127\.0\.0\.1:\d{1,5}\/[\x21-\x7e]*$/;
 const USAGE =
   "Use /compact-adviser, auto, hint, off, status, threshold <tokens|default>, snooze or dismiss.";
 
+/** Why a turn end was not judged, besides a cooldown. */
+const SKIP_TEXT = {
+  "not-interactive": "the session is not interactive",
+  compacting: "a compaction started",
+  off: "mode is off",
+  "unknown-usage": "context size unknown",
+  "below-minimum": "context below the minimum",
+  "no-key": "no TypeSafe key",
+  interrupted: "the turn was interrupted",
+  "no-answer": "the turn ended without an answer",
+  "settings-unreadable": "settings unreadable",
+  "too-little-history": "too little conversation history",
+  "already-advised": "already advised at this checkpoint",
+} as const;
+type Skip = keyof typeof SKIP_TEXT | Cooldown;
+
+function skipText(skip: Skip): string {
+  return skip in COOLDOWN_TEXT
+    ? `cooldown: ${COOLDOWN_TEXT[skip as Cooldown]}`
+    : SKIP_TEXT[skip as keyof typeof SKIP_TEXT];
+}
+
+/** What a judged turn end came to: its verdict's resolution, or how that went wrong. */
+const OUTCOME_TEXT: Readonly<
+  Record<Resolution | "pending" | "asked" | "failed" | "compaction-failed", string>
+> = {
+  pending: "being judged",
+  asked: "being judged",
+  failed: "the judgment failed; context left unchanged",
+  discard: "judgment discarded, settings or session changed meanwhile",
+  wait: "judged, not a checkpoint yet",
+  unconfirmed: "judged a checkpoint; automatic mode is not confirmed (/compact-adviser auto)",
+  hint: "judged a checkpoint; hint shown",
+  compact: "judged a checkpoint; compacted",
+  "compaction-failed": "judged a checkpoint; compaction failed",
+};
+/** A discard names the gate that no longer held once the answer came back. */
+type TurnEnd = Skip | keyof typeof OUTCOME_TEXT | `discarded:${Skip}`;
+
+function turnEndText(end: TurnEnd): string {
+  if (end.startsWith("discarded:")) return `judgment discarded, ${skipText(end.slice(10) as Skip)}`;
+  if (end in OUTCOME_TEXT) return OUTCOME_TEXT[end as keyof typeof OUTCOME_TEXT];
+  return `not checked, ${skipText(end as Skip)}`;
+}
+
 // Per module environment (a hot reload starts fresh; see the header).
 let activation: Promise<boolean> | undefined;
 // The host-validated options this environment loaded with (a save reloads it with new ones).
@@ -87,9 +140,23 @@ let loadedOptions: PluginOptions = {};
 let interactive = false;
 let generation = 0;
 let judging = false;
-let compacting = false;
+// Compactions in flight: this module's own and any other the host runs in this session.
+let compactions = 0;
+// A turn end that settled while an older judgment was still running; judged once it ends.
+let pendingEpoch: number | undefined;
+// The lookup of the session's latest request-log part, run once per environment.
+let logPartResume: Promise<void> | undefined;
+// Whether the next main-loop response may be the first since a compaction: its context is
+// the post-compaction baseline (the turn end's is later, and a long first turn inflates it).
+let baselinePending = false;
 let hintVisible = false;
 let diagnostic = "";
+// What the latest settled turn end came to, for `/compact-adviser status` only.
+let lastCheck: TurnEnd | undefined;
+// Why request logging stopped in this environment; set once a log exists but cannot be read.
+let logProblem: string | undefined;
+// The request-log part appends go to; a part that would outgrow the host's read limit rolls over.
+let logPart = 1;
 // The settings pane: one list of rows, as the Pi extension's menu, each opening a view
 // of its own; Enter on an option or a saved value returns to the list. A save hot-reloads
 // the module, so this scratch resets to the list on its own.
@@ -177,37 +244,102 @@ function judgeFailureMessage(error: unknown): string {
   return error instanceof JudgeError ? error.message : JUDGE_UNAVAILABLE_MESSAGE;
 }
 
-async function logHome($: EngineInterface): Promise<string> {
-  return ((await $.env.get("HOME")) ?? (await $.session.cwd())).replace(/[\\/]+$/, "");
+/**
+ * This session's request log (the part it appends to, unless `part` names another), or
+ * undefined without HOME: request bodies carry transcript text, so they are never written
+ * into the working directory instead.
+ */
+async function sessionLogPath($: EngineInterface, part?: number): Promise<string | undefined> {
+  const home = await $.env.get("HOME");
+  if (home === undefined || home.trim() === "") return undefined;
+  if (part === undefined) await resumeLogPart($);
+  const current = part ?? logPart;
+  const path = requestLogPath(home, await $.session.id());
+  return current === 1 ? path : path.replace(/\.jsonl$/, `.${current}.jsonl`);
 }
 
-async function sessionLogPath($: EngineInterface): Promise<string> {
-  return requestLogPath(await logHome($), await $.session.id());
+/** `$.fs.read` refuses files over 4 MiB; a log part stops growing before it gets there. */
+const LOG_PART_BYTES = 4 * 1024 * 1024;
+/** Parts per session before logging pauses: 400 MiB of request bodies. */
+const MAX_LOG_PARTS = 100;
+
+/**
+ * `$.fs.write` replaces the whole file, so an append is read-then-write. A part that the line
+ * would push past the host's read limit is left as it is and the line starts the next part.
+ * A part that exists but cannot be read anyway is never rewritten: logging pauses instead.
+ */
+/**
+ * A hot reload restarts `logPart` at 1, but the session's log continues in its latest part:
+ * a later, shorter line must not land in a part that already rolled over.
+ */
+function resumeLogPart($: EngineInterface): Promise<void> {
+  // One lookup, awaited by every caller: a status read during it must not append to part 1.
+  logPartResume ??= (async () => {
+    for (; logPart < MAX_LOG_PARTS; logPart++) {
+      const next = await sessionLogPath($, logPart + 1);
+      if (next === undefined || !(await $.fs.exists(next))) return;
+    }
+  })();
+  return logPartResume;
 }
 
 async function appendTypeSafeLog($: EngineInterface, line: string): Promise<void> {
-  const path = await sessionLogPath($);
-  let existing = "";
-  try {
-    existing = await $.fs.read(path);
-  } catch {
-    existing = "";
+  if (logProblem !== undefined) return;
+  await resumeLogPart($);
+  const lineBytes = new TextEncoder().encode(line).byteLength;
+  for (; logPart <= MAX_LOG_PARTS; logPart++) {
+    const path = await sessionLogPath($);
+    if (path === undefined) return;
+    if (!(await $.fs.exists(path))) return $.fs.write(path, line);
+    if ((await $.fs.stat(path)).size + lineBytes > LOG_PART_BYTES) continue;
+    let existing: string;
+    try {
+      existing = await $.fs.read(path);
+    } catch {
+      logProblem = "paused; the existing log could not be read, so it was left untouched";
+      return;
+    }
+    return $.fs.write(path, `${existing}${line}`);
   }
-  await $.fs.write(path, `${existing}${line}`);
+  logProblem = `paused after ${MAX_LOG_PARTS} log parts`;
+}
+
+async function requestLogStatus($: EngineInterface, config: Config): Promise<string> {
+  if (!config.logRequests) return "off";
+  return logProblem ?? (await sessionLogPath($)) ?? "unavailable, HOME is not set";
 }
 
 function notice($: EngineInterface, message: string): void {
   if (diagnostic === message) return;
   diagnostic = message;
+  warn($, message);
+}
+
+/**
+ * A warning or error: hosts cut a toast short (one line at 2.1.275, a narrow card from
+ * 2.1.282), so the full-width transcript line keeps the whole message readable.
+ */
+function warn($: EngineInterface, message: string): void {
   $.ui.toast(message, { timeoutMs: 8000 });
+  $.ui.log(message);
 }
 
 function clearStatus($: EngineInterface): void {
   if (interactive) $.ui.status(undefined);
 }
 
-async function invalidate($: EngineInterface): Promise<void> {
+/**
+ * Makes any judgment in flight stale; the turn end it was judging no longer reads as pending.
+ * `why` names the gate that stops it: an asked judgment is discarded, an unasked one not checked.
+ */
+function supersede(why?: Skip): void {
   generation++;
+  if (lastCheck === "asked") lastCheck = why === undefined ? "discard" : `discarded:${why}`;
+  else if (lastCheck === "pending") lastCheck = why ?? "discard";
+}
+
+async function invalidate($: EngineInterface): Promise<void> {
+  supersede();
   if (hintVisible) {
     hintVisible = false;
     clearStatus($);
@@ -238,31 +370,65 @@ function usageFraction(context: {
   return context.tokens / denominator;
 }
 
-async function eligible(
+/** Why this checkpoint may not be judged, cheapest gate first; undefined when it may. */
+async function ineligibility(
   $: EngineInterface,
   config: Config,
   state: SessionState,
   tokens: number | undefined,
   now: number,
-): Promise<boolean> {
-  return (
-    interactive &&
-    !compacting &&
-    config.mode !== "off" &&
-    (await apiKey($)) !== "" &&
-    typeof tokens === "number" &&
-    Number.isFinite(tokens) &&
-    tokens >= config.minContextTokens &&
-    cooldownReason(state, tokens, now) === undefined
-  );
+): Promise<Skip | undefined> {
+  if (!interactive) return "not-interactive";
+  if (compactions > 0) return "compacting";
+  if (config.mode === "off") return "off";
+  if (typeof tokens !== "number" || !Number.isFinite(tokens)) return "unknown-usage";
+  if (tokens < config.minContextTokens) return "below-minimum";
+  const waiting = cooldown(state, state.compacted, tokens, now);
+  if (waiting !== undefined) return waiting;
+  if ((await apiKey($)) === "") return "no-key";
+  return undefined;
 }
 
-/** The scheduled half of a turn end: judge, then hint or (opt-in) compact. */
+/**
+ * Records what a turn end came to, but only while that turn is still the latest: a judgment
+ * that returns after a newer turn has settled must not replace that turn's own reason.
+ */
+function note(epoch: number, end: TurnEnd): void {
+  if (epoch === generation) lastCheck = end;
+}
+
+/** Judges this turn end once the engine is idle; a failure is reported, never thrown. */
+function scheduleJudgment($: EngineInterface, epoch: number): void {
+  $.clock.after(0, () => {
+    void judgeCheckpoint($, epoch).catch(() => {
+      note(epoch, "failed");
+      notice($, "Compact adviser could not inspect this checkpoint; context left unchanged.");
+    });
+  });
+}
+
+/**
+ * The scheduled half of a turn end: judge, then hint or (opt-in) compact. One judgment runs
+ * at a time; a turn that settles meanwhile waits and is judged when the running one ends.
+ */
 async function judgeCheckpoint($: EngineInterface, epoch: number): Promise<void> {
-  if (epoch !== generation || judging || compacting) return;
+  if (epoch !== generation) return;
+  if (judging) {
+    pendingEpoch = epoch;
+    return;
+  }
   judging = true;
   try {
     const initial = await loadConfig($);
+    // Re-run the cheap gates before any request: a turn queued behind another judgment was
+    // gated before that judgment recorded its answer (a wait, a backoff) or a compaction began.
+    const { state: before } = await loadState($);
+    const { context: settled } = await $.session.usage();
+    const blocked = await ineligibility($, initial, before, settled.tokens, await $.clock.now());
+    if (blocked !== undefined) {
+      note(epoch, blocked);
+      return;
+    }
     const profile = parseProfile(initial.profile);
     const [messages, activeKey, rows] = await Promise.all([
       $.session.messages(),
@@ -270,9 +436,15 @@ async function judgeCheckpoint($: EngineInterface, epoch: number): Promise<void>
       $.config.list(),
     ]);
     const view = snapshot(messages, [activeKey, readSavedApiKey(rows, loadedOptions)]);
-    if (view.conversationTokens <= 20000) return;
+    if (view.conversationTokens <= 20000) {
+      note(epoch, "too-little-history");
+      return;
+    }
     const fingerprint = await checkpointKey(view.checkpointText);
-    if ((await loadState($)).state.lastHintKey === fingerprint) return;
+    if (before.lastHintKey === fingerprint) {
+      note(epoch, "already-advised");
+      return;
+    }
     let loggedBody: string | undefined;
     if (initial.logRequests) {
       try {
@@ -283,6 +455,7 @@ async function judgeCheckpoint($: EngineInterface, epoch: number): Promise<void>
       }
     }
     const endpoint = await testEndpoint($);
+    note(epoch, "asked");
     let result: Awaited<ReturnType<typeof judge>>;
     try {
       result = await judge(
@@ -296,7 +469,7 @@ async function judgeCheckpoint($: EngineInterface, epoch: number): Promise<void>
         profile,
       );
     } catch (error) {
-      if (epoch !== generation) return;
+      // Every logged request gets its outcome, even one a newer turn has made stale.
       if (initial.logRequests) {
         try {
           await appendTypeSafeLog($, errorLogLine(loggedJudgeErrorKind(error), loggedBody));
@@ -304,12 +477,20 @@ async function judgeCheckpoint($: EngineInterface, epoch: number): Promise<void>
           // Error logging must not replace backoff.
         }
       }
+      if (epoch !== generation) return;
+      // A save from /config reloads this module without invalidating this environment, and
+      // the reload can cancel the request: that is not a TypeSafe failure worth a backoff.
+      const settingsNow = await loadConfig($).catch(() => undefined);
+      if (JSON.stringify(settingsNow) !== JSON.stringify(initial)) return;
+      note(epoch, "failed");
       const { key, state } = await loadState($);
-      await $.store.set(key, backoff(state, await $.clock.now()));
+      const failedAt = await $.clock.now();
+      // Checked right before the write: a newer turn may have stored a record meanwhile.
+      if (epoch !== generation) return;
+      await $.store.set(key, backoff(state, failedAt));
       notice($, judgeFailureMessage(error));
       return;
     }
-    if (epoch !== generation) return;
     const latest = await loadConfig($);
     const { key, state: current } = await loadState($);
     const now = await $.clock.now();
@@ -330,31 +511,46 @@ async function judgeCheckpoint($: EngineInterface, epoch: number): Promise<void>
         // Response logging must not replace the gate decision.
       }
     }
-    if (
-      JSON.stringify(latest) !== JSON.stringify(initial) ||
-      !(await eligible($, latest, current, context.tokens, now))
-    )
+    // The epoch check sits right before the write: a turn that completed during the awaits
+    // above has stored a newer record, which `current` must not overwrite.
+    const judgedTokens = context.tokens;
+    const changed = JSON.stringify(latest) !== JSON.stringify(initial);
+    const skip = changed ? undefined : await ineligibility($, latest, current, judgedTokens, now);
+    if (changed || skip !== undefined || typeof judgedTokens !== "number" || epoch !== generation) {
+      note(epoch, skip === undefined ? "discard" : `discarded:${skip}`);
+      // Still this turn's record (no await since the check): the answer clears the backoff.
+      if (epoch === generation) {
+        await $.store.set(key, { ...judged(current, "discard", 0, fingerprint), updatedAt: now });
+      }
       return;
-    let state: SessionState = { ...current, failures: 0, retryAfter: 0, updatedAt: now };
-    const auto = latest.mode === "auto";
-    if (!qualifies(result, usageFraction(context), profile) || (auto && !latest.autoAcknowledged)) {
-      await $.store.set(key, state);
+    }
+    const resolution = resolve({
+      fresh: true,
+      qualifies: qualifies(result, usageFraction(context), profile),
+      mode: latest.mode,
+      autoAcknowledged: latest.autoAcknowledged,
+    });
+    const state: SessionState = {
+      ...judged(current, resolution, judgedTokens, fingerprint),
+      updatedAt: now,
+    };
+    await $.store.set(key, state);
+    if (resolution === "wait" || resolution === "unconfirmed") {
+      note(epoch, resolution);
       return;
     }
     diagnostic = "";
-    if (!auto) {
-      state = { ...state, lastHintAt: state.completed, lastHintKey: fingerprint };
-      await $.store.set(key, state);
+    if (resolution === "hint") {
       if (epoch !== generation) return;
+      note(epoch, resolution);
       hintVisible = true;
       // Claude Code prefixes $.ui.status with the plugin name; do not repeat it.
       $.ui.status(HINT);
       return;
     }
-    await $.store.set(key, state);
     // No await between this last identity check and the compaction request.
-    if (epoch !== generation || compacting) return;
-    compacting = true;
+    if (epoch !== generation || compactions > 0) return;
+    compactions++;
     // A status line, not a toast: the host drops a toast within two seconds of the last,
     // which would swallow the completion notice of a quick compaction.
     $.ui.status("compacting at a checkpoint (experimental auto)…");
@@ -367,12 +563,25 @@ async function judgeCheckpoint($: EngineInterface, epoch: number): Promise<void>
     } catch (error) {
       failure = error instanceof Error ? error.message : String(error);
     } finally {
-      compacting = false;
+      compactions--;
     }
     const after = await $.clock.now();
+    if (failure !== undefined && epoch !== generation) {
+      // The host refuses a compaction once a turn runs: stale work, not a failure to report.
+      clearStatus($);
+      return;
+    }
     if (failure !== undefined) {
+      note(epoch, "compaction-failed");
       const { state: latestState } = await loadState($);
-      await $.store.set(key, { ...latestState, retryAfter: after + 60000, updatedAt: after });
+      // A compaction that did not happen did not act: the re-ask gate holds this checkpoint.
+      if (epoch === generation) {
+        await $.store.set(key, {
+          ...judged(latestState, "wait", judgedTokens, fingerprint),
+          retryAfter: after + 60000,
+          updatedAt: after,
+        });
+      }
       notice(
         $,
         "Compaction failed or was cancelled. No immediate retry; Claude Code remains in control.",
@@ -380,8 +589,10 @@ async function judgeCheckpoint($: EngineInterface, epoch: number): Promise<void>
       clearStatus($);
       return;
     }
+    note(epoch, "compact");
     generation++;
     await $.store.set(key, initialState(true, after));
+    baselinePending = true;
     const completed =
       tokens.before !== undefined && tokens.after !== undefined
         ? `compaction completed: ${formatTokens(tokens.before)} to ${formatTokens(tokens.after)} tokens.`
@@ -393,6 +604,9 @@ async function judgeCheckpoint($: EngineInterface, epoch: number): Promise<void>
     clearStatus($);
   } finally {
     judging = false;
+    const waiting = pendingEpoch;
+    pendingEpoch = undefined;
+    if (waiting === generation) scheduleJudgment($, waiting);
   }
 }
 
@@ -407,16 +621,17 @@ async function settle($: EngineInterface): Promise<void> {
   try {
     config = await loadConfig($);
   } catch (error) {
+    lastCheck = "settings-unreadable";
     notice($, error instanceof Error ? error.message : "Cannot read compact-adviser settings.");
     return;
   }
-  if (judging || !(await eligible($, config, state, context.tokens, now))) return;
-  const epoch = generation;
-  $.clock.after(0, () => {
-    void judgeCheckpoint($, epoch).catch(() =>
-      notice($, "Compact adviser could not inspect this checkpoint; context left unchanged."),
-    );
-  });
+  const skip = await ineligibility($, config, state, context.tokens, now);
+  if (skip !== undefined) {
+    lastCheck = skip;
+    return;
+  }
+  lastCheck = "pending";
+  scheduleJudgment($, generation);
 }
 
 async function saveRow(
@@ -424,15 +639,21 @@ async function saveRow(
   key: string,
   value: string | number | boolean,
   message: string,
+  detail?: string,
 ): Promise<boolean> {
   await invalidate($);
   // A saved row hot-reloads this module, which drops this environment's later toasts, so
   // the confirmation is left for the reloaded environment to show at its session.start.
-  await $.store.set(PENDING_NOTICE_KEY, { message, at: await $.clock.now(), row: menuRow });
+  await $.store.set(PENDING_NOTICE_KEY, {
+    message,
+    detail,
+    at: await $.clock.now(),
+    row: menuRow,
+  });
   const result = await $.config.set({ key, value });
   if (result.deny !== undefined) {
     await $.store.delete(PENDING_NOTICE_KEY);
-    $.ui.toast(`Not saved: ${result.deny}`, { timeoutMs: 8000 });
+    warn($, `Not saved: ${result.deny}`);
     return false;
   }
   if (key === API_KEY_KEY && typeof value === "string") {
@@ -451,6 +672,7 @@ async function saveRow(
 async function showPendingNotice($: EngineInterface): Promise<void> {
   const pending = (await $.store.get(PENDING_NOTICE_KEY)) as {
     message?: unknown;
+    detail?: unknown;
     at?: unknown;
     row?: unknown;
   };
@@ -458,7 +680,9 @@ async function showPendingNotice($: EngineInterface): Promise<void> {
   await $.store.delete(PENDING_NOTICE_KEY);
   const fresh = typeof pending.at === "number" && (await $.clock.now()) - pending.at < 30000;
   if (fresh && typeof pending.message === "string") {
+    // The toast keeps a headline a host shows whole; the transcript line carries the detail.
     $.ui.toast(pending.message, { timeoutMs: 6000 });
+    if (typeof pending.detail === "string") $.ui.log(`${pending.message} ${pending.detail}`);
   }
   if (fresh && typeof pending.row === "string" && (await paneOpen($))) {
     showMenu(pending.row);
@@ -482,8 +706,9 @@ async function saveConsent($: EngineInterface, patch: Partial<Omit<Consent, "ver
   diagnostic = "";
 }
 
-function openPane($: EngineInterface): Promise<void> {
-  return $.ui.open({
+async function openPane($: EngineInterface): Promise<void> {
+  // A pane the person asked for is placed at any width, so the placement result is unused.
+  await $.ui.open({
     id: PANE_ID,
     title: "Compact adviser (saved for all sessions)",
     focus: true,
@@ -592,7 +817,8 @@ async function changeMode($: EngineInterface, mode: Mode, fromPane = false): Pro
       $,
       MODE_KEY,
       "auto",
-      "Automatic mode saved (all sessions). A TypeSafe key is still required.",
+      "Automatic mode saved (all sessions).",
+      "A TypeSafe key is still required.",
     );
     return;
   }
@@ -600,7 +826,8 @@ async function changeMode($: EngineInterface, mode: Mode, fromPane = false): Pro
     $,
     MODE_KEY,
     mode,
-    `${mode === "hint" ? "Hints only" : "Off"} saved (all sessions). Claude Code's built-in compaction is unchanged.`,
+    `${mode === "hint" ? "Hints only" : "Off"} saved (all sessions).`,
+    "Claude Code's built-in compaction is unchanged.",
   );
 }
 
@@ -610,24 +837,31 @@ async function changeMinimum($: EngineInterface, text: string): Promise<boolean>
   const { context } = await $.session.usage();
   const warning =
     count >= context.window
-      ? ` Warning: this is at or above the active model's ${formatTokens(context.window)}-token window, so advice will not trigger before Claude Code's own compaction.`
-      : "";
+      ? `Warning: this is at or above the active model's ${formatTokens(context.window)}-token window, so advice will not trigger before Claude Code's own compaction.`
+      : undefined;
   return saveRow(
     $,
     MINIMUM_KEY,
     count,
-    `Minimum context saved: ${formatTokens(count)} tokens (all sessions).${warning}`,
+    `Minimum context saved: ${formatTokens(count)} tokens (all sessions).`,
+    warning,
   );
 }
 
 async function changeLogRequests($: EngineInterface, enabled: boolean): Promise<void> {
+  if (!enabled) {
+    await saveRow($, LOG_KEY, false, "TypeSafe request logging off (all sessions).");
+    return;
+  }
+  const path = await sessionLogPath($);
   await saveRow(
     $,
     LOG_KEY,
-    enabled,
-    enabled
-      ? `TypeSafe request logging on (all sessions). ${await sessionLogPath($)}`
-      : "TypeSafe request logging off (all sessions).",
+    true,
+    "TypeSafe request logging on (all sessions).",
+    path === undefined
+      ? "HOME is not set, so nothing is written."
+      : `This session logs to ${path}.`,
   );
 }
 
@@ -636,7 +870,8 @@ async function changeSavedApiKey($: EngineInterface, text: string): Promise<bool
     $,
     API_KEY_KEY,
     parseSavedApiKey(text),
-    "TypeSafe API key saved (all sessions). Status shows the source, never the value.",
+    "TypeSafe API key saved (all sessions).",
+    "Status shows the source, never the value.",
   );
 }
 
@@ -645,7 +880,8 @@ async function clearSavedApiKey($: EngineInterface): Promise<boolean> {
     $,
     API_KEY_KEY,
     "",
-    "Saved TypeSafe API key cleared (all sessions). Launch environment and .env still apply.",
+    "Saved TypeSafe API key cleared (all sessions).",
+    "Launch environment and .env still apply.",
   );
 }
 
@@ -661,17 +897,18 @@ async function statusText($: EngineInterface): Promise<string> {
       : breakdown.isAutoCompactEnabled && breakdown.autoCompactThreshold !== undefined
         ? ` Claude Code auto-compacts at ${formatTokens(breakdown.autoCompactThreshold)} tokens.`
         : " Claude Code auto-compact is off.";
-  const cooldown =
+  const waiting =
     typeof tokens === "number"
-      ? (cooldownReason(state, tokens, await $.clock.now()) ??
-        "No cooldown; semantic checks still apply.")
+      ? `${cooldownReason(state, tokens, await $.clock.now()) ?? "No cooldown; semantic checks still apply"}.`
       : "Waiting for fresh model usage.";
-  return `Mode: ${config.mode}${config.mode === "auto" && !config.autoAcknowledged ? " (not confirmed)" : ""}. Minimum: ${formatTokens(config.minContextTokens)} tokens. Context: ${typeof tokens === "number" ? formatTokens(tokens) : "unknown"}${Number.isFinite(usageFraction(usage.context)) ? ` (${Math.round(usageFraction(usage.context) * 100)}% of the context limit; hint floor ${floorFor(usageFraction(usage.context), parseProfile(config.profile)).toFixed(2)})` : ""}. ${formatKeyStatus((await resolvedKey($)).source)}. ${cooldown}${engine} Request log: ${config.logRequests ? await sessionLogPath($) : "off"}. Settings: /config (compact-adviser rows) and /compact-adviser.`;
+  return `Mode: ${config.mode}${config.mode === "auto" && !config.autoAcknowledged ? " (not confirmed)" : ""}. Minimum: ${formatTokens(config.minContextTokens)} tokens. Context: ${typeof tokens === "number" ? formatTokens(tokens) : "unknown"}${Number.isFinite(usageFraction(usage.context)) ? ` (${Math.round(usageFraction(usage.context) * 100)}% of the context limit; hint floor ${floorFor(usageFraction(usage.context), parseProfile(config.profile)).toFixed(2)})` : ""}. ${formatKeyStatus((await resolvedKey($)).source)}. ${waiting}${lastCheck === undefined ? "" : ` Last turn end: ${turnEndText(lastCheck)}.`}${engine} Request log: ${await requestLogStatus($, config)}. Settings: /config (compact-adviser rows) and /compact-adviser.`;
 }
 
 async function snoozeOrDismiss($: EngineInterface, command: "snooze" | "dismiss") {
-  const { key, state } = await loadState($);
+  // Invalidate first: a judgment in flight is then discarded instead of writing a record
+  // between this read and the snooze below.
   await invalidate($);
+  const { key, state } = await loadState($);
   if (command === "snooze") {
     await $.store.set(key, {
       ...state,
@@ -696,8 +933,14 @@ export const register: Register = (on, options) => {
     if (!interactive) return next(e);
     generation++;
     judging = false;
-    compacting = false;
+    compactions = 0;
+    pendingEpoch = undefined;
+    logPartResume = undefined;
+    baselinePending = true;
     hintVisible = false;
+    lastCheck = undefined;
+    logProblem = undefined;
+    logPart = 1;
     await $.command.register({
       name: COMMAND,
       description: "Configure persistent compaction advice, experimental auto, and token minimum",
@@ -726,7 +969,9 @@ export const register: Register = (on, options) => {
   on("turn.complete", async ($, e, next) => {
     const result = await next(e);
     if (!(await isActivated($)) || !interactive) return result;
-    if (e.agentId !== undefined || e.reason !== "answer" || e.isAborted || !e.answer.trim()) {
+    if (e.agentId !== undefined) return result;
+    if (e.reason !== "answer" || e.isAborted || !e.answer.trim()) {
+      lastCheck = e.isAborted ? "interrupted" : "no-answer";
       return result;
     }
     try {
@@ -740,17 +985,45 @@ export const register: Register = (on, options) => {
   // Any compaction but this module's own (which never reaches its own hook) resets the
   // session's cooldown; a precompute installs nothing and a subagent's is its own.
   on("session.compact", async ($, e, next) => {
-    const result = await next(e);
-    if (!(await isActivated($)) || !interactive) return result;
-    if (e.trigger === "precompute" || e.agentId !== undefined || result.skip !== undefined) {
-      return result;
-    }
+    if (e.trigger === "precompute" || e.agentId !== undefined) return next(e);
+    if (!(await isActivated($)) || !interactive) return next(e);
+    // A judgment in flight is stale either way, and none may hint or compact until this ends.
+    supersede("compacting");
+    compactions++;
+    let result: Awaited<ReturnType<typeof next>>;
     try {
-      await invalidate($);
+      result = await next(e);
+    } finally {
+      compactions--;
+    }
+    // A compaction that did not happen leaves the hint: its checkpoint still stands.
+    if (result.skip !== undefined) return result;
+    await invalidate($);
+    try {
       const key = sessionKey(await $.session.id());
       await $.store.set(key, initialState(true, await $.clock.now()));
+      baselinePending = true;
     } catch {
       // The cooldown record stays as it was; the next judgment re-reads fresh usage.
+    }
+    return result;
+  });
+
+  // A turn end still takes the baseline when no response reported usage (see completeExchange).
+  on("turn.step", async function* ($, e, next) {
+    const result = yield* next(e);
+    if (!baselinePending || e.agentId !== undefined || result.usage === null) return result;
+    baselinePending = false;
+    if (!(await isActivated($)) || !interactive) return result;
+    const u = result.usage;
+    const tokens = u.input_tokens + u.cache_read_input_tokens + u.cache_creation_input_tokens;
+    try {
+      const { key, state } = await loadState($);
+      if (state.compacted && state.baseline === null) {
+        await $.store.set(key, { ...state, baseline: tokens });
+      }
+    } catch {
+      // The next turn end takes the baseline instead.
     }
     return result;
   });
@@ -779,7 +1052,7 @@ export const register: Register = (on, options) => {
         throw new Error(USAGE);
       }
     } catch (error) {
-      $.ui.toast(errorMessage(error), { timeoutMs: 8000 });
+      warn($, errorMessage(error));
     }
     return {};
   });
@@ -832,7 +1105,7 @@ export const register: Register = (on, options) => {
     };
     const run = (action: () => Promise<unknown>) => {
       void action()
-        .catch((error) => $.ui.toast(errorMessage(error), { timeoutMs: 8000 }))
+        .catch((error) => warn($, errorMessage(error)))
         .finally(redraw);
     };
     const back = () => {

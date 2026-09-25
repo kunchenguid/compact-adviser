@@ -4,6 +4,7 @@ import type {
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
+import { judged, resolve } from "./checkpoint.ts";
 import {
   type Config,
   ConfigStore,
@@ -86,6 +87,8 @@ export function installAdviser(pi: ExtensionAPI, options: Options): void {
   let compacting = false;
   let automaticCompaction = false;
   let hintVisible = false;
+  // Whether a turn_end may still owe this branch its post-compaction baseline.
+  let baselinePending = true;
   let diagnostic = "";
   const active = (ctx: ExtensionContext) => ctx.mode === "tui" && ctx.hasUI;
   function persist(state: SessionState) {
@@ -108,6 +111,7 @@ export function installAdviser(pi: ExtensionAPI, options: Options): void {
   }
   function invalidate(ctx: ExtensionContext) {
     generation++;
+    baselinePending = true;
     request?.abort();
     request = undefined;
     if (hintVisible && active(ctx)) ctx.ui.setWidget(LABEL, undefined);
@@ -199,6 +203,8 @@ export function installAdviser(pi: ExtensionAPI, options: Options): void {
       configIdentity = JSON.stringify(config);
     const current = () =>
       !controller.signal.aborted && generation === epoch && sessionIdentity(ctx) === identity;
+    // The usage of the context judged: a stale answer's log line must not describe a newer one.
+    const fraction = usageFraction(ctx);
     try {
       const result = await evaluate(
         view.state,
@@ -206,38 +212,42 @@ export function installAdviser(pi: ExtensionAPI, options: Options): void {
         controller.signal,
         profile,
       );
-      if (!current()) return;
+      // Every answered request gets its outcome logged, even one a newer turn has made stale.
       if (config.logRequests) {
         try {
           appendResponseLog(
             options.agentDir,
             loggedBody ?? requestBody(view.state, profile),
             result,
-            usageFraction(ctx),
+            fraction,
             profile,
           );
         } catch {
           // Response logging must not replace the gate decision.
         }
       }
+      if (!current()) return;
       // No await between this final cross-session configuration/state check and compact().
       const latest = store.read();
-      if (JSON.stringify(latest) !== configIdentity || eligible(ctx, latest, state) === undefined)
-        return;
-      state = { ...state, failures: 0, retryAfter: 0 };
-      const auto = latest.mode === "auto";
-      if (!qualifies(result, usageFraction(ctx), profile)) {
-        persist(state);
-        return;
-      }
-      if (auto && !latest.autoAcknowledged) {
-        persist(state);
+      const judgedTokens = eligible(ctx, latest, state);
+      if (JSON.stringify(latest) !== configIdentity || judgedTokens === undefined) {
+        // Still this session and leaf, so the answer clears the backoff; it decides nothing else.
+        persist(
+          judged(restoreState(ctx.sessionManager.getBranch()), "discard", 0, view.checkpointKey),
+        );
         return;
       }
+      const resolution = resolve({
+        fresh: true,
+        qualifies: qualifies(result, fraction, profile),
+        mode: latest.mode,
+        autoAcknowledged: latest.autoAcknowledged,
+      });
+      state = judged(state, resolution, judgedTokens, view.checkpointKey);
+      persist(state);
+      if (resolution !== "hint" && resolution !== "compact") return;
       diagnostic = "";
-      if (!auto) {
-        state = { ...state, lastHintAt: state.completed, lastHintKey: view.checkpointKey };
-        persist(state);
+      if (resolution === "hint") {
         ctx.ui.setWidget(LABEL, (_tui, theme) => new Text(theme.fg("warning", HINT), 0, 0));
         hintVisible = true;
       } else {
@@ -259,7 +269,11 @@ export function installAdviser(pi: ExtensionAPI, options: Options): void {
             compacting = false;
             automaticCompaction = false;
             const latestState = restoreState(ctx.sessionManager.getBranch());
-            persist({ ...latestState, retryAfter: now() + 60000 });
+            // A compaction that did not happen did not act: the re-ask gate holds this checkpoint.
+            persist({
+              ...judged(latestState, "wait", judgedTokens, view.checkpointKey),
+              retryAfter: now() + 60000,
+            });
             notice(
               ctx,
               "Compaction failed or was cancelled. No immediate retry; Pi remains in control.",
@@ -268,14 +282,15 @@ export function installAdviser(pi: ExtensionAPI, options: Options): void {
         });
       }
     } catch (error) {
-      if (!current()) return;
-      if (config.logRequests) {
+      // A request this module cancelled has no TypeSafe outcome to log.
+      if (config.logRequests && !controller.signal.aborted) {
         try {
           appendErrorLog(options.agentDir, error, loggedBody);
         } catch {
           // Error logging must not replace backoff.
         }
       }
+      if (!current()) return;
       const failures = Math.min(state.failures + 1, 6);
       persist({ ...state, failures, retryAfter: now() + Math.min(300000, 5000 * 2 ** failures) });
       notice(
@@ -290,6 +305,18 @@ export function installAdviser(pi: ExtensionAPI, options: Options): void {
   }
   pi.on("turn_end", (_event, ctx) => {
     if (!ctx.isIdle() && hintVisible) invalidate(ctx);
+    // The first response after a compaction sets its baseline, before a long first run of
+    // tool calls can lift it; `settled` still takes it when no response reported usage.
+    if (!baselinePending || !active(ctx)) return;
+    const s = restoreState(ctx.sessionManager.getBranch());
+    if (!s.compactionId || s.baseline !== null) {
+      baselinePending = false;
+      return;
+    }
+    const tokens = ctx.getContextUsage()?.tokens;
+    if (typeof tokens !== "number" || !Number.isFinite(tokens)) return;
+    persist({ ...s, baseline: tokens });
+    baselinePending = false;
   });
   pi.on("agent_settled", (_event, ctx) => {
     void settled(ctx).catch(() =>

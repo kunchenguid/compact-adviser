@@ -112,7 +112,8 @@ On Grok, save the TypeSafe key as `TYPESAFE_API_KEY` or a cwd `.env`, or with th
 | --- | --- |
 | `Key: missing` in `/compact-adviser status` (Pi, Claude Code) or `/compact-adviser` (Grok) | No `TYPESAFE_API_KEY` in the launch environment, saved settings, or the session cwd's `./.env` |
 | No `/compact-adviser` command in Claude Code | `CLAUDE_CODE_ENABLE_FUNCTION_HOOKS` is not exactly `1` |
-| Command exists, no hint | Context is below the constant 40,000-token minimum, the session is not idle, or the last turn was not a settled final answer |
+| Command exists, no hint | Context is below the constant 40,000-token minimum, the session is not idle, the last turn was not a settled final answer, or the last judgment said "not yet" and the next waits for 20k more tokens, or 3 more exchanges that change it by 5k |
+| Claude Code: still unsure why | `/compact-adviser status` has a `Last turn end:` line naming what the latest settled turn came to: not checked (and which gate), being judged, failed, discarded (and why), judged not a checkpoint yet, or judged a checkpoint |
 | Claude Code: "nonessential traffic" | `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` blocks plugin network requests |
 | No hint in Codex | The hook is untrusted (review it in `/hooks`), Node is older than 22.18, or the hook cannot find Node at all - Codex rebuilds its PATH, so set `COMPACT_ADVISER_NODE` to an absolute `node` path |
 | Grok: no hint row at all | `[ui.status_line]` is not set in the `config.toml` `install` named, or Grok is in minimal render mode |
@@ -171,7 +172,7 @@ hint can never be fed back to the model.
 | --- | --- |
 | `/compact-adviser` (Pi and Claude Code) | Settings (mode, minimum, request log, TypeSafe API key) |
 | `/compact-adviser auto` / `hint` / `off` (Pi and Claude Code) | Save that mode; auto asks for first-use confirmation |
-| `/compact-adviser status` (Pi and Claude Code) | Mode, minimum, context, key source (`env` / `saved` / `.env` / `missing`), cooldown |
+| `/compact-adviser status` (Pi and Claude Code) | Mode, minimum, context, key source (`env` / `saved` / `.env` / `missing`), cooldown, and on Claude Code what the last turn end came to |
 | `/compact-adviser threshold 60000` (Pi and Claude Code) | Save an absolute token minimum |
 | `/compact-adviser snooze` / `dismiss` (Pi and Claude Code) | Suppress the next three exchanges, or clear the current hint |
 | `/compact-adviser` (Grok) | Show status; do not add arguments because Grok sends them to the model |

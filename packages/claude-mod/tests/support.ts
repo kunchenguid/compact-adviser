@@ -71,13 +71,24 @@ export type World = {
     autoCompactEnabled?: boolean;
   };
   messages: SessionMessage[];
+  /** The context a model response reports as its request usage; undefined reports none. */
+  stepTokens?: number;
   /** What TypeSafe answers; the default is a confident checkpoint. */
   respond: (body: string) => Promise<{ status: number; text: string } | { deny: string }>;
+  /** What the engine answers for a compaction another trigger (manual, auto) runs. */
+  hostCompact: () => Promise<
+    { messages: SessionMessage[]; tokensBefore?: number; tokensAfter?: number } | { skip: string }
+  >;
   /** What the engine's compaction answers for this mod's own request. */
   compact: () => Promise<
     { messages: SessionMessage[]; tokensBefore?: number; tokensAfter?: number } | { skip: string }
   >;
   denyConfig: (reason: string | undefined) => void;
+  /** Request logs on disk by path; a path in `unreadableLogs` exists but its read rejects, as over 4 MiB. */
+  logFiles: Map<string, string>;
+  unreadableLogs: Set<string>;
+  /** A size `$.fs.stat` reports for a log in place of its text's, to stand in for a large file. */
+  logSizes: Map<string, number>;
 };
 
 export type WorldOptions = {
@@ -94,6 +105,8 @@ export type WorldOptions = {
   store?: Record<string, unknown>;
   /** Text `$.fs.read(".env")` should return; omit to treat the file as missing. */
   dotenv?: string;
+  /** `HOME` for the session; pass `undefined` to leave it unset. */
+  home?: string | undefined;
 };
 
 /** A transcript whose own text is well over the 20k-token useful-history floor. */
@@ -127,9 +140,10 @@ export function longConversation(
 export function world(on: On, options: WorldOptions = {}): World {
   const functionHooks = "functionHooks" in options ? options.functionHooks : "1";
   const key = "key" in options ? options.key : KEY;
+  // Claude Code rejects host filesystem paths under macOS automounts such as /home.
+  const home = "home" in options ? options.home : "/tmp/fixture-home";
   mock.env(on, {
-    // Claude Code rejects host filesystem paths under macOS automounts such as /home.
-    HOME: "/tmp/fixture-home",
+    ...(home === undefined ? {} : { HOME: home }),
     ...(functionHooks === undefined ? {} : { CLAUDE_CODE_ENABLE_FUNCTION_HOOKS: functionHooks }),
     ...(key === undefined ? {} : { TYPESAFE_API_KEY: key }),
     ...(options.endpoint === undefined ? {} : { COMPACT_ADVISER_TEST_ENDPOINT: options.endpoint }),
@@ -189,6 +203,11 @@ export function world(on: On, options: WorldOptions = {}): World {
     usage: { tokens: 60000, window: 200000, autoCompactThreshold: 167000 },
     messages: longConversation(),
     respond: async () => ({ status: 200, text: JSON.stringify(jevAnswer()) }),
+    hostCompact: async () => ({
+      messages: [{ role: "user", text: "This session is being continued", toolUses: [] }],
+      tokensBefore: 50000,
+      tokensAfter: 4000,
+    }),
     compact: async () => ({
       messages: [{ role: "user", text: "This session is being continued", toolUses: [] }],
       tokensBefore: 60000,
@@ -197,11 +216,34 @@ export function world(on: On, options: WorldOptions = {}): World {
     denyConfig: (reason) => {
       configDenial = reason;
     },
+    logFiles: jsonlFiles,
+    unreadableLogs: new Set(),
+    logSizes: new Map(),
   };
 
   on("session.start", async (_$, e) => ({ cwd: e.cwd }));
   on("turn.start", async (_$, e) => ({ turnId: e.turnId }));
   on("turn.complete", async (_$, e) => ({ text: e.answer }));
+  // biome-ignore lint/correctness/useYield: the bottom of the chain answers without streaming.
+  on("turn.step", async function* (_$, e) {
+    return {
+      turnId: e.turnId,
+      index: e.index,
+      answer: "",
+      toolUses: [],
+      stopReason: "end_turn" as const,
+      usage:
+        w.stepTokens === undefined
+          ? null
+          : {
+              model: "claude-test",
+              input_tokens: w.stepTokens,
+              output_tokens: 0,
+              cache_read_input_tokens: 0,
+              cache_creation_input_tokens: 0,
+            },
+    };
+  });
   on("session.id", async () => ({ value: w.sessionId }));
   on("session.usage", async (_$, e) => {
     journal.usageReads += 1;
@@ -244,11 +286,7 @@ export function world(on: On, options: WorldOptions = {}): World {
       journal.compactions.push({ instructions: e.instructions });
       return (await w.compact()) as never;
     }
-    return {
-      messages: [{ role: "user", text: "This session is being continued", toolUses: [] }],
-      tokensBefore: 50000,
-      tokensAfter: 4000,
-    };
+    return (await w.hostCompact()) as never;
   });
   on("config.list", async () => ({
     value: [...rows].map(([key, value]) => ({
@@ -295,7 +333,7 @@ export function world(on: On, options: WorldOptions = {}): World {
   });
   on("ui.open", async (_$, e) => {
     journal.opened.push({ id: e.id, focus: e.focus });
-    return { value: undefined };
+    return { value: { isPlaced: true } as never };
   });
   on("ui.close", async (_$, e) => {
     journal.closed.push(e.id);
@@ -314,7 +352,24 @@ export function world(on: On, options: WorldOptions = {}): World {
       journal.fsReads.push(e.path);
       const existing = jsonlFiles.get(String(e.path));
       if (existing === undefined) throw new Error("ENOENT");
+      if (w.unreadableLogs.has(String(e.path))) throw new Error("file is over 4 MiB");
       return { value: existing };
+    }
+    return next(e);
+  });
+  on("fs.exists", async (_$, e, next) => {
+    if (/compact-adviser-requests[^/]*\.jsonl$/.test(String(e.path))) {
+      return { value: jsonlFiles.has(String(e.path)) };
+    }
+    return next(e);
+  });
+  on("fs.stat", async (_$, e, next) => {
+    const path = String(e.path);
+    if (/compact-adviser-requests[^/]*\.jsonl$/.test(path)) {
+      const text = jsonlFiles.get(path);
+      if (text === undefined) throw new Error("ENOENT");
+      const size = w.logSizes.get(path) ?? new TextEncoder().encode(text).byteLength;
+      return { value: { kind: "file" as const, size, mtimeMs: 0, isLink: false } };
     }
     return next(e);
   });

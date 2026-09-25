@@ -13,6 +13,7 @@ import {
   assistantMessage,
   environment,
   fakeTypesafe,
+  jevAnswer,
   type Lab,
   makeLab,
   sessionMeta,
@@ -144,6 +145,37 @@ test("a materially different next checkpoint is judged again straight away", asy
     ]);
     assert.deepEqual(await handle(stop(lab), environment_), { systemMessage: HINT });
     assert.equal(typesafe.requests.length, 2);
+  });
+});
+
+test("after a judgment below the floor, re-ask waits for 20k more tokens or 3 exchanges that change it by 5k", async () => {
+  await withLab(async (lab) => {
+    // 0.6 x (0.5 + 0.5 x 0.6) = 0.48, under every floor this test reaches.
+    const typesafe = fakeTypesafe(() => ({ body: jevAnswer(0.6, 0.6) }));
+    const environment_ = environment(lab, { fetch: typesafe.fetch });
+    const turn = async (ask: string, tokens: number) => {
+      writeRollout(lab.transcript, [
+        ...settledRollout({ tokens: 70000 }),
+        userMessage(ask),
+        assistantMessage(`Done: ${ask}.`),
+        tokenCount(tokens),
+      ]);
+      return handle(stop(lab), environment_);
+    };
+    await turn("first", 70000);
+    assert.equal(typesafe.requests.length, 1);
+    await turn("second", 89999);
+    await turn("third", 89999);
+    assert.equal(typesafe.requests.length, 1);
+    await turn("fourth", 90000);
+    assert.equal(typesafe.requests.length, 2);
+    await turn("fifth", 90000);
+    await turn("sixth", 90000);
+    assert.equal(typesafe.requests.length, 2);
+    await turn("seventh", 94999);
+    assert.equal(typesafe.requests.length, 2);
+    await turn("eighth", 95000);
+    assert.equal(typesafe.requests.length, 3);
   });
 });
 
@@ -316,6 +348,22 @@ test("a concurrent threshold increase after TypeSafe returns suppresses the hint
   });
 });
 
+test("a below-floor judgment discarded by a concurrent settings change does not start the re-ask wait", async () => {
+  await withLab(async (lab) => {
+    writeRollout(lab.transcript, settledRollout());
+    const root = adviserRoot({ CODEX_HOME: lab.home });
+    const typesafe = fakeTypesafe(() => ({ body: jevAnswer(0.6, 0.6) }));
+    const fetch: Environment["fetch"] = async (url, init) => {
+      new ConfigStore(root).update({ minContextTokens: 100000 });
+      return typesafe.fetch(url, init);
+    };
+    await handle(stop(lab), environment(lab, { fetch }));
+    assert.equal(typesafe.requests.length, 1);
+    const state = new SessionStore(root).read("s1", 0).state;
+    assert.deepEqual([state.judgedTokens, state.judgedAt], [null, null]);
+  });
+});
+
 test("a TypeSafe failure backs off and stays silent", async () => {
   await withLab(async (lab) => {
     writeRollout(lab.transcript, settledRollout());
@@ -410,6 +458,24 @@ test("compaction resets the session, and the next checkpoint waits for the new b
     ]);
     assert.deepEqual(await handle(stop(lab), environment_), {}, "the post-compaction wait holds");
     assert.equal(typesafe.requests.length, 1);
+  });
+});
+
+test("the first request after a compaction sets its baseline, not a long first turn's end", async () => {
+  await withLab(async (lab) => {
+    const environment_ = environment(lab, { fetch: fakeTypesafe().fetch });
+    const store = new SessionStore(adviserRoot({ CODEX_HOME: lab.home }));
+    await handle({ hook_event_name: "PostCompact", session_id: "s1" }, environment_);
+    writeRollout(lab.transcript, [
+      ...settledRollout({ tokens: 300000 }),
+      { type: "compacted", payload: { replacement_history: [] } },
+      tokenCount(60000),
+      userMessage("Next step."),
+      assistantMessage("Done and committed."),
+      tokenCount(90000),
+    ]);
+    await handle(stop(lab), environment_);
+    assert.equal(store.read("s1", 0).state.baseline, 60000);
   });
 });
 

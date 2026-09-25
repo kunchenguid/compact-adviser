@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import test, { type TestContext } from "node:test";
 import {
+  floorFor,
   JUDGE_UNAVAILABLE_MESSAGE,
   JudgeError,
   parseJudgment,
@@ -58,6 +59,37 @@ test("a new checkpoint can be judged immediately; the same checkpoint is not", a
   h.next("Now add the README section.");
   await h.fire("agent_settled");
   assert.equal(h.calls, 2);
+});
+
+test("after a judgment that did not advise, re-ask waits for 20k more tokens or 3 exchanges that change it by 5k", async (t) => {
+  const h = harness(t, async () => parseJudgment(apiResponse(0.1, 0.99)));
+  h.enable();
+  h.tokens = 45000;
+  await h.fire("agent_settled");
+  assert.equal(h.calls, 1);
+  h.tokens = 64999;
+  for (const ask of ["a", "b"]) {
+    h.next(ask);
+    await h.fire("agent_settled");
+  }
+  assert.equal(h.calls, 1);
+  h.tokens = 65000;
+  h.next("c");
+  await h.fire("agent_settled");
+  assert.equal(h.calls, 2);
+  for (const ask of ["d", "e"]) {
+    h.next(ask);
+    await h.fire("agent_settled");
+  }
+  assert.equal(h.calls, 2);
+  h.tokens = 69999;
+  h.next("f");
+  await h.fire("agent_settled");
+  assert.equal(h.calls, 2, "3 exchanges that added under 5k tokens are not a new checkpoint");
+  h.tokens = 70000;
+  h.next("g");
+  await h.fire("agent_settled");
+  assert.equal(h.calls, 3);
 });
 
 test("the hint floor slides with context usage: a finished coordinating unit hints only once the window is fuller", async (t) => {
@@ -267,11 +299,17 @@ test("auto compacts at a qualifying checkpoint, errors back off", async (t) => {
   await h.fire("agent_settled");
   assert.equal(h.compactions.length, 1);
   h.compactions[0].onError?.(new Error("fixture cancel"));
+  // A compaction that did not happen did not act, so the re-ask gate holds this checkpoint.
+  assert.notEqual(restoreState(h.sm.getBranch()).judgedTokens, null);
   h.next();
   await h.fire("agent_settled");
   assert.equal(h.calls, 1);
   h.clock = 200000;
   h.next("Later checkpoint");
+  await h.fire("agent_settled");
+  assert.equal(h.calls, 1, "the backoff has passed, but the re-ask gate still holds");
+  h.tokens = 65000;
+  h.next("Checkpoint after more work");
   await h.fire("agent_settled");
   assert.equal(h.calls, 2);
 });
@@ -337,6 +375,85 @@ test("a cross-session disable or new pending message wins over a favorable in-fl
   }
 });
 
+test("the request log keeps the outcome of an answer a newer leaf made stale", async (t) => {
+  for (const outcome of ["response", "error"]) {
+    let settle: (() => void) | undefined;
+    const h = harness(
+      t,
+      () =>
+        new Promise((resolve, reject) => {
+          settle = () =>
+            outcome === "response" ? resolve(success()) : reject(new JudgeError("server"));
+        }),
+    );
+    h.enable();
+    h.store.update({ logRequests: true });
+    await h.fire("agent_settled");
+    h.next("Newer context");
+    h.tokens = 260000;
+    settle?.();
+    await flush();
+    const lines = readFileSync(requestLogPath(h.dir), "utf8")
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
+    assert.deepEqual(
+      lines.map((line) => line.kind),
+      ["request", outcome],
+      outcome,
+    );
+    // The floor describes the context that was judged, not the one the session moved to.
+    if (outcome === "response") assert.equal(lines[1].floor, floorFor(45000 / 272000));
+    assert.equal(h.compactions.length, 0, outcome);
+  }
+});
+
+test("a judgment discarded by a settings change mid-flight does not start the re-ask wait", async (t) => {
+  let answer: ((j: ReturnType<typeof parseJudgment>) => void) | undefined;
+  const h = harness(
+    t,
+    () =>
+      new Promise((resolve) => {
+        answer = resolve;
+      }),
+  );
+  h.enable();
+  await h.fire("agent_settled");
+  assert.equal(h.calls, 1);
+  h.store.update({ minContextTokens: 41000 });
+  answer?.(parseJudgment(apiResponse(0.1, 0.99)));
+  await flush();
+  h.next("next");
+  await h.fire("agent_settled");
+  assert.equal(h.calls, 2);
+});
+
+test("an answer discarded by a settings change still clears the TypeSafe backoff", async (t) => {
+  let answer: ((j: ReturnType<typeof parseJudgment>) => void) | undefined;
+  let first = true;
+  const h = harness(t, () => {
+    if (first) {
+      first = false;
+      return Promise.reject(new Error("transient"));
+    }
+    return new Promise((resolve) => {
+      answer = resolve;
+    });
+  });
+  h.enable();
+  await h.fire("agent_settled");
+  assert.equal(restoreState(h.sm.getBranch()).failures, 1);
+  h.clock = 1_000_000;
+  h.next("next");
+  await h.fire("agent_settled");
+  assert.equal(h.calls, 2);
+  h.store.update({ minContextTokens: 41000 });
+  answer?.(parseJudgment(apiResponse(0.1, 0.99)));
+  await flush();
+  const state = restoreState(h.sm.getBranch());
+  assert.deepEqual([state.failures, state.judgedTokens], [0, null]);
+});
+
 test("compaction callback cannot touch an invalidated session", async (t) => {
   const h = harness(t);
   h.enable("auto");
@@ -374,6 +491,55 @@ test("unknown post-compaction usage and 20k growth plus three exchanges survive 
   assert.equal(h.calls, 0);
   h.next("Third exchange completed and saved");
   await h.fire("agent_settled");
+  assert.equal(h.calls, 1);
+});
+
+test("the first response after a compaction sets its baseline, not a long first run's end", async (t) => {
+  const h = harness(t);
+  h.enable();
+  const kept = h.sm.getLeafId();
+  assert.ok(kept);
+  const compact = h.sm.appendCompaction("Durable summary", kept, 45000);
+  await h.fire("session_compact", { compactionEntry: h.sm.getEntry(compact) });
+  h.next("Older continued exploration ".repeat(5000));
+  h.tokens = 45000;
+  await h.fire("turn_end");
+  // Later responses of the same run do not move it.
+  h.tokens = 64000;
+  await h.fire("turn_end");
+  await h.fire("agent_settled");
+  for (const ask of ["second", "third"]) {
+    h.next(ask);
+    h.tokens = 65000;
+    await h.fire("agent_settled");
+  }
+  assert.equal(h.calls, 1);
+});
+
+test("the post-compaction baseline is looked for again after every compaction, and set once", async (t) => {
+  const h = harness(t);
+  h.enable();
+  // An ordinary response before any compaction settles the lookup for this session so far.
+  await h.fire("turn_end");
+  const kept = h.sm.getLeafId();
+  assert.ok(kept);
+  const compact = h.sm.appendCompaction("Durable summary", kept, 45000);
+  await h.fire("session_compact", { compactionEntry: h.sm.getEntry(compact) });
+  h.next("Older continued exploration ".repeat(5000));
+  h.tokens = 45000;
+  await h.fire("turn_end");
+  h.tokens = 64000;
+  await h.fire("turn_end");
+  await h.fire("agent_settled");
+  // A new prompt looks again, and must leave the baseline already set where it is.
+  await h.fire("before_agent_start");
+  h.tokens = 64000;
+  await h.fire("turn_end");
+  for (const ask of ["second", "third"]) {
+    h.next(ask);
+    h.tokens = 65000;
+    await h.fire("agent_settled");
+  }
   assert.equal(h.calls, 1);
 });
 

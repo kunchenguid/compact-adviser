@@ -37,6 +37,12 @@ export interface Rollout {
   tokens: number | undefined;
   /** The active model's context window, or undefined when it was not recorded. */
   window: number | undefined;
+  /**
+   * The first token count recorded after the latest compaction, where Codex records the size of
+   * the compacted history: the post-compaction baseline. Undefined with no compaction in the read
+   * records or no count since.
+   */
+  tokensAfterCompaction: number | undefined;
   /** True when earlier records were dropped by the read window or message cap. */
   truncated: boolean;
 }
@@ -46,6 +52,7 @@ export const EMPTY_ROLLOUT: Readonly<Rollout> = Object.freeze({
   messages: [],
   tokens: undefined,
   window: undefined,
+  tokensAfterCompaction: undefined,
   truncated: false,
 });
 
@@ -804,11 +811,15 @@ export function mapRecords(records: readonly unknown[]): Rollout {
   let originator: string | undefined;
   let tokens: number | undefined;
   let window: number | undefined;
+  let compacted = false;
+  let tokensAfterCompaction: number | undefined;
 
   for (const record of records) {
     const entry = record as { type?: unknown; payload?: unknown } | null;
     if (entry?.type === "compacted") {
       applyCompacted(entry.payload, messages, pending);
+      compacted = true;
+      tokensAfterCompaction = undefined;
       continue;
     }
 
@@ -823,7 +834,10 @@ export function mapRecords(records: readonly unknown[]): Rollout {
     if (entry?.type === "event_msg" && payload.type === "token_count") {
       const info = (payload.info ?? null) as Record<string, unknown> | null;
       const last = (info?.last_token_usage ?? null) as Record<string, unknown> | null;
-      if (typeof last?.total_tokens === "number") tokens = last.total_tokens;
+      if (typeof last?.total_tokens === "number") {
+        tokens = last.total_tokens;
+        if (compacted && tokensAfterCompaction === undefined) tokensAfterCompaction = tokens;
+      }
       if (typeof info?.model_context_window === "number") window = info.model_context_window;
       continue;
     }
@@ -838,6 +852,7 @@ export function mapRecords(records: readonly unknown[]): Rollout {
     messages: messages.slice(-MESSAGE_LIMIT),
     tokens,
     window,
+    tokensAfterCompaction,
     truncated,
   };
 }

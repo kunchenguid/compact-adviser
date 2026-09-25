@@ -2,6 +2,8 @@
 // entries. They live in the plugin's own store under `session:<id>`, so a restart, a hot
 // reload, or a mode change never resets a session's cooldowns.
 
+import { COOLDOWN_TEXT, cooldown } from "./checkpoint.ts";
+
 export const SESSION_PREFIX = "session:";
 export const SESSION_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 
@@ -15,6 +17,9 @@ export interface SessionState {
   completed: number;
   lastHintAt: number | null;
   lastHintKey: string | null;
+  /** Context tokens and `completed` at the latest judgment that did not act; null when none. */
+  judgedTokens: number | null;
+  judgedAt: number | null;
   snoozeUntil: number;
   retryAfter: number;
   failures: number;
@@ -33,6 +38,8 @@ export function initialState(compacted: boolean, now: number): SessionState {
     completed: 0,
     lastHintAt: null,
     lastHintKey: null,
+    judgedTokens: null,
+    judgedAt: null,
     snoozeUntil: 0,
     retryAfter: 0,
     failures: 0,
@@ -60,26 +67,31 @@ export function restoreState(value: unknown, now: number): SessionState {
     !(s.baseline === null || (typeof s.baseline === "number" && Number.isFinite(s.baseline))) ||
     !(s.lastHintAt === null || count(s.lastHintAt)) ||
     !(s.lastHintKey === null || typeof s.lastHintKey === "string") ||
+    !(
+      s.judgedTokens == null ||
+      (typeof s.judgedTokens === "number" && Number.isFinite(s.judgedTokens) && s.judgedTokens >= 0)
+    ) ||
+    !(s.judgedAt == null || count(s.judgedAt)) ||
     !count(s.updatedAt)
   ) {
     return { ...initialState(true, now), snoozeUntil: 3 };
   }
-  return { ...(s as SessionState) };
+  // Records written before the re-ask gate existed carry neither judged field.
+  return {
+    ...(s as SessionState),
+    judgedTokens: s.judgedTokens ?? null,
+    judgedAt: s.judgedAt ?? null,
+  };
 }
 
+/** The shared cooldown gates, read against this host's record of the latest compaction. */
 export function cooldownReason(
   state: SessionState,
   tokens: number,
   now: number,
 ): string | undefined {
-  if (now < state.retryAfter) return "TypeSafe backoff";
-  if (state.completed < state.snoozeUntil) return "Snoozed";
-  if (
-    state.compacted &&
-    (state.baseline === null || tokens - state.baseline < 20000 || state.completed < 3)
-  )
-    return "Waiting for 20k new tokens and 3 completed exchanges after compaction";
-  return undefined;
+  const reason = cooldown(state, state.compacted, tokens, now);
+  return reason === undefined ? undefined : COOLDOWN_TEXT[reason];
 }
 
 /** Records one completed exchange, taking the post-compaction baseline from fresh usage. */

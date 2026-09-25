@@ -34,6 +34,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
+import { judged, resolve } from "../lib/checkpoint.ts";
 import {
   DEFAULT_MINIMUM,
   formatTokens,
@@ -333,11 +334,16 @@ async function runStop(payload: HookPayload): Promise<void> {
   if (transcript.unreadableLines !== 0) return;
   if (!transcript.messages.length) return;
   const view = snapshot(transcript.messages, [activeKey], transcript.hasImages);
-  if (view.conversationTokens <= MINIMUM_CONVERSATION_TOKENS) return;
 
   // `contextTokensUsed` is the honest number when signals.json is readable; the local estimate
   // stands in when it is not, so an undocumented field going away weakens the gate, not the product.
   const tokens = usage.tokens ?? view.conversationTokens;
+  if (state.compacted && state.baseline === null) {
+    // No readable usage after the compaction: the same estimate the gate reads is the baseline.
+    state = { ...state, baseline: tokens };
+    saveSessionState(statePath, state);
+  }
+  if (view.conversationTokens <= MINIMUM_CONVERSATION_TOKENS) return;
   if (tokens < settings.minContextTokens) return;
   if (cooldownReason(state, tokens, now) !== undefined) return;
 
@@ -370,7 +376,7 @@ async function runStop(payload: HookPayload): Promise<void> {
     if (settings.logRequests) {
       appendLog(sessionId, errorLogLine(loggedJudgeErrorKind(error), loggedBody));
     }
-    saveSessionState(statePath, backoff(state, now));
+    saveSessionState(statePath, backoff(loadSessionState(statePath, Date.now()), Date.now()));
     saveDiagnostic(diagnosticPath(dataDir(env()), sessionId), loggedJudgeErrorKind(error));
     clearVerdict(verdict);
     return;
@@ -389,19 +395,31 @@ async function runStop(payload: HookPayload): Promise<void> {
       ),
     );
   }
-  state = { ...state, failures: 0, retryAfter: 0, updatedAt: now };
   clearDiagnostic(diagnosticPath(dataDir(env()), sessionId));
-  let profileChanged = true;
+  // Another hook process (a compaction, a later Stop) may have written this session's record
+  // or the settings while TypeSafe answered: judge against what is on disk now.
+  const after = Date.now();
+  let latest: Settings | undefined;
   try {
-    profileChanged = settingsOrThrow().profile !== settings.profile;
+    latest = settingsOrThrow();
   } catch {}
-  if (profileChanged || !qualifies(judgment, fraction, profile)) {
-    saveSessionState(statePath, state);
+  const current = loadSessionState(statePath, after);
+  const resolution = resolve({
+    fresh:
+      latest !== undefined &&
+      latest.profile === settings.profile &&
+      tokens >= latest.minContextTokens &&
+      cooldownReason(current, tokens, after) === undefined,
+    qualifies: qualifies(judgment, fraction, profile),
+    mode: latest?.mode ?? "off",
+    autoAcknowledged: false,
+  });
+  state = { ...judged(current, resolution, tokens, fingerprint), updatedAt: after };
+  saveSessionState(statePath, state);
+  if (resolution !== "hint") {
     clearVerdict(verdict);
     return;
   }
-  state = { ...state, lastHintAt: state.completed, lastHintKey: fingerprint };
-  saveSessionState(statePath, state);
   saveVerdict(verdict, {
     version: 1,
     sessionId,

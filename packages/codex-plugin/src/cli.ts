@@ -63,8 +63,10 @@ function statusText(environment: CliEnvironment): string {
   const cooldown =
     latest === undefined
       ? "No session recorded yet."
-      : (cooldownReason(latest.state, latest.tokens ?? 0, now) ??
-        "No cooldown; semantic checks still apply.");
+      : latest.tokens === undefined
+        ? "Waiting for fresh model usage."
+        : (cooldownReason(latest.state, latest.tokens, now) ??
+          "No cooldown; semantic checks still apply.");
   const usage = latest === undefined ? Number.NaN : usageFraction(latest);
   const window = Number.isFinite(usage)
     ? ` Context: ${formatTokens(latest?.tokens ?? 0)} tokens, ${Math.round(usage * 100)}% of the window; hint floor ${floorFor(usage, parseProfile(config.profile)).toFixed(2)}.`

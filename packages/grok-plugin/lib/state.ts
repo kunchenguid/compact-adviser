@@ -5,6 +5,8 @@
 // `cooldownReason` must gate identically on every host; packages/pi-extension/test/lockstep.test.ts
 // asserts that.
 
+import { COOLDOWN_TEXT, cooldown } from "./checkpoint.ts";
+
 export const SESSION_PREFIX = "session:";
 export const SESSION_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 
@@ -18,6 +20,9 @@ export interface SessionState {
   completed: number;
   lastHintAt: number | null;
   lastHintKey: string | null;
+  /** Context tokens and `completed` at the latest judgment that did not act; null when none. */
+  judgedTokens: number | null;
+  judgedAt: number | null;
   /**
    * The turn this session's Stop gate has already handled. A later serial run of the same
    * turn is skipped so it does not ask TypeSafe again.
@@ -41,6 +46,8 @@ export function initialState(compacted: boolean, now: number): SessionState {
     completed: 0,
     lastHintAt: null,
     lastHintKey: null,
+    judgedTokens: null,
+    judgedAt: null,
     lastPromptId: null,
     snoozeUntil: 0,
     retryAfter: 0,
@@ -70,6 +77,11 @@ export function restoreState(value: unknown, now: number): SessionState {
     !(s.lastHintAt === null || count(s.lastHintAt)) ||
     !(s.lastHintKey === null || typeof s.lastHintKey === "string") ||
     !(
+      s.judgedTokens == null ||
+      (typeof s.judgedTokens === "number" && Number.isFinite(s.judgedTokens) && s.judgedTokens >= 0)
+    ) ||
+    !(s.judgedAt == null || count(s.judgedAt)) ||
+    !(
       s.lastPromptId === undefined ||
       s.lastPromptId === null ||
       typeof s.lastPromptId === "string"
@@ -78,22 +90,23 @@ export function restoreState(value: unknown, now: number): SessionState {
   ) {
     return { ...initialState(true, now), snoozeUntil: 3 };
   }
-  return { ...(s as SessionState), lastPromptId: s.lastPromptId ?? null };
+  // Records written before the re-ask gate existed carry neither judged field.
+  return {
+    ...(s as SessionState),
+    lastPromptId: s.lastPromptId ?? null,
+    judgedTokens: s.judgedTokens ?? null,
+    judgedAt: s.judgedAt ?? null,
+  };
 }
 
+/** The shared cooldown gates, read against this host's record of the latest compaction. */
 export function cooldownReason(
   state: SessionState,
   tokens: number,
   now: number,
 ): string | undefined {
-  if (now < state.retryAfter) return "TypeSafe backoff";
-  if (state.completed < state.snoozeUntil) return "Snoozed";
-  if (
-    state.compacted &&
-    (state.baseline === null || tokens - state.baseline < 20000 || state.completed < 3)
-  )
-    return "Waiting for 20k new tokens and 3 completed exchanges after compaction";
-  return undefined;
+  const reason = cooldown(state, state.compacted, tokens, now);
+  return reason === undefined ? undefined : COOLDOWN_TEXT[reason];
 }
 
 /** Records one completed exchange, taking the post-compaction baseline from fresh usage. */

@@ -14,6 +14,7 @@
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { judged, resolve } from "./checkpoint.ts";
 import { ConfigStore } from "./config.ts";
 import { DISABLE_ENV, disabledByEnv } from "./disable.ts";
 import { parseDotenvKey, type ResolvedTypesafeApiKey, resolveTypesafeApiKey } from "./env.ts";
@@ -154,7 +155,9 @@ async function onStop(payload: HookPayload, environment: Environment): Promise<H
   const rollout = readRollout(transcript);
   const usage = { tokens: rollout.tokens, window: rollout.window };
   const stored = sessions.read(sessionId, now).state;
-  const state = completeExchange(stored, rollout.tokens, now);
+  // The first token count after a compaction is its baseline: a long first turn's end would
+  // lift it.
+  const state = completeExchange(stored, rollout.tokensAfterCompaction ?? rollout.tokens, now);
   sessions.write(sessionId, state, usage);
 
   if (config.mode === "off") return {};
@@ -239,23 +242,21 @@ async function onStop(payload: HookPayload, environment: Environment): Promise<H
   const nowAfter = environment.now();
   const latestConfig = new ConfigStore(root).read();
   const current = sessions.read(sessionId, nowAfter).state;
-  const settled = { ...current, failures: 0, retryAfter: 0, updatedAt: nowAfter };
-  if (
-    latestConfig.mode === "off" ||
-    tokens < latestConfig.minContextTokens ||
-    cooldownReason(current, tokens, nowAfter) !== undefined ||
-    latestConfig.profile !== config.profile ||
-    !qualifies(result, fraction, profile)
-  ) {
-    sessions.write(sessionId, settled, usage);
-    return {};
-  }
+  const resolution = resolve({
+    fresh:
+      tokens >= latestConfig.minContextTokens &&
+      cooldownReason(current, tokens, nowAfter) === undefined &&
+      latestConfig.profile === config.profile,
+    qualifies: qualifies(result, fraction, profile),
+    mode: latestConfig.mode,
+    autoAcknowledged: false,
+  });
   sessions.write(
     sessionId,
-    { ...settled, lastHintAt: settled.completed, lastHintKey: fingerprint },
+    { ...judged(current, resolution, tokens, fingerprint), updatedAt: nowAfter },
     usage,
   );
-  return { systemMessage: HINT };
+  return resolution === "hint" ? { systemMessage: HINT } : {};
 }
 
 /** Compaction resets a session's counters: the wait gate is measured from the new baseline. */

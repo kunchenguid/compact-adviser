@@ -685,3 +685,16 @@ test("a mixed text-and-image user message keeps the text and marks images", () =
   assert.equal(view.state.coverage.hasImages, true);
   assert.equal(view.state.userConstraints[0]?.text, "Look at this screenshot.");
 });
+
+test("the first request after the latest compaction is the post-compaction baseline", () => {
+  const compacted = { type: "compacted", payload: { replacement_history: [] } };
+  assert.equal(
+    mapRecords([tokenCount(300000), tokenCount(310000)]).tokensAfterCompaction,
+    undefined,
+  );
+  const once = mapRecords([tokenCount(300000), compacted, tokenCount(60000), tokenCount(90000)]);
+  assert.deepEqual([once.tokens, once.tokensAfterCompaction], [90000, 60000]);
+  const twice = mapRecords([compacted, tokenCount(60000), compacted, tokenCount(40000)]);
+  assert.equal(twice.tokensAfterCompaction, 40000);
+  assert.equal(mapRecords([tokenCount(60000), compacted]).tokensAfterCompaction, undefined);
+});
