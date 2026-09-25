@@ -371,7 +371,7 @@ async function runStop(payload: HookPayload): Promise<void> {
     if (settings.logRequests) {
       appendLog(sessionId, errorLogLine(loggedJudgeErrorKind(error), loggedBody));
     }
-    saveSessionState(statePath, backoff(state, now));
+    saveSessionState(statePath, backoff(loadSessionState(statePath, Date.now()), Date.now()));
     saveDiagnostic(diagnosticPath(dataDir(env()), sessionId), loggedJudgeErrorKind(error));
     clearVerdict(verdict);
     return;
@@ -391,17 +391,25 @@ async function runStop(payload: HookPayload): Promise<void> {
     );
   }
   clearDiagnostic(diagnosticPath(dataDir(env()), sessionId));
-  let profileChanged = true;
+  // Another hook process (a compaction, a later Stop) may have written this session's record
+  // or the settings while TypeSafe answered: judge against what is on disk now.
+  const after = Date.now();
+  let latest: Settings | undefined;
   try {
-    profileChanged = settingsOrThrow().profile !== settings.profile;
+    latest = settingsOrThrow();
   } catch {}
+  const current = loadSessionState(statePath, after);
   const resolution = resolve({
-    fresh: !profileChanged,
+    fresh:
+      latest !== undefined &&
+      latest.profile === settings.profile &&
+      tokens >= latest.minContextTokens &&
+      cooldownReason(current, tokens, after) === undefined,
     qualifies: qualifies(judgment, fraction, profile),
-    mode: settings.mode,
+    mode: latest?.mode ?? "off",
     autoAcknowledged: false,
   });
-  state = { ...judged(state, resolution, tokens, fingerprint), updatedAt: now };
+  state = { ...judged(current, resolution, tokens, fingerprint), updatedAt: after };
   saveSessionState(statePath, state);
   if (resolution !== "hint") {
     clearVerdict(verdict);

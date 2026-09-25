@@ -9,6 +9,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { HINT } from "../lib/statusline.ts";
+import { resetSessionState } from "../lib/store.ts";
 import {
   lab,
   PACKAGE_ROOT,
@@ -121,6 +122,39 @@ test("a below-floor judgment discarded by a profile change mid-flight does not s
   };
   assert.deepEqual([state.judgedTokens, state.judgedAt], [null, null]);
 });
+
+test("a compaction that lands while TypeSafe answers keeps its reset", async (t) => {
+  const { l, fixture } = await judgeTurn(t);
+  fixture.verdict = { finished: 0.6, handsOn: 0.6 };
+  // What the PostCompact hook does, run synchronously inside the in-flight request.
+  fixture.onRequest = () =>
+    resetSessionState(join(l.dataDir, "sessions", `${l.sessionId}.json`), Date.now());
+  await runCli(["hook", "stop"], { lab: l, stdin: stopPayload(l), env: keyed(fixture) });
+  assert.equal(fixture.bodies.length, 1);
+  const state = JSON.parse(
+    readFileSync(join(l.dataDir, "sessions", `${l.sessionId}.json`), "utf8"),
+  ) as { compacted: boolean; completed: number; judgedTokens: number | null };
+  assert.deepEqual([state.compacted, state.completed, state.judgedTokens], [true, 0, null]);
+});
+
+for (const [name, settings] of [
+  ["a raised minimum", { version: 1, minContextTokens: 900000 }],
+  ["mode off", { version: 1, mode: "off" }],
+] as const) {
+  test(`${name} saved while TypeSafe answers discards the verdict`, async (t) => {
+    const { l, fixture } = await judgeTurn(t);
+    fixture.onRequest = () =>
+      writeFileSync(join(l.dataDir, "settings.json"), JSON.stringify(settings));
+    await runCli(["hook", "stop"], { lab: l, stdin: stopPayload(l), env: keyed(fixture) });
+    assert.equal(fixture.bodies.length, 1);
+    const state = JSON.parse(
+      readFileSync(join(l.dataDir, "sessions", `${l.sessionId}.json`), "utf8"),
+    ) as { lastHintKey: string | null; judgedTokens: number | null };
+    assert.deepEqual([state.lastHintKey, state.judgedTokens], [null, null]);
+    const row = await runCli(["status-line"], { lab: l, stdin: statusPayload(l) });
+    assert.ok(!row.stdout.includes(HINT));
+  });
+}
 
 test("the judge sees the person's own words, not Grok's prompt envelopes", async (t) => {
   const { l, fixture } = await judgeTurn(t);
