@@ -389,6 +389,32 @@ test("a judgment discarded by a settings change mid-flight does not start the re
   assert.equal(h.calls, 2);
 });
 
+test("an answer discarded by a settings change still clears the TypeSafe backoff", async (t) => {
+  let answer: ((j: ReturnType<typeof parseJudgment>) => void) | undefined;
+  let first = true;
+  const h = harness(t, () => {
+    if (first) {
+      first = false;
+      return Promise.reject(new Error("transient"));
+    }
+    return new Promise((resolve) => {
+      answer = resolve;
+    });
+  });
+  h.enable();
+  await h.fire("agent_settled");
+  assert.equal(restoreState(h.sm.getBranch()).failures, 1);
+  h.clock = 1_000_000;
+  h.next("next");
+  await h.fire("agent_settled");
+  assert.equal(h.calls, 2);
+  h.store.update({ minContextTokens: 41000 });
+  answer?.(parseJudgment(apiResponse(0.1, 0.99)));
+  await flush();
+  const state = restoreState(h.sm.getBranch());
+  assert.deepEqual([state.failures, state.judgedTokens], [0, null]);
+});
+
 test("compaction callback cannot touch an invalidated session", async (t) => {
   const h = harness(t);
   h.enable("auto");

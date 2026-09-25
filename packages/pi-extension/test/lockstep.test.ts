@@ -590,6 +590,39 @@ test("a verdict resolves and updates the gates the same way for every mode", () 
   }
 });
 
+test("Pi restores pre-gate and invalid gate entries like every other package", () => {
+  const entry = (data: Record<string, unknown>) =>
+    [{ type: "custom", customType: piState.STATE_TYPE, data }] as never;
+  const legacy = {
+    version: 1,
+    compactionId: null,
+    baseline: null,
+    completed: 2,
+    lastSettled: null,
+    lastHintAt: null,
+    lastHintKey: null,
+    snoozeUntil: 0,
+    retryAfter: 0,
+    failures: 0,
+  };
+  const restored = piState.restoreState(entry(legacy));
+  assert.deepEqual(
+    [restored.snoozeUntil, restored.judgedTokens, restored.judgedAt],
+    [0, null, null],
+  );
+  for (const bad of [
+    { judgedAt: -1 },
+    { judgedTokens: -1 },
+    { judgedTokens: Number.NaN },
+    { judgedTokens: "9" },
+  ])
+    assert.equal(
+      piState.restoreState(entry({ ...legacy, ...bad })).snoozeUntil,
+      3,
+      JSON.stringify(bad),
+    );
+});
+
 test("every package restores pre-gate records the same way", () => {
   const legacy = {
     version: 1,
@@ -614,11 +647,17 @@ test("every package restores pre-gate records the same way", () => {
       [0, null, null],
       `${name} legacy`,
     );
-    assert.equal(
-      other.restoreState({ ...legacy, judgedAt: -1 }, 0).snoozeUntil,
-      3,
-      `${name} invalid`,
-    );
+    for (const bad of [
+      { judgedAt: -1 },
+      { judgedTokens: -1 },
+      { judgedTokens: Number.NaN },
+      { judgedTokens: "9" },
+    ])
+      assert.equal(
+        other.restoreState({ ...legacy, ...bad }, 0).snoozeUntil,
+        3,
+        `${name} ${JSON.stringify(bad)}`,
+      );
   }
 });
 

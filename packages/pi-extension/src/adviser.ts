@@ -224,7 +224,13 @@ export function installAdviser(pi: ExtensionAPI, options: Options): void {
       // No await between this final cross-session configuration/state check and compact().
       const latest = store.read();
       const judgedTokens = eligible(ctx, latest, state);
-      if (JSON.stringify(latest) !== configIdentity || judgedTokens === undefined) return;
+      if (JSON.stringify(latest) !== configIdentity || judgedTokens === undefined) {
+        // Still this session and leaf, so the answer clears the backoff; it decides nothing else.
+        persist(
+          judged(restoreState(ctx.sessionManager.getBranch()), "discard", 0, view.checkpointKey),
+        );
+        return;
+      }
       const resolution = resolve({
         fresh: true,
         qualifies: qualifies(result, usageFraction(ctx), profile),
