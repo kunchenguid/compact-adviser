@@ -143,8 +143,8 @@ let judging = false;
 let compactions = 0;
 // A turn end that settled while an older judgment was still running; judged once it ends.
 let pendingEpoch: number | undefined;
-// Whether this environment has found the session's latest request-log part yet.
-let logPartResumed = false;
+// The lookup of the session's latest request-log part, run once per environment.
+let logPartResume: Promise<void> | undefined;
 // Whether the next main-loop response may be the first since a compaction: its context is
 // the post-compaction baseline (the turn end's is later, and a long first turn inflates it).
 let baselinePending = false;
@@ -268,13 +268,15 @@ const MAX_LOG_PARTS = 100;
  * A hot reload restarts `logPart` at 1, but the session's log continues in its latest part:
  * a later, shorter line must not land in a part that already rolled over.
  */
-async function resumeLogPart($: EngineInterface): Promise<void> {
-  if (logPartResumed) return;
-  logPartResumed = true;
-  for (; logPart < MAX_LOG_PARTS; logPart++) {
-    const next = await sessionLogPath($, logPart + 1);
-    if (next === undefined || !(await $.fs.exists(next))) return;
-  }
+function resumeLogPart($: EngineInterface): Promise<void> {
+  // One lookup, awaited by every caller: a status read during it must not append to part 1.
+  logPartResume ??= (async () => {
+    for (; logPart < MAX_LOG_PARTS; logPart++) {
+      const next = await sessionLogPath($, logPart + 1);
+      if (next === undefined || !(await $.fs.exists(next))) return;
+    }
+  })();
+  return logPartResume;
 }
 
 async function appendTypeSafeLog($: EngineInterface, line: string): Promise<void> {
@@ -314,8 +316,14 @@ function clearStatus($: EngineInterface): void {
   if (interactive) $.ui.status(undefined);
 }
 
-async function invalidate($: EngineInterface): Promise<void> {
+/** Makes any judgment in flight stale; the turn end it was judging no longer reads as pending. */
+function supersede(): void {
   generation++;
+  if (lastCheck === "pending") lastCheck = "discard";
+}
+
+async function invalidate($: EngineInterface): Promise<void> {
+  supersede();
   if (hintVisible) {
     hintVisible = false;
     clearStatus($);
@@ -388,7 +396,7 @@ function scheduleJudgment($: EngineInterface, epoch: number): void {
  * at a time; a turn that settles meanwhile waits and is judged when the running one ends.
  */
 async function judgeCheckpoint($: EngineInterface, epoch: number): Promise<void> {
-  if (epoch !== generation || compactions > 0) return;
+  if (epoch !== generation) return;
   if (judging) {
     pendingEpoch = epoch;
     return;
@@ -396,6 +404,15 @@ async function judgeCheckpoint($: EngineInterface, epoch: number): Promise<void>
   judging = true;
   try {
     const initial = await loadConfig($);
+    // Re-run the cheap gates before any request: a turn queued behind another judgment was
+    // gated before that judgment recorded its answer (a wait, a backoff) or a compaction began.
+    const { state: before } = await loadState($);
+    const { context: settled } = await $.session.usage();
+    const blocked = await ineligibility($, initial, before, settled.tokens, await $.clock.now());
+    if (blocked !== undefined) {
+      note(epoch, blocked);
+      return;
+    }
     const profile = parseProfile(initial.profile);
     const [messages, activeKey, rows] = await Promise.all([
       $.session.messages(),
@@ -408,7 +425,7 @@ async function judgeCheckpoint($: EngineInterface, epoch: number): Promise<void>
       return;
     }
     const fingerprint = await checkpointKey(view.checkpointText);
-    if ((await loadState($)).state.lastHintKey === fingerprint) {
+    if (before.lastHintKey === fingerprint) {
       note(epoch, "already-advised");
       return;
     }
@@ -845,8 +862,7 @@ async function statusText($: EngineInterface): Promise<string> {
         : " Claude Code auto-compact is off.";
   const waiting =
     typeof tokens === "number"
-      ? (cooldownReason(state, tokens, await $.clock.now()) ??
-        "No cooldown; semantic checks still apply.")
+      ? `${cooldownReason(state, tokens, await $.clock.now()) ?? "No cooldown; semantic checks still apply"}.`
       : "Waiting for fresh model usage.";
   return `Mode: ${config.mode}${config.mode === "auto" && !config.autoAcknowledged ? " (not confirmed)" : ""}. Minimum: ${formatTokens(config.minContextTokens)} tokens. Context: ${typeof tokens === "number" ? formatTokens(tokens) : "unknown"}${Number.isFinite(usageFraction(usage.context)) ? ` (${Math.round(usageFraction(usage.context) * 100)}% of the context limit; hint floor ${floorFor(usageFraction(usage.context), parseProfile(config.profile)).toFixed(2)})` : ""}. ${formatKeyStatus((await resolvedKey($)).source)}. ${waiting}${lastCheck === undefined ? "" : ` Last turn end: ${turnEndText(lastCheck)}.`}${engine} Request log: ${await requestLogStatus($, config)}. Settings: /config (compact-adviser rows) and /compact-adviser.`;
 }
@@ -882,7 +898,7 @@ export const register: Register = (on, options) => {
     judging = false;
     compactions = 0;
     pendingEpoch = undefined;
-    logPartResumed = false;
+    logPartResume = undefined;
     baselinePending = true;
     hintVisible = false;
     lastCheck = undefined;
@@ -935,7 +951,7 @@ export const register: Register = (on, options) => {
     if (e.trigger === "precompute" || e.agentId !== undefined) return next(e);
     if (!(await isActivated($)) || !interactive) return next(e);
     // A judgment in flight is stale either way, and none may hint or compact until this ends.
-    await invalidate($);
+    supersede();
     compactions++;
     let result: Awaited<ReturnType<typeof next>>;
     try {
@@ -943,7 +959,9 @@ export const register: Register = (on, options) => {
     } finally {
       compactions--;
     }
+    // A compaction that did not happen leaves the hint: its checkpoint still stands.
     if (result.skip !== undefined) return result;
+    await invalidate($);
     try {
       const key = sessionKey(await $.session.id());
       await $.store.set(key, initialState(true, await $.clock.now()));

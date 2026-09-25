@@ -634,6 +634,71 @@ describe("turn-end gates", () => {
     expect(hinted(w)).toBe(false);
   });
 
+  for (const interrupt of ["compact", "snooze"] as const) {
+    test(`a ${interrupt} during a judgment leaves no turn end reading as being judged`, async ($, on) => {
+      const w = world(on);
+      w.respond = async () => {
+        if (interrupt === "compact") {
+          await $.session.compact({ trigger: "manual", messages: MESSAGES });
+        } else {
+          await $.command.run(commandRun("snooze"));
+        }
+        return { status: 200, text: JSON.stringify(jevAnswer()) };
+      };
+      await $.session.start(interactiveStart);
+      await turnEnd($, w);
+      await $.command.run(commandRun("status"));
+      const status = w.journal.logs.at(-1) ?? "";
+      expect(status).not.toContain("being judged");
+      expect(status).toContain("Last turn end: judgment discarded");
+      // The cooldown sentence ends before the next one starts.
+      expect(status).toMatch(/(after compaction|Snoozed)\. Last turn end:/);
+      expect(hinted(w)).toBe(false);
+      if (interrupt === "snooze")
+        expect(stored(w).snoozeUntil).toBe((stored(w).completed as number) + 4);
+    });
+  }
+
+  test("a turn queued behind a judgment is gated again before its own request", async ($, on) => {
+    const w = world(on);
+    let calls = 0;
+    w.respond = async () => {
+      calls++;
+      if (calls === 1) {
+        // A turn end with no turn start: it queues behind this judgment, whose "not yet"
+        // then starts the re-ask wait that the queued turn has not grown past.
+        w.messages = longConversation("second unit");
+        w.usage.tokens = 61000;
+        await $.turn.complete(answered());
+      }
+      return { status: 200, text: JSON.stringify(jevAnswer({ completed: 0.1 })) };
+    };
+    await $.session.start(interactiveStart);
+    await turnEnd($, w);
+    expect(w.journal.requests).toHaveLength(1);
+    await $.command.run(commandRun("status"));
+    expect(w.journal.logs.at(-1)).toContain(
+      "Last turn end: not checked, cooldown: Waiting for 20k",
+    );
+  });
+
+  test("a request log pauses after its last part instead of growing without end", async ($, on) => {
+    const w = world(on, { logRequests: true });
+    const base = "/tmp/fixture-home/.claude/compact-adviser-requests-session-1";
+    for (let part = 1; part <= 100; part++) {
+      const path = part === 1 ? `${base}.jsonl` : `${base}.${part}.jsonl`;
+      w.logFiles.set(path, "full\n");
+      w.logSizes.set(path, 4 * 1024 * 1024);
+    }
+    await $.session.start(interactiveStart);
+    await turnEnd($, w);
+    expect(w.journal.requests).toHaveLength(1);
+    expect(w.logFiles.has(`${base}.101.jsonl`)).toBe(false);
+    expect(w.logFiles.get(`${base}.100.jsonl`)).toBe("full\n");
+    await $.command.run(commandRun("status"));
+    expect(w.journal.logs.at(-1)).toContain("Request log: paused after 100 log parts.");
+  });
+
   test("an answer discarded by a settings change still clears the TypeSafe backoff", async ($, on) => {
     const w = world(on);
     w.respond = async () => ({ status: 500, text: "" });
@@ -925,6 +990,51 @@ describe("compaction cooldown", () => {
     w.usage.tokens = 65000;
     await turn($, w, "a3");
     expect(w.journal.requests).toHaveLength(1);
+  });
+
+  test("a turn end during a host compaction is not judged", async ($, on) => {
+    const w = world(on);
+    await $.session.start(interactiveStart);
+    w.hostCompact = async () => {
+      await turnEnd($, w);
+      return { messages: MESSAGES, tokensBefore: 50000, tokensAfter: 4000 };
+    };
+    await $.session.compact({ trigger: "manual", messages: MESSAGES });
+    expect(w.journal.requests).toHaveLength(0);
+  });
+
+  test("a vetoed host compaction keeps the hint and the session's counters", async ($, on) => {
+    const w = world(on);
+    await $.session.start(interactiveStart);
+    await turnEnd($, w);
+    expect(hinted(w)).toBe(true);
+    w.hostCompact = async () => ({ skip: "another plugin vetoed" });
+    await $.session.compact({ trigger: "manual", messages: MESSAGES });
+    expect(w.journal.statuses.at(-1)).toBe(HINT);
+    expect(stored(w).compacted).toBe(false);
+  });
+
+  test("a subagent's response or one without usage leaves the baseline to the next main one", async ($, on) => {
+    const w = world(on);
+    await $.session.start(interactiveStart);
+    await $.session.compact({ trigger: "manual", messages: MESSAGES });
+    const steps = [
+      { stepTokens: 50000, agentId: "sub" },
+      { stepTokens: undefined, agentId: undefined },
+      { stepTokens: 70000, agentId: undefined },
+    ];
+    for (const [index, step] of steps.entries()) {
+      w.stepTokens = step.stepTokens;
+      const run = $.turn.step({
+        turnId: "t",
+        index,
+        model: "m",
+        messageCount: index + 1,
+        ...(step.agentId ? { agentId: step.agentId } : {}),
+      } as never);
+      for await (const _ of run);
+    }
+    expect(stored(w).baseline).toBe(70000);
   });
 
   test("a precompute or a subagent's compaction does not reset the session", async ($, on) => {

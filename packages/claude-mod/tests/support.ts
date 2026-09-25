@@ -75,6 +75,10 @@ export type World = {
   stepTokens?: number;
   /** What TypeSafe answers; the default is a confident checkpoint. */
   respond: (body: string) => Promise<{ status: number; text: string } | { deny: string }>;
+  /** What the engine answers for a compaction another trigger (manual, auto) runs. */
+  hostCompact: () => Promise<
+    { messages: SessionMessage[]; tokensBefore?: number; tokensAfter?: number } | { skip: string }
+  >;
   /** What the engine's compaction answers for this mod's own request. */
   compact: () => Promise<
     { messages: SessionMessage[]; tokensBefore?: number; tokensAfter?: number } | { skip: string }
@@ -199,6 +203,11 @@ export function world(on: On, options: WorldOptions = {}): World {
     usage: { tokens: 60000, window: 200000, autoCompactThreshold: 167000 },
     messages: longConversation(),
     respond: async () => ({ status: 200, text: JSON.stringify(jevAnswer()) }),
+    hostCompact: async () => ({
+      messages: [{ role: "user", text: "This session is being continued", toolUses: [] }],
+      tokensBefore: 50000,
+      tokensAfter: 4000,
+    }),
     compact: async () => ({
       messages: [{ role: "user", text: "This session is being continued", toolUses: [] }],
       tokensBefore: 60000,
@@ -277,11 +286,7 @@ export function world(on: On, options: WorldOptions = {}): World {
       journal.compactions.push({ instructions: e.instructions });
       return (await w.compact()) as never;
     }
-    return {
-      messages: [{ role: "user", text: "This session is being continued", toolUses: [] }],
-      tokensBefore: 50000,
-      tokensAfter: 4000,
-    };
+    return (await w.hostCompact()) as never;
   });
   on("config.list", async () => ({
     value: [...rows].map(([key, value]) => ({
