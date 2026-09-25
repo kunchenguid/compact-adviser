@@ -14,7 +14,7 @@
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { judged, resolve } from "./checkpoint.ts";
+import { effectiveBudget, judged, resolve } from "./checkpoint.ts";
 import { ConfigStore } from "./config.ts";
 import { DISABLE_ENV, disabledByEnv } from "./disable.ts";
 import { parseDotenvKey, type ResolvedTypesafeApiKey, resolveTypesafeApiKey } from "./env.ts";
@@ -232,7 +232,7 @@ async function onStop(payload: HookPayload, environment: Environment): Promise<H
           fraction,
           undefined,
           profile,
-          config.contextBudgetTokens,
+          effectiveBudget(rollout.window ?? Number.NaN, config.contextBudgetTokens),
         ),
       );
     } catch {

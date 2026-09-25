@@ -665,7 +665,13 @@ test("a silent no-qualify turn still logs the Jev response", async (t) => {
 });
 
 test("a context budget relaxes the floor by the person's own token count", async (t) => {
-  for (const budget of ["off", "50000"]) {
+  // 45k of a 272k window is early (strict floor); 45k of a 50k budget is near the end; a
+  // budget above the window leaves the window in charge.
+  for (const [budget, usage, logged, hint, saved, share] of [
+    ["off", 45000 / 272000, undefined, false, "Budget: off.", "17% of the window;"],
+    ["50000", 45000 / 50000, 50000, true, "Budget: 50,000 tokens.", "90% of the budget;"],
+    ["450000", 45000 / 272000, undefined, false, "Budget: 450,000 tokens.", "17% of the window;"],
+  ] as const) {
     const judgment = parseJudgment(apiResponse(0.8, 0.5));
     const h = harness(t, async () => judgment);
     h.enable();
@@ -678,18 +684,17 @@ test("a context budget relaxes the floor by the person's own token count", async
       .trim()
       .split("\n")
       .map((line) => JSON.parse(line))[1];
-    // 45k of a 272k window is early (strict floor); 45k of a 50k budget is near the end.
-    assert.equal(response.usage, budget === "off" ? 45000 / 272000 : 45000 / 50000);
+    assert.equal(response.usage, usage);
     assert.equal(response.floor, floorFor(response.usage));
     // A replay can tell a budget fraction from a window fraction.
-    assert.equal(response.budget, budget === "off" ? undefined : 50000);
-    assert.equal(showedHint(h), budget !== "off");
+    assert.equal(response.budget, logged);
+    assert.equal(showedHint(h), hint);
     await h.command("status");
     const status = h.notifications.at(-1) ?? "";
-    assert.ok(status.includes(budget === "off" ? "Budget: off." : "Budget: 50,000 tokens."));
-    assert.ok(status.includes(budget === "off" ? "% of the window;" : "90% of the budget;"));
+    assert.ok(status.includes(saved), status);
+    assert.ok(status.includes(share), status);
     // The cooldown reads as its own sentence before the next field.
-    assert.ok(status.includes("since the last judgment. Request log:") || budget !== "off", status);
+    assert.ok(status.includes("since the last judgment. Request log:") || hint, status);
   }
 });
 

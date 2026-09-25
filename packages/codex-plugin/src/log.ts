@@ -43,7 +43,7 @@ export function responseLogLine(
   usage: number,
   at = new Date().toISOString(),
   profile?: JudgeProfile,
-  /** The context budget the usage is measured against; recorded only when one is set. */
+  /** The context budget the usage is measured against; recorded only when it applies. */
   budget = 0,
 ): string {
   return `${JSON.stringify({

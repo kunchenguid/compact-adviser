@@ -34,7 +34,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
-import { budgetApplies, judged, resolve } from "../lib/checkpoint.ts";
+import { effectiveBudget, judged, resolve } from "../lib/checkpoint.ts";
 import {
   DEFAULT_MINIMUM,
   formatTokens,
@@ -102,7 +102,7 @@ const USAGE = `compact-adviser (Grok)
   status                     what the adviser would do right now
   mode hint|off              hint shows advice; off disables it (Grok's own auto-compact is unaffected)
   threshold <tokens|default> minimum context tokens before a checkpoint is judged
-  budget <tokens|off>        relax the hint floor toward this context size instead of the window
+  budget <tokens|off>        relax the hint floor toward this context size, or the window if smaller
   key <value>|key clear      save or clear the TypeSafe API key from a shell (TYPESAFE_API_KEY still wins)
   log on|off                 TypeSafe request logging, off by default
   snooze                     no advice for three more completed exchanges in this session
@@ -394,7 +394,7 @@ async function runStop(payload: HookPayload): Promise<void> {
         fraction,
         undefined,
         profile,
-        settings.contextBudgetTokens,
+        effectiveBudget(usage.window ?? Number.NaN, settings.contextBudgetTokens),
       ),
     );
   }
@@ -650,7 +650,7 @@ function statusText(): string {
       `Session ${sessionId}: ${state.completed} completed exchange(s) since the last compaction.`,
       `Context: ${usage.tokens === undefined ? "unknown" : formatTokens(usage.tokens)}${
         Number.isFinite(fraction)
-          ? ` (${Math.round(fraction * 100)}% of the ${budgetApplies(usage.window ?? Number.NaN, settings.contextBudgetTokens) ? "budget" : "window"}; hint floor ${floorFor(fraction, parseProfile(settings.profile)).toFixed(2)})`
+          ? ` (${Math.round(fraction * 100)}% of the ${effectiveBudget(usage.window ?? Number.NaN, settings.contextBudgetTokens) > 0 ? "budget" : "window"}; hint floor ${floorFor(fraction, parseProfile(settings.profile)).toFixed(2)})`
           : ` (usage unknown; hint floor ${floorFor(Number.NaN, parseProfile(settings.profile)).toFixed(2)})`
       }.`,
       `Cooldown: ${

@@ -4,7 +4,7 @@ import type {
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
-import { budgetApplies, contextPressure, judged, resolve } from "./checkpoint.ts";
+import { contextPressure, effectiveBudget, judged, resolve } from "./checkpoint.ts";
 import {
   type Config,
   ConfigStore,
@@ -198,7 +198,11 @@ export function installAdviser(pi: ExtensionAPI, options: Options): void {
     const current = () =>
       !controller.signal.aborted && generation === epoch && sessionIdentity(ctx) === identity;
     // The usage of the context judged: a stale answer's log line must not describe a newer one.
-    const fraction = usageFraction(ctx, config);
+    const fraction = usageFraction(ctx, config),
+      budget = effectiveBudget(
+        ctx.getContextUsage()?.contextWindow ?? Number.NaN,
+        config.contextBudgetTokens,
+      );
     try {
       const result = await evaluate(
         view.state,
@@ -215,7 +219,7 @@ export function installAdviser(pi: ExtensionAPI, options: Options): void {
             result,
             fraction,
             profile,
-            config.contextBudgetTokens,
+            budget,
           );
         } catch {
           // Response logging must not replace the gate decision.
@@ -447,7 +451,7 @@ export function installAdviser(pi: ExtensionAPI, options: Options): void {
       t = usage?.tokens,
       u = usageFraction(ctx, c);
     ctx.ui.notify(
-      `Mode: ${c.mode}. Minimum: ${c.minContextTokens.toLocaleString("en-US")} tokens. Budget: ${c.contextBudgetTokens > 0 ? `${c.contextBudgetTokens.toLocaleString("en-US")} tokens` : "off"}. Context: ${t ?? "unknown"}${Number.isFinite(u) ? ` (${Math.round(u * 100)}% of the ${budgetApplies(usage?.contextWindow ?? Number.NaN, c.contextBudgetTokens) ? "budget" : "window"}; hint floor ${floorFor(u, parseProfile(c.profile)).toFixed(2)})` : ""}. ${formatKeyStatus(resolvedKey(ctx.cwd).source)}. ${typeof t === "number" ? `${cooldownReason(s, t, now()) ?? "No cooldown; semantic checks still apply"}.` : "Waiting for fresh model usage."} Request log: ${c.logRequests ? requestLogPath(options.agentDir) : "off"}. Settings: ${store.path}`,
+      `Mode: ${c.mode}. Minimum: ${c.minContextTokens.toLocaleString("en-US")} tokens. Budget: ${c.contextBudgetTokens > 0 ? `${c.contextBudgetTokens.toLocaleString("en-US")} tokens` : "off"}. Context: ${t ?? "unknown"}${Number.isFinite(u) ? ` (${Math.round(u * 100)}% of the ${effectiveBudget(usage?.contextWindow ?? Number.NaN, c.contextBudgetTokens) > 0 ? "budget" : "window"}; hint floor ${floorFor(u, parseProfile(c.profile)).toFixed(2)})` : ""}. ${formatKeyStatus(resolvedKey(ctx.cwd).source)}. ${typeof t === "number" ? `${cooldownReason(s, t, now()) ?? "No cooldown; semantic checks still apply"}.` : "Waiting for fresh model usage."} Request log: ${c.logRequests ? requestLogPath(options.agentDir) : "off"}. Settings: ${store.path}`,
       "info",
     );
   }

@@ -9,7 +9,7 @@
 
 import { createInterface } from "node:readline/promises";
 import { Writable } from "node:stream";
-import { budgetApplies } from "./checkpoint.ts";
+import { effectiveBudget } from "./checkpoint.ts";
 import {
   AUTO_UNAVAILABLE,
   ConfigStore,
@@ -40,7 +40,7 @@ Usage: compact-adviser <command> [value]
   hint                      Advise with a hint at eligible checkpoints (default)
   off                       Stop advising; Codex's own compaction is unaffected
   threshold <tokens>        Save an absolute token minimum, or "default" for ${DEFAULT_MINIMUM}
-  budget <tokens|off>       Relax the hint floor toward this context size instead of the window
+  budget <tokens|off>       Relax the hint floor toward this context size, or the window if smaller
   log <on|off>              Log each TypeSafe request and its outcome to a local jsonl file
   key <set|clear|status>    Save, clear, or report the TypeSafe API key (never printed)
 
@@ -73,7 +73,7 @@ function statusText(environment: CliEnvironment): string {
   const budget = config.contextBudgetTokens;
   const usage = latest === undefined ? Number.NaN : usageFraction(latest, budget);
   const window = Number.isFinite(usage)
-    ? ` Context: ${formatTokens(latest?.tokens ?? 0)} tokens, ${Math.round(usage * 100)}% of the ${budgetApplies(latest?.window ?? Number.NaN, budget) ? "budget" : "window"}; hint floor ${floorFor(usage, parseProfile(config.profile)).toFixed(2)}.`
+    ? ` Context: ${formatTokens(latest?.tokens ?? 0)} tokens, ${Math.round(usage * 100)}% of the ${effectiveBudget(latest?.window ?? Number.NaN, budget) > 0 ? "budget" : "window"}; hint floor ${floorFor(usage, parseProfile(config.profile)).toFixed(2)}.`
     : "";
   return [
     `Mode: ${config.mode}.`,

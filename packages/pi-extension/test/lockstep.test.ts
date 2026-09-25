@@ -622,16 +622,22 @@ test("a verdict resolves and updates the gates the same way for every mode", () 
 });
 
 test("a context budget only relaxes the floor, on every host", () => {
-  const cases: [tokens: number, limit: number, budget: number, pressure: number][] = [
-    [160000, 167000, 0, 160000 / 167000],
-    [45000, 272000, 50000, 45000 / 50000],
+  const cases: [
+    tokens: number,
+    limit: number,
+    budget: number,
+    pressure: number,
+    effective: number,
+  ][] = [
+    [160000, 167000, 0, 160000 / 167000, 0],
+    [45000, 272000, 50000, 45000 / 50000, 50000],
     // A budget above the host's limit leaves the limit in charge.
-    [160000, 167000, 450000, 160000 / 167000],
-    [160000, 450000, 450000, 160000 / 450000],
+    [160000, 167000, 450000, 160000 / 167000, 0],
+    [160000, 450000, 450000, 160000 / 450000, 450000],
     // An unknown limit takes the budget; without either, usage is unknown.
-    [160000, Number.NaN, 450000, 160000 / 450000],
-    [5, 0, 100, 0.05],
-    [160000, Number.NaN, 0, Number.NaN],
+    [160000, Number.NaN, 450000, 160000 / 450000, 450000],
+    [5, 0, 100, 0.05, 100],
+    [160000, Number.NaN, 0, Number.NaN, 0],
   ];
   for (const [host, policy] of [
     ["pi", checkpoint],
@@ -639,12 +645,10 @@ test("a context budget only relaxes the floor, on every host", () => {
     ["codex", codexCheckpoint],
     ["grok", grokCheckpoint],
   ] as const) {
-    for (const [tokens, limit, budget, pressure] of cases) {
-      assert.equal(
-        policy.contextPressure(tokens, limit, budget),
-        pressure,
-        `${host} ${tokens}/${limit}/${budget}`,
-      );
+    for (const [tokens, limit, budget, pressure, effective] of cases) {
+      const name = `${host} ${tokens}/${limit}/${budget}`;
+      assert.equal(policy.contextPressure(tokens, limit, budget), pressure, name);
+      assert.equal(policy.effectiveBudget(limit, budget), effective, name);
     }
   }
 });

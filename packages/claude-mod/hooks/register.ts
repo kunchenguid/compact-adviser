@@ -18,11 +18,11 @@
 //   session's counters itself.
 import type { EngineInterface, PluginOptions, Register, RenderChildren } from "claude-code";
 import {
-  budgetApplies,
   COOLDOWN_TEXT,
   type Cooldown,
   contextPressure,
   cooldown,
+  effectiveBudget,
   judged,
   type Resolution,
   resolve,
@@ -508,7 +508,7 @@ async function judgeCheckpoint($: EngineInterface, epoch: number): Promise<void>
             usageFraction(context, latest.contextBudgetTokens),
             undefined,
             profile,
-            latest.contextBudgetTokens,
+            effectiveBudget(contextLimit(context), latest.contextBudgetTokens),
           ),
         );
       } catch {
@@ -921,7 +921,7 @@ async function statusText($: EngineInterface): Promise<string> {
       : "Waiting for fresh model usage.";
   const budget = config.contextBudgetTokens;
   const fraction = usageFraction(usage.context, budget);
-  return `Mode: ${config.mode}${config.mode === "auto" && !config.autoAcknowledged ? " (not confirmed)" : ""}. Minimum: ${formatTokens(config.minContextTokens)} tokens. Budget: ${budget > 0 ? `${formatTokens(budget)} tokens` : "off"}. Context: ${typeof tokens === "number" ? formatTokens(tokens) : "unknown"}${Number.isFinite(fraction) ? ` (${Math.round(fraction * 100)}% of the ${budgetApplies(contextLimit(usage.context), budget) ? "budget" : "context limit"}; hint floor ${floorFor(fraction, parseProfile(config.profile)).toFixed(2)})` : ""}. ${formatKeyStatus((await resolvedKey($)).source)}. ${waiting}${lastCheck === undefined ? "" : ` Last turn end: ${turnEndText(lastCheck)}.`}${engine} Request log: ${await requestLogStatus($, config)}. Settings: /config (compact-adviser rows) and /compact-adviser.`;
+  return `Mode: ${config.mode}${config.mode === "auto" && !config.autoAcknowledged ? " (not confirmed)" : ""}. Minimum: ${formatTokens(config.minContextTokens)} tokens. Budget: ${budget > 0 ? `${formatTokens(budget)} tokens` : "off"}. Context: ${typeof tokens === "number" ? formatTokens(tokens) : "unknown"}${Number.isFinite(fraction) ? ` (${Math.round(fraction * 100)}% of the ${effectiveBudget(contextLimit(usage.context), budget) > 0 ? "budget" : "context limit"}; hint floor ${floorFor(fraction, parseProfile(config.profile)).toFixed(2)})` : ""}. ${formatKeyStatus((await resolvedKey($)).source)}. ${waiting}${lastCheck === undefined ? "" : ` Last turn end: ${turnEndText(lastCheck)}.`}${engine} Request log: ${await requestLogStatus($, config)}. Settings: /config (compact-adviser rows) and /compact-adviser.`;
 }
 
 async function snoozeOrDismiss($: EngineInterface, command: "snooze" | "dismiss") {
