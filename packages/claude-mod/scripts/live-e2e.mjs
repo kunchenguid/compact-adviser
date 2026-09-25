@@ -231,9 +231,19 @@ function cards(shot) {
   });
   return found;
 }
+// The transcript left of an open pane as one line, so a phrase the terminal wrapped matches.
+const transcript = (shot) =>
+  shot
+    .split("\n")
+    .map((line) => line.split("│")[0].trim())
+    .join(" ")
+    .replace(/\s+/g, " ");
 const waitText = (text, timeoutMs) =>
   waitFor(
-    (s) => s.includes(text) || cards(s).some((card) => card.includes(text)),
+    (s) =>
+      s.includes(text) ||
+      cards(s).some((card) => card.includes(text)) ||
+      transcript(s).includes(text),
     JSON.stringify(text),
     timeoutMs,
   );
@@ -415,6 +425,8 @@ try {
   await moveTo("On");
   key("Enter");
   await waitText("TypeSafe request logging on (all sessions)", 20000);
+  // The toast keeps the headline; the transcript line names this session's log file.
+  await waitText("This session logs to", 20000);
   await waitFor(() => pluginOptions().logRequests === true, "the host to enable request logging");
   await waitText("Log TypeSafe requests   On");
   pass("request logging is enabled by arrows and Enter alone through the real settings pane");
