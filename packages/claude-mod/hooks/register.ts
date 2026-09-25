@@ -752,8 +752,10 @@ async function statusText($: EngineInterface): Promise<string> {
 }
 
 async function snoozeOrDismiss($: EngineInterface, command: "snooze" | "dismiss") {
-  const { key, state } = await loadState($);
+  // Invalidate first: a judgment in flight is then discarded instead of writing a record
+  // between this read and the snooze below.
   await invalidate($);
+  const { key, state } = await loadState($);
   if (command === "snooze") {
     await $.store.set(key, {
       ...state,
