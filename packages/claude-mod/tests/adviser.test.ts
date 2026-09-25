@@ -41,11 +41,15 @@ function hinted(w: World) {
   return w.journal.statuses.some((s) => typeof s === "string" && s.includes(HINT));
 }
 
-/** Drain `$.clock.after(0, …)` plus the async judgment it starts. */
+/**
+ * Drain `$.clock.after(0, …)` plus the async judgment it starts. The checkpoint
+ * fingerprint is a `crypto.subtle` digest, which settles on a host task rather than a
+ * microtask, so each round also waits out one digest of its own.
+ */
 async function drain(w: World) {
   for (let i = 0; i < 50; i++) {
     await w.clock.settle();
-    await Promise.resolve();
+    await crypto.subtle.digest("SHA-256", new Uint8Array());
     await Promise.resolve();
   }
 }
@@ -152,6 +156,38 @@ describe("turn-end gates", () => {
     expect(w.journal.suggestions).toEqual([]);
     expect(w.journal.compactions).toHaveLength(0);
     expect(w.journal.fsWrites).toHaveLength(0);
+  });
+
+  test("a request log that exists but cannot be read is never overwritten", async ($, on) => {
+    const w = world(on, { logRequests: true });
+    w.logFiles.set(
+      "/tmp/fixture-home/.claude/compact-adviser-requests-session-1.jsonl",
+      "earlier line\n",
+    );
+    w.unreadableLogs.add("/tmp/fixture-home/.claude/compact-adviser-requests-session-1.jsonl");
+    await $.session.start(interactiveStart);
+    await turnEnd($, w);
+    expect(w.journal.requests).toHaveLength(1);
+    expect(hinted(w)).toBe(true);
+    expect(w.journal.fsWrites).toHaveLength(0);
+    expect(
+      w.logFiles.get("/tmp/fixture-home/.claude/compact-adviser-requests-session-1.jsonl"),
+    ).toBe("earlier line\n");
+    await $.command.run(commandRun("status"));
+    expect(w.journal.logs.at(-1)).toContain(
+      "Request log: paused; the existing log could not be read, so it was left untouched.",
+    );
+  });
+
+  test("without HOME the request log is not written anywhere", async ($, on) => {
+    const w = world(on, { logRequests: true, home: undefined });
+    await $.session.start(interactiveStart);
+    await turnEnd($, w);
+    expect(w.journal.requests).toHaveLength(1);
+    expect(hinted(w)).toBe(true);
+    expect(w.journal.fsWrites).toHaveLength(0);
+    await $.command.run(commandRun("status"));
+    expect(w.journal.logs.at(-1)).toContain("Request log: unavailable, HOME is not set.");
   });
 
   test("optional request logging writes the TypeSafe body and never the key", async ($, on) => {
@@ -716,6 +752,20 @@ describe("automatic mode", () => {
     expect(w.journal.compactions).toHaveLength(1);
   });
 
+  test("a compaction refused because a new turn started is dropped, not reported as a failure", async ($, on) => {
+    const w = autoWorld(on);
+    w.compact = async () => {
+      await $.turn.start({ turnId: "next", origin: { kind: "composer" } } as never);
+      throw new Error("a turn is running");
+    };
+    await $.session.start(interactiveStart);
+    await turnEnd($, w);
+    expect(w.journal.compactions).toHaveLength(1);
+    expect(stored(w).retryAfter).toBe(0);
+    expect(w.journal.toasts.some((t) => t.startsWith("Compaction failed"))).toBe(false);
+    expect(w.journal.statuses.at(-1)).toBeUndefined();
+  });
+
   test("a vetoed or failed compaction backs off for a minute without resetting counters", async ($, on) => {
     const w = autoWorld(on);
     w.compact = async () => ({ skip: "another plugin vetoed" });
@@ -868,6 +918,41 @@ describe("commands", () => {
       line.includes("/tmp/fixture-home/.claude/compact-adviser-requests-session-1.jsonl"),
     ).toBe(true);
     expect(line.includes(KEY)).toBe(false);
+  });
+
+  test("status says why the last turn end did or did not advise", async ($, on) => {
+    const w = world(on, { minimum: 100000 });
+    const last = () => (w.journal.logs.at(-1) ?? "").match(/Last turn end: [^.]*\./)?.[0];
+    await $.session.start(interactiveStart);
+    await $.command.run(commandRun("status"));
+    expect(last()).toBeUndefined();
+    await turnEnd($, w);
+    await $.command.run(commandRun("status"));
+    expect(last()).toBe("Last turn end: not checked, context below the minimum.");
+    await turnEnd($, w, { ...answered(), isAborted: true });
+    await $.command.run(commandRun("status"));
+    expect(last()).toBe("Last turn end: not checked, the turn was interrupted.");
+    w.usage.tokens = 150000;
+    w.respond = async () => ({
+      status: 200,
+      text: JSON.stringify(jevAnswer({ completed: 0.1 })),
+    });
+    await turnEnd($, w);
+    await $.command.run(commandRun("status"));
+    expect(last()).toBe("Last turn end: judged, not a checkpoint yet.");
+    w.respond = async () => ({ status: 200, text: JSON.stringify(jevAnswer()) });
+    w.messages = longConversation("next unit");
+    await turnEnd($, w);
+    await $.command.run(commandRun("status"));
+    expect(last()).toBe("Last turn end: judged a checkpoint; hint shown.");
+    w.respond = async () => ({ status: 500, text: "" });
+    w.messages = longConversation("another unit");
+    await turnEnd($, w);
+    await $.command.run(commandRun("status"));
+    expect(last()).toBe("Last turn end: the judgment failed; context left unchanged.");
+    await turnEnd($, w);
+    await $.command.run(commandRun("status"));
+    expect(last()).toBe("Last turn end: not checked, cooldown: TypeSafe backoff.");
   });
 
   test("snooze suppresses advice for three exchanges; dismiss clears the hint", async ($, on) => {

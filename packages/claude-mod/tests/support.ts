@@ -78,6 +78,9 @@ export type World = {
     { messages: SessionMessage[]; tokensBefore?: number; tokensAfter?: number } | { skip: string }
   >;
   denyConfig: (reason: string | undefined) => void;
+  /** Request logs on disk by path; a path in `unreadableLogs` exists but its read rejects, as over 4 MiB. */
+  logFiles: Map<string, string>;
+  unreadableLogs: Set<string>;
 };
 
 export type WorldOptions = {
@@ -94,6 +97,8 @@ export type WorldOptions = {
   store?: Record<string, unknown>;
   /** Text `$.fs.read(".env")` should return; omit to treat the file as missing. */
   dotenv?: string;
+  /** `HOME` for the session; pass `undefined` to leave it unset. */
+  home?: string | undefined;
 };
 
 /** A transcript whose own text is well over the 20k-token useful-history floor. */
@@ -127,9 +132,10 @@ export function longConversation(
 export function world(on: On, options: WorldOptions = {}): World {
   const functionHooks = "functionHooks" in options ? options.functionHooks : "1";
   const key = "key" in options ? options.key : KEY;
+  // Claude Code rejects host filesystem paths under macOS automounts such as /home.
+  const home = "home" in options ? options.home : "/tmp/fixture-home";
   mock.env(on, {
-    // Claude Code rejects host filesystem paths under macOS automounts such as /home.
-    HOME: "/tmp/fixture-home",
+    ...(home === undefined ? {} : { HOME: home }),
     ...(functionHooks === undefined ? {} : { CLAUDE_CODE_ENABLE_FUNCTION_HOOKS: functionHooks }),
     ...(key === undefined ? {} : { TYPESAFE_API_KEY: key }),
     ...(options.endpoint === undefined ? {} : { COMPACT_ADVISER_TEST_ENDPOINT: options.endpoint }),
@@ -197,6 +203,8 @@ export function world(on: On, options: WorldOptions = {}): World {
     denyConfig: (reason) => {
       configDenial = reason;
     },
+    logFiles: jsonlFiles,
+    unreadableLogs: new Set(),
   };
 
   on("session.start", async (_$, e) => ({ cwd: e.cwd }));
@@ -295,7 +303,7 @@ export function world(on: On, options: WorldOptions = {}): World {
   });
   on("ui.open", async (_$, e) => {
     journal.opened.push({ id: e.id, focus: e.focus });
-    return { value: undefined };
+    return { value: { isPlaced: true } as never };
   });
   on("ui.close", async (_$, e) => {
     journal.closed.push(e.id);
@@ -314,7 +322,14 @@ export function world(on: On, options: WorldOptions = {}): World {
       journal.fsReads.push(e.path);
       const existing = jsonlFiles.get(String(e.path));
       if (existing === undefined) throw new Error("ENOENT");
+      if (w.unreadableLogs.has(String(e.path))) throw new Error("file is over 4 MiB");
       return { value: existing };
+    }
+    return next(e);
+  });
+  on("fs.exists", async (_$, e, next) => {
+    if (/compact-adviser-requests[^/]*\.jsonl$/.test(String(e.path))) {
+      return { value: jsonlFiles.has(String(e.path)) };
     }
     return next(e);
   });
