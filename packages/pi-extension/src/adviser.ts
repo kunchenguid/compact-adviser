@@ -87,6 +87,8 @@ export function installAdviser(pi: ExtensionAPI, options: Options): void {
   let compacting = false;
   let automaticCompaction = false;
   let hintVisible = false;
+  // Whether a turn_end may still owe this branch its post-compaction baseline.
+  let baselinePending = true;
   let diagnostic = "";
   const active = (ctx: ExtensionContext) => ctx.mode === "tui" && ctx.hasUI;
   function persist(state: SessionState) {
@@ -109,6 +111,7 @@ export function installAdviser(pi: ExtensionAPI, options: Options): void {
   }
   function invalidate(ctx: ExtensionContext) {
     generation++;
+    baselinePending = true;
     request?.abort();
     request = undefined;
     if (hintVisible && active(ctx)) ctx.ui.setWidget(LABEL, undefined);
@@ -302,16 +305,16 @@ export function installAdviser(pi: ExtensionAPI, options: Options): void {
     if (!ctx.isIdle() && hintVisible) invalidate(ctx);
     // The first response after a compaction sets its baseline, before a long first run of
     // tool calls can lift it; `settled` still takes it when no response reported usage.
-    if (!active(ctx)) return;
+    if (!baselinePending || !active(ctx)) return;
     const s = restoreState(ctx.sessionManager.getBranch());
+    if (!s.compactionId || s.baseline !== null) {
+      baselinePending = false;
+      return;
+    }
     const tokens = ctx.getContextUsage()?.tokens;
-    if (
-      s.compactionId &&
-      s.baseline === null &&
-      typeof tokens === "number" &&
-      Number.isFinite(tokens)
-    )
-      persist({ ...s, baseline: tokens });
+    if (typeof tokens !== "number" || !Number.isFinite(tokens)) return;
+    persist({ ...s, baseline: tokens });
+    baselinePending = false;
   });
   pi.on("agent_settled", (_event, ctx) => {
     void settled(ctx).catch(() =>
