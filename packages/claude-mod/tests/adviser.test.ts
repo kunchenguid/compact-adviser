@@ -579,6 +579,21 @@ describe("turn-end gates", () => {
     expect(stored(w).snoozeUntil).toBe(0);
   });
 
+  test("a judgment discarded by a settings change mid-flight does not start the re-ask wait", async ($, on) => {
+    const w = world(on);
+    w.respond = async () => {
+      w.rows.set(`${PLUGIN}.minContextTokens`, 41000);
+      return { status: 200, text: JSON.stringify(jevAnswer({ completed: 0.1 })) };
+    };
+    await $.session.start(interactiveStart);
+    await turnEnd($, w);
+    expect(w.journal.requests).toHaveLength(1);
+    expect(stored(w).judgedTokens).toBeNull();
+    w.messages = longConversation("next");
+    await turnEnd($, w);
+    expect(w.journal.requests).toHaveLength(2);
+  });
+
   test("no repeat at the same checkpoint; a new checkpoint can hint immediately", async ($, on) => {
     const w = world(on);
     await $.session.start(interactiveStart);

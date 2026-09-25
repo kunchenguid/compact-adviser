@@ -101,6 +101,27 @@ test("a profile that turns invalid while the judge is pending retires the hint a
   assert.equal(settled.retryAfter, 0);
 });
 
+test("a below-floor judgment discarded by a profile change mid-flight does not start the re-ask wait", async (t) => {
+  const { l, fixture } = await judgeTurn(t);
+  fixture.verdict = { finished: 0.6, handsOn: 0.6 };
+  fixture.onRequest = () =>
+    writeFileSync(
+      join(l.dataDir, "settings.json"),
+      JSON.stringify({
+        version: 1,
+        profile: JSON.stringify({ version: 1, coordinationWeight: 0.5, floors: [[0, 0.9]] }),
+      }),
+    );
+  await runCli(["hook", "stop"], { lab: l, stdin: stopPayload(l), env: keyed(fixture) });
+  assert.equal(fixture.bodies.length, 1);
+  const statePath = join(l.dataDir, "sessions", `${l.sessionId}.json`);
+  const state = JSON.parse(readFileSync(statePath, "utf8")) as {
+    judgedTokens: number | null;
+    judgedAt: number | null;
+  };
+  assert.deepEqual([state.judgedTokens, state.judgedAt], [null, null]);
+});
+
 test("the judge sees the person's own words, not Grok's prompt envelopes", async (t) => {
   const { l, fixture } = await judgeTurn(t);
   await runCli(["hook", "stop"], { lab: l, stdin: stopPayload(l), env: keyed(fixture) });

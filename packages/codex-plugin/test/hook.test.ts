@@ -346,6 +346,22 @@ test("a concurrent threshold increase after TypeSafe returns suppresses the hint
   });
 });
 
+test("a below-floor judgment discarded by a concurrent settings change does not start the re-ask wait", async () => {
+  await withLab(async (lab) => {
+    writeRollout(lab.transcript, settledRollout());
+    const root = adviserRoot({ CODEX_HOME: lab.home });
+    const typesafe = fakeTypesafe(() => ({ body: jevAnswer(0.6, 0.6) }));
+    const fetch: Environment["fetch"] = async (url, init) => {
+      new ConfigStore(root).update({ minContextTokens: 100000 });
+      return typesafe.fetch(url, init);
+    };
+    await handle(stop(lab), environment(lab, { fetch }));
+    assert.equal(typesafe.requests.length, 1);
+    const state = new SessionStore(root).read("s1", 0).state;
+    assert.deepEqual([state.judgedTokens, state.judgedAt], [null, null]);
+  });
+});
+
 test("a TypeSafe failure backs off and stays silent", async () => {
   await withLab(async (lab) => {
     writeRollout(lab.transcript, settledRollout());

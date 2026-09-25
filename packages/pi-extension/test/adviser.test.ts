@@ -363,6 +363,26 @@ test("a cross-session disable or new pending message wins over a favorable in-fl
   }
 });
 
+test("a judgment discarded by a settings change mid-flight does not start the re-ask wait", async (t) => {
+  let answer: ((j: ReturnType<typeof parseJudgment>) => void) | undefined;
+  const h = harness(
+    t,
+    () =>
+      new Promise((resolve) => {
+        answer = resolve;
+      }),
+  );
+  h.enable();
+  await h.fire("agent_settled");
+  assert.equal(h.calls, 1);
+  h.store.update({ minContextTokens: 41000 });
+  answer?.(parseJudgment(apiResponse(0.1, 0.99)));
+  await flush();
+  h.next("next");
+  await h.fire("agent_settled");
+  assert.equal(h.calls, 2);
+});
+
 test("compaction callback cannot touch an invalidated session", async (t) => {
   const h = harness(t);
   h.enable("auto");
