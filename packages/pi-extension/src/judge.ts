@@ -1,6 +1,6 @@
 import type { JudgeProfile } from "./profile.ts";
 
-export const ENDPOINT = "https://api.typesafe.ai/v1/systemone";
+export const ENDPOINT = `${process.env.TYPESAFE_BASE ?? "https://api.typesafe.ai"}/v1/systemone`;
 export const MAX_REQUEST_BYTES = 32000;
 /**
  * Two atomic questions in one request, composed in code.
