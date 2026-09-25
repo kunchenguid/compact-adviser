@@ -38,8 +38,9 @@ export interface Rollout {
   /** The active model's context window, or undefined when it was not recorded. */
   window: number | undefined;
   /**
-   * Tokens the first model request after the latest compaction occupied: the post-compaction
-   * baseline. Undefined with no compaction in the read records or no request since.
+   * The first token count recorded after the latest compaction, where Codex records the size of
+   * the compacted history: the post-compaction baseline. Undefined with no compaction in the read
+   * records or no count since.
    */
   tokensAfterCompaction: number | undefined;
   /** True when earlier records were dropped by the read window or message cap. */

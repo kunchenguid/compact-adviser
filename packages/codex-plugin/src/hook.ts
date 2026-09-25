@@ -155,7 +155,8 @@ async function onStop(payload: HookPayload, environment: Environment): Promise<H
   const rollout = readRollout(transcript);
   const usage = { tokens: rollout.tokens, window: rollout.window };
   const stored = sessions.read(sessionId, now).state;
-  // The first request after a compaction is its baseline; a long first turn's end would lift it.
+  // The first token count after a compaction is its baseline: a long first turn's end would
+  // lift it.
   const state = completeExchange(stored, rollout.tokensAfterCompaction ?? rollout.tokens, now);
   sessions.write(sessionId, state, usage);
 
