@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import test, { type TestContext } from "node:test";
 import {
+  floorFor,
   JUDGE_UNAVAILABLE_MESSAGE,
   JudgeError,
   parseJudgment,
@@ -389,13 +390,20 @@ test("the request log keeps the outcome of an answer a newer leaf made stale", a
     h.store.update({ logRequests: true });
     await h.fire("agent_settled");
     h.next("Newer context");
+    h.tokens = 260000;
     settle?.();
     await flush();
-    const kinds = readFileSync(requestLogPath(h.dir), "utf8")
+    const lines = readFileSync(requestLogPath(h.dir), "utf8")
       .trim()
       .split("\n")
-      .map((line) => JSON.parse(line).kind);
-    assert.deepEqual(kinds, ["request", outcome], outcome);
+      .map((line) => JSON.parse(line));
+    assert.deepEqual(
+      lines.map((line) => line.kind),
+      ["request", outcome],
+      outcome,
+    );
+    // The floor describes the context that was judged, not the one the session moved to.
+    if (outcome === "response") assert.equal(lines[1].floor, floorFor(45000 / 272000));
     assert.equal(h.compactions.length, 0, outcome);
   }
 });
@@ -500,6 +508,33 @@ test("the first response after a compaction sets its baseline, not a long first 
   h.tokens = 64000;
   await h.fire("turn_end");
   await h.fire("agent_settled");
+  for (const ask of ["second", "third"]) {
+    h.next(ask);
+    h.tokens = 65000;
+    await h.fire("agent_settled");
+  }
+  assert.equal(h.calls, 1);
+});
+
+test("the post-compaction baseline is looked for again after every compaction, and set once", async (t) => {
+  const h = harness(t);
+  h.enable();
+  // An ordinary response before any compaction settles the lookup for this session so far.
+  await h.fire("turn_end");
+  const kept = h.sm.getLeafId();
+  assert.ok(kept);
+  const compact = h.sm.appendCompaction("Durable summary", kept, 45000);
+  await h.fire("session_compact", { compactionEntry: h.sm.getEntry(compact) });
+  h.next("Older continued exploration ".repeat(5000));
+  h.tokens = 45000;
+  await h.fire("turn_end");
+  h.tokens = 64000;
+  await h.fire("turn_end");
+  await h.fire("agent_settled");
+  // A new prompt looks again, and must leave the baseline already set where it is.
+  await h.fire("before_agent_start");
+  h.tokens = 64000;
+  await h.fire("turn_end");
   for (const ask of ["second", "third"]) {
     h.next(ask);
     h.tokens = 65000;

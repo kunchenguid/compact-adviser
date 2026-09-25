@@ -203,6 +203,8 @@ export function installAdviser(pi: ExtensionAPI, options: Options): void {
       configIdentity = JSON.stringify(config);
     const current = () =>
       !controller.signal.aborted && generation === epoch && sessionIdentity(ctx) === identity;
+    // The usage of the context judged: a stale answer's log line must not describe a newer one.
+    const fraction = usageFraction(ctx);
     try {
       const result = await evaluate(
         view.state,
@@ -217,7 +219,7 @@ export function installAdviser(pi: ExtensionAPI, options: Options): void {
             options.agentDir,
             loggedBody ?? requestBody(view.state, profile),
             result,
-            usageFraction(ctx),
+            fraction,
             profile,
           );
         } catch {
@@ -237,7 +239,7 @@ export function installAdviser(pi: ExtensionAPI, options: Options): void {
       }
       const resolution = resolve({
         fresh: true,
-        qualifies: qualifies(result, usageFraction(ctx), profile),
+        qualifies: qualifies(result, fraction, profile),
         mode: latest.mode,
         autoAcknowledged: latest.autoAcknowledged,
       });
