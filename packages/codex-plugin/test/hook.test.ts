@@ -348,6 +348,35 @@ test("a concurrent threshold increase after TypeSafe returns suppresses the hint
   });
 });
 
+// 0.8 x (0.5 + 0.5 x 0.8) = 0.72: under the 0.775 floor at 35% of the 200k window, over the
+// 0.50 floor at 93% of a 75k budget. A 450k budget above the window must not tighten 85% of it.
+for (const [budget, tokens, hint, logged] of [
+  [0, 70000, false, undefined],
+  [75000, 70000, true, 75000],
+  [450000, 170000, true, undefined],
+] as const) {
+  test(`a context budget of ${budget} decides the floor the hook gates with`, async () => {
+    await withLab(async (lab) => {
+      writeRollout(lab.transcript, settledRollout({ tokens }));
+      const root = adviserRoot({ CODEX_HOME: lab.home });
+      new ConfigStore(root).update({ contextBudgetTokens: budget, logRequests: true });
+      const typesafe = fakeTypesafe(() => ({ body: jevAnswer(0.8, 0.8) }));
+
+      const output = await handle(stop(lab), environment(lab, { fetch: typesafe.fetch }));
+
+      assert.deepEqual(output, hint ? { systemMessage: HINT } : {});
+      const response = readFileSync(requestLogPath(root, "s1"), "utf8")
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line))
+        .at(-1);
+      assert.equal(response.usage, tokens / (logged ?? 200000));
+      assert.equal(response.budget, logged);
+      assert.equal(response.qualifies, hint);
+    });
+  });
+}
+
 test("a concurrent budget change after TypeSafe returns suppresses the hint", async () => {
   await withLab(async (lab) => {
     writeRollout(lab.transcript, settledRollout());

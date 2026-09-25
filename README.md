@@ -172,7 +172,7 @@ hint can never be fed back to the model.
 | --- | --- |
 | `/compact-adviser` (Pi and Claude Code) | Settings (mode, minimum, request log, TypeSafe API key) |
 | `/compact-adviser auto` / `hint` / `off` (Pi and Claude Code) | Save that mode; auto asks for first-use confirmation |
-| `/compact-adviser status` (Pi and Claude Code) | Mode, minimum, context, key source (`env` / `saved` / `.env` / `missing`), cooldown, and on Claude Code what the last turn end came to |
+| `/compact-adviser status` (Pi and Claude Code) | Mode, minimum, budget, context, key source (`env` / `saved` / `.env` / `missing`), cooldown, and on Claude Code what the last turn end came to |
 | `/compact-adviser threshold 60000` (Pi and Claude Code) | Save an absolute token minimum |
 | `/compact-adviser budget 450000` / `budget off` (Pi and Claude Code) | Save a context budget: the hint floor is fully relaxed at this many tokens, or at the host's own compaction point if that is smaller (off by default) |
 | `/compact-adviser snooze` / `dismiss` (Pi and Claude Code) | Suppress the next three exchanges, or clear the current hint |

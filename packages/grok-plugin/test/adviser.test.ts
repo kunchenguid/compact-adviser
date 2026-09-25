@@ -157,6 +157,55 @@ for (const [name, settings] of [
   });
 }
 
+// 0.8 x (0.5 + 0.5 x 0.8) = 0.72: under the 0.80 floor at 30% of the 500k window, over the
+// 0.50 floor at 94% of a 160k budget. A 2M budget above the window must not tighten 88% of it.
+for (const [budget, tokens, saved, share, hint, logged] of [
+  ["off", 150000, "Context budget off", "30% of the window; hint floor 0.80", false, undefined],
+  [
+    "160000",
+    150000,
+    "Context budget saved: 160,000",
+    "94% of the budget; hint floor 0.50",
+    true,
+    160000,
+  ],
+  [
+    "2000000",
+    440000,
+    "Context budget saved: 2,000,000",
+    "88% of the window; hint floor 0.51",
+    true,
+    undefined,
+  ],
+] as const) {
+  test(`budget ${budget} decides the hint floor the Stop hook gates with`, async (t) => {
+    const { l, fixture } = await judgeTurn(t, { tokens });
+    fixture.verdict = { finished: 0.8, handsOn: 0.8 };
+    assert.match((await runCli(["budget", budget], { lab: l })).stdout, new RegExp(saved));
+    await runCli(["log", "on"], { lab: l });
+    const status = await runCli(["status"], { lab: l });
+    assert.ok(status.stdout.includes(share), status.stdout);
+    await runCli(["hook", "stop"], { lab: l, stdin: stopPayload(l), env: keyed(fixture) });
+    assert.equal(fixture.bodies.length, 1);
+    const row = await runCli(["status-line"], {
+      lab: l,
+      stdin: statusPayload(l, {
+        context_window: { context_tokens: tokens, context_window_size: 500000 },
+      }),
+    });
+    assert.equal(row.stdout.includes(HINT), hint);
+    const lines = readFileSync(
+      join(l.dataDir, `compact-adviser-requests-${l.sessionId}.jsonl`),
+      "utf8",
+    )
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line) as { budget?: number; qualifies?: boolean });
+    assert.equal(lines.at(-1)?.budget, logged);
+    assert.equal(lines.at(-1)?.qualifies, hint);
+  });
+}
+
 test("the judge sees the person's own words, not Grok's prompt envelopes", async (t) => {
   const { l, fixture } = await judgeTurn(t);
   await runCli(["hook", "stop"], { lab: l, stdin: stopPayload(l), env: keyed(fixture) });
