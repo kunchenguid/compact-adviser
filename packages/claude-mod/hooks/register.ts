@@ -17,7 +17,14 @@
 //   `session.compact` hook never sees its own automatic compaction; that path resets the
 //   session's counters itself.
 import type { EngineInterface, PluginOptions, Register, RenderChildren } from "claude-code";
-import { judged, resolve } from "../lib/checkpoint.ts";
+import {
+  COOLDOWN_TEXT,
+  type Cooldown,
+  cooldown,
+  judged,
+  type Resolution,
+  resolve,
+} from "../lib/checkpoint.ts";
 import {
   API_KEY_KEY,
   CONSENT_STORE_KEY,
@@ -81,6 +88,41 @@ const LOOPBACK_ENDPOINT = /^http:\/\/127\.0\.0\.1:\d{1,5}\/[\x21-\x7e]*$/;
 const USAGE =
   "Use /compact-adviser, auto, hint, off, status, threshold <tokens|default>, snooze or dismiss.";
 
+/** Why a turn end was not judged, besides a cooldown. */
+const SKIP_TEXT = {
+  "not-interactive": "the session is not interactive",
+  compacting: "a compaction is running",
+  off: "mode is off",
+  "unknown-usage": "context size unknown",
+  "below-minimum": "context below the minimum",
+  "no-key": "no TypeSafe key",
+  judging: "a judgment is already running",
+  interrupted: "the turn was interrupted",
+  "no-answer": "the turn ended without an answer",
+  "settings-unreadable": "settings unreadable",
+  "too-little-history": "too little conversation history",
+  "already-advised": "already advised at this checkpoint",
+} as const;
+type Skip = keyof typeof SKIP_TEXT | Cooldown;
+
+/** What a judged turn end came to: its verdict's resolution, or how that went wrong. */
+const OUTCOME_TEXT: Readonly<Record<Resolution | "failed" | "compaction-failed", string>> = {
+  failed: "the judgment failed; context left unchanged",
+  discard: "judgment discarded, settings or session changed meanwhile",
+  wait: "judged, not a checkpoint yet",
+  unconfirmed: "judged a checkpoint; automatic mode is not confirmed (/compact-adviser auto)",
+  hint: "judged a checkpoint; hint shown",
+  compact: "judged a checkpoint; compacted",
+  "compaction-failed": "judged a checkpoint; compaction failed",
+};
+type TurnEnd = Skip | keyof typeof OUTCOME_TEXT;
+
+function turnEndText(end: TurnEnd): string {
+  if (end in COOLDOWN_TEXT) return `not checked, cooldown: ${COOLDOWN_TEXT[end as Cooldown]}`;
+  if (end in SKIP_TEXT) return `not checked, ${SKIP_TEXT[end as keyof typeof SKIP_TEXT]}`;
+  return OUTCOME_TEXT[end as keyof typeof OUTCOME_TEXT];
+}
+
 // Per module environment (a hot reload starts fresh; see the header).
 let activation: Promise<boolean> | undefined;
 // The host-validated options this environment loaded with (a save reloads it with new ones).
@@ -92,7 +134,7 @@ let compacting = false;
 let hintVisible = false;
 let diagnostic = "";
 // What the latest settled turn end came to, for `/compact-adviser status` only.
-let lastCheck: string | undefined;
+let lastCheck: TurnEnd | undefined;
 // Why request logging stopped in this environment; set once a log exists but cannot be read.
 let logProblem: string | undefined;
 // The request-log part appends go to; a part that would outgrow the host's read limit rolls over.
@@ -279,15 +321,15 @@ async function ineligibility(
   state: SessionState,
   tokens: number | undefined,
   now: number,
-): Promise<string | undefined> {
-  if (!interactive) return "the session is not interactive";
-  if (compacting) return "a compaction is running";
-  if (config.mode === "off") return "mode is off";
-  if (typeof tokens !== "number" || !Number.isFinite(tokens)) return "context size unknown";
-  if (tokens < config.minContextTokens) return "context below the minimum";
-  const cooldown = cooldownReason(state, tokens, now);
-  if (cooldown !== undefined) return `cooldown: ${cooldown}`;
-  if ((await apiKey($)) === "") return "no TypeSafe key";
+): Promise<Skip | undefined> {
+  if (!interactive) return "not-interactive";
+  if (compacting) return "compacting";
+  if (config.mode === "off") return "off";
+  if (typeof tokens !== "number" || !Number.isFinite(tokens)) return "unknown-usage";
+  if (tokens < config.minContextTokens) return "below-minimum";
+  const waiting = cooldown(state, state.compacted, tokens, now);
+  if (waiting !== undefined) return waiting;
+  if ((await apiKey($)) === "") return "no-key";
   return undefined;
 }
 
@@ -295,8 +337,8 @@ async function ineligibility(
  * Records what a turn end came to, but only while that turn is still the latest: a judgment
  * that returns after a newer turn has settled must not replace that turn's own reason.
  */
-function note(epoch: number, text: string): void {
-  if (epoch === generation) lastCheck = text;
+function note(epoch: number, end: TurnEnd): void {
+  if (epoch === generation) lastCheck = end;
 }
 
 /** The scheduled half of a turn end: judge, then hint or (opt-in) compact. */
@@ -313,12 +355,12 @@ async function judgeCheckpoint($: EngineInterface, epoch: number): Promise<void>
     ]);
     const view = snapshot(messages, [activeKey, readSavedApiKey(rows, loadedOptions)]);
     if (view.conversationTokens <= 20000) {
-      note(epoch, "not checked, too little conversation history");
+      note(epoch, "too-little-history");
       return;
     }
     const fingerprint = await checkpointKey(view.checkpointText);
     if ((await loadState($)).state.lastHintKey === fingerprint) {
-      note(epoch, "not checked, already advised at this checkpoint");
+      note(epoch, "already-advised");
       return;
     }
     let loggedBody: string | undefined;
@@ -345,7 +387,7 @@ async function judgeCheckpoint($: EngineInterface, epoch: number): Promise<void>
       );
     } catch (error) {
       if (epoch !== generation) return;
-      note(epoch, "the judgment failed; context left unchanged");
+      note(epoch, "failed");
       if (initial.logRequests) {
         try {
           await appendTypeSafeLog($, errorLogLine(loggedJudgeErrorKind(error), loggedBody));
@@ -388,7 +430,7 @@ async function judgeCheckpoint($: EngineInterface, epoch: number): Promise<void>
       (await ineligibility($, latest, current, judgedTokens, now)) !== undefined ||
       epoch !== generation
     ) {
-      note(epoch, "judgment discarded, settings or session changed meanwhile");
+      note(epoch, "discard");
       return;
     }
     const resolution = resolve({
@@ -402,18 +444,14 @@ async function judgeCheckpoint($: EngineInterface, epoch: number): Promise<void>
       updatedAt: now,
     };
     await $.store.set(key, state);
-    if (resolution === "wait") {
-      note(epoch, "judged, not a checkpoint yet");
-      return;
-    }
-    if (resolution === "unconfirmed") {
-      note(epoch, "judged a checkpoint; automatic mode is not confirmed (/compact-adviser auto)");
+    if (resolution === "wait" || resolution === "unconfirmed") {
+      note(epoch, resolution);
       return;
     }
     diagnostic = "";
     if (resolution === "hint") {
       if (epoch !== generation) return;
-      note(epoch, "judged a checkpoint; hint shown");
+      note(epoch, resolution);
       hintVisible = true;
       // Claude Code prefixes $.ui.status with the plugin name; do not repeat it.
       $.ui.status(HINT);
@@ -443,7 +481,7 @@ async function judgeCheckpoint($: EngineInterface, epoch: number): Promise<void>
       return;
     }
     if (failure !== undefined) {
-      note(epoch, "judged a checkpoint; compaction failed");
+      note(epoch, "compaction-failed");
       const { state: latestState } = await loadState($);
       await $.store.set(key, { ...latestState, retryAfter: after + 60000, updatedAt: after });
       notice(
@@ -453,7 +491,7 @@ async function judgeCheckpoint($: EngineInterface, epoch: number): Promise<void>
       clearStatus($);
       return;
     }
-    note(epoch, "judged a checkpoint; compacted");
+    note(epoch, "compact");
     generation++;
     await $.store.set(key, initialState(true, after));
     const completed =
@@ -481,15 +519,15 @@ async function settle($: EngineInterface): Promise<void> {
   try {
     config = await loadConfig($);
   } catch (error) {
-    lastCheck = "not checked, settings unreadable";
+    lastCheck = "settings-unreadable";
     notice($, error instanceof Error ? error.message : "Cannot read compact-adviser settings.");
     return;
   }
   const skip =
     (await ineligibility($, config, state, context.tokens, now)) ??
-    (judging ? "a judgment is already running" : undefined);
+    (judging ? "judging" : undefined);
   if (skip !== undefined) {
-    lastCheck = `not checked, ${skip}`;
+    lastCheck = skip;
     return;
   }
   const epoch = generation;
@@ -743,12 +781,12 @@ async function statusText($: EngineInterface): Promise<string> {
       : breakdown.isAutoCompactEnabled && breakdown.autoCompactThreshold !== undefined
         ? ` Claude Code auto-compacts at ${formatTokens(breakdown.autoCompactThreshold)} tokens.`
         : " Claude Code auto-compact is off.";
-  const cooldown =
+  const waiting =
     typeof tokens === "number"
       ? (cooldownReason(state, tokens, await $.clock.now()) ??
         "No cooldown; semantic checks still apply.")
       : "Waiting for fresh model usage.";
-  return `Mode: ${config.mode}${config.mode === "auto" && !config.autoAcknowledged ? " (not confirmed)" : ""}. Minimum: ${formatTokens(config.minContextTokens)} tokens. Context: ${typeof tokens === "number" ? formatTokens(tokens) : "unknown"}${Number.isFinite(usageFraction(usage.context)) ? ` (${Math.round(usageFraction(usage.context) * 100)}% of the context limit; hint floor ${floorFor(usageFraction(usage.context), parseProfile(config.profile)).toFixed(2)})` : ""}. ${formatKeyStatus((await resolvedKey($)).source)}. ${cooldown}${lastCheck === undefined ? "" : ` Last turn end: ${lastCheck}.`}${engine} Request log: ${await requestLogStatus($, config)}. Settings: /config (compact-adviser rows) and /compact-adviser.`;
+  return `Mode: ${config.mode}${config.mode === "auto" && !config.autoAcknowledged ? " (not confirmed)" : ""}. Minimum: ${formatTokens(config.minContextTokens)} tokens. Context: ${typeof tokens === "number" ? formatTokens(tokens) : "unknown"}${Number.isFinite(usageFraction(usage.context)) ? ` (${Math.round(usageFraction(usage.context) * 100)}% of the context limit; hint floor ${floorFor(usageFraction(usage.context), parseProfile(config.profile)).toFixed(2)})` : ""}. ${formatKeyStatus((await resolvedKey($)).source)}. ${waiting}${lastCheck === undefined ? "" : ` Last turn end: ${turnEndText(lastCheck)}.`}${engine} Request log: ${await requestLogStatus($, config)}. Settings: /config (compact-adviser rows) and /compact-adviser.`;
 }
 
 async function snoozeOrDismiss($: EngineInterface, command: "snooze" | "dismiss") {
@@ -815,9 +853,7 @@ export const register: Register = (on, options) => {
     if (!(await isActivated($)) || !interactive) return result;
     if (e.agentId !== undefined) return result;
     if (e.reason !== "answer" || e.isAborted || !e.answer.trim()) {
-      lastCheck = e.isAborted
-        ? "not checked, the turn was interrupted"
-        : "not checked, the turn ended without an answer";
+      lastCheck = e.isAborted ? "interrupted" : "no-answer";
       return result;
     }
     try {
