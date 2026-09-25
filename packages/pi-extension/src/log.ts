@@ -34,6 +34,8 @@ export function responseLogLine(
   usage: number,
   at = new Date().toISOString(),
   profile?: JudgeProfile,
+  /** The context budget the usage is measured against; recorded only when one is set. */
+  budget = 0,
 ): string {
   return `${JSON.stringify({
     at,
@@ -45,6 +47,7 @@ export function responseLogLine(
     },
     score: score(judgment, profile),
     usage: Number.isFinite(usage) ? usage : null,
+    ...(budget > 0 ? { budget } : {}),
     floor: floorFor(usage, profile),
     qualifies: qualifies(judgment, usage, profile),
   })}\n`;
@@ -74,8 +77,9 @@ export function appendResponseLog(
   judgment: Judgment,
   usage: number,
   profile?: JudgeProfile,
+  budget = 0,
 ): void {
-  writeLog(agentDir, responseLogLine(body, judgment, usage, undefined, profile));
+  writeLog(agentDir, responseLogLine(body, judgment, usage, undefined, profile, budget));
 }
 
 export function appendErrorLog(agentDir: string, error: unknown, body?: string): void {

@@ -34,6 +34,13 @@
       "default": 40000,
       "min": 1
     },
+    "contextBudgetTokens": {
+      "type": "number",
+      "title": "Context budget (tokens)",
+      "description": "Optional. The context size you want compacted by: the hint floor relaxes as the context approaches it rather than Claude Code's auto-compact point. 0 turns it off.",
+      "default": 0,
+      "min": 0
+    },
     "logRequests": {
       "type": "boolean",
       "title": "Log TypeSafe requests",

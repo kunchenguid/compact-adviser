@@ -345,6 +345,10 @@ test("every package writes the same TypeSafe log line shape", () => {
       other.responseLogLine(body, judgment, Number.NaN, at),
       piLog.responseLogLine(body, judgment, Number.NaN, at),
     );
+    assert.equal(
+      other.responseLogLine(body, judgment, 0.2, at, undefined, 450000),
+      piLog.responseLogLine(body, judgment, 0.2, at, undefined, 450000),
+    );
     assert.equal(other.errorLogLine("timeout", body, at), piLog.errorLogLine("timeout", body, at));
     assert.equal(
       other.errorLogLine("input", undefined, at),

@@ -20,6 +20,8 @@ export interface Config {
   version: 1;
   mode: Mode;
   minContextTokens: number;
+  /** Tokens at which the hint floor is fully relaxed; 0 uses the model's window. */
+  contextBudgetTokens: number;
   autoAcknowledged: boolean;
   logRequests: boolean;
   typesafeApiKey?: string;
@@ -29,6 +31,7 @@ export const DEFAULT_CONFIG: Readonly<Config> = Object.freeze({
   version: 1,
   mode: "hint",
   minContextTokens: 40000,
+  contextBudgetTokens: 0,
   autoAcknowledged: false,
   logRequests: false,
 });
@@ -37,6 +40,16 @@ export function parseMinimum(text: string): number {
   const number = Number(value);
   if (!/^\d+$/.test(value) || !Number.isSafeInteger(number) || number <= 0) {
     throw new Error("Enter a positive whole number of tokens, for example 40000.");
+  }
+  return number;
+}
+/** A context budget in tokens, or 0 for "off" and "default" (the model's window). */
+export function parseBudget(text: string): number {
+  const value = text.trim();
+  if (value === "off" || value === "default") return 0;
+  const number = Number(value);
+  if (!/^\d+$/.test(value) || !Number.isSafeInteger(number)) {
+    throw new Error("Enter a whole number of tokens, for example 450000, or off.");
   }
   return number;
 }
@@ -64,6 +77,10 @@ function validate(value: unknown): Config {
     typeof c.minContextTokens !== "number" ||
     !Number.isSafeInteger(c.minContextTokens) ||
     c.minContextTokens <= 0 ||
+    (c.contextBudgetTokens !== undefined &&
+      (typeof c.contextBudgetTokens !== "number" ||
+        !Number.isSafeInteger(c.contextBudgetTokens) ||
+        c.contextBudgetTokens < 0)) ||
     typeof c.autoAcknowledged !== "boolean" ||
     (c.logRequests !== undefined && typeof c.logRequests !== "boolean") ||
     (c.typesafeApiKey !== undefined && typeof c.typesafeApiKey !== "string")
@@ -82,6 +99,7 @@ function validate(value: unknown): Config {
     version: 1,
     mode: c.mode as Mode,
     minContextTokens: c.minContextTokens,
+    contextBudgetTokens: (c.contextBudgetTokens as number | undefined) ?? 0,
     autoAcknowledged: c.autoAcknowledged,
     logRequests: c.logRequests === true,
     ...(typesafeApiKey !== undefined ? { typesafeApiKey } : {}),

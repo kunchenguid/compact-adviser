@@ -16,6 +16,18 @@ export const REASK_TOKENS = 20000;
 export const REASK_EXCHANGES = 3;
 export const REASK_MIN_TOKENS = 5000;
 
+/**
+ * The context fraction the hint floor reads: tokens over the person's context budget when
+ * one is set (a positive token count), otherwise over the host's own limit. NaN when either
+ * side is unknown, which takes the strictest floor.
+ */
+export function contextPressure(tokens: number, limit: number, budget: number): number {
+  const denominator = budget > 0 ? budget : limit;
+  if (!Number.isFinite(tokens) || !Number.isFinite(denominator) || denominator <= 0)
+    return Number.NaN;
+  return tokens / denominator;
+}
+
 /** The per-session facts the policy reads and writes; each host's record carries them. */
 export interface Gates {
   /** The first known context size after the latest compaction. */

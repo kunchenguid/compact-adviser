@@ -220,7 +220,7 @@ async function onStop(payload: HookPayload, environment: Environment): Promise<H
     return {};
   }
 
-  const fraction = usageFraction(rollout);
+  const fraction = usageFraction(rollout, config.contextBudgetTokens);
   if (config.logRequests) {
     try {
       appendRequestLogLine(
@@ -232,6 +232,7 @@ async function onStop(payload: HookPayload, environment: Environment): Promise<H
           fraction,
           undefined,
           profile,
+          config.contextBudgetTokens,
         ),
       );
     } catch {

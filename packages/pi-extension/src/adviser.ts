@@ -4,12 +4,13 @@ import type {
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
-import { judged, resolve } from "./checkpoint.ts";
+import { contextPressure, judged, resolve } from "./checkpoint.ts";
 import {
   type Config,
   ConfigStore,
   DEFAULT_CONFIG,
   type Mode,
+  parseBudget,
   parseMinimum,
   parseSavedApiKey,
 } from "./config.ts";
@@ -40,7 +41,7 @@ import {
 const LABEL = "compact-adviser";
 const HINT = "Compact adviser: work appears completed or recorded. Run /compact to save tokens.";
 const USAGE =
-  "Use /compact-adviser, auto, hint, off, status, threshold <tokens|default>, snooze or dismiss.";
+  "Use /compact-adviser, auto, hint, off, status, threshold <tokens|default>, budget <tokens|off>, snooze or dismiss.";
 interface Options {
   agentDir: string;
   version: string;
@@ -140,18 +141,11 @@ export function installAdviser(pi: ExtensionAPI, options: Options): void {
       return undefined;
     return usage.tokens;
   }
-  /** Context tokens over the model's window, or NaN when Pi does not know it (strictest floor). */
-  function usageFraction(ctx: ExtensionContext): number {
+  /** Context tokens over the budget or the model's window; NaN when unknown (strictest floor). */
+  function usageFraction(ctx: ExtensionContext, c: Config): number {
     const usage = ctx.getContextUsage();
-    if (
-      !usage ||
-      usage.tokens === null ||
-      !Number.isFinite(usage.tokens) ||
-      !Number.isFinite(usage.contextWindow) ||
-      usage.contextWindow <= 0
-    )
-      return Number.NaN;
-    return usage.tokens / usage.contextWindow;
+    if (!usage || usage.tokens === null) return Number.NaN;
+    return contextPressure(usage.tokens, usage.contextWindow, c.contextBudgetTokens);
   }
   function sessionIdentity(ctx: ExtensionContext) {
     return JSON.stringify([
@@ -204,7 +198,7 @@ export function installAdviser(pi: ExtensionAPI, options: Options): void {
     const current = () =>
       !controller.signal.aborted && generation === epoch && sessionIdentity(ctx) === identity;
     // The usage of the context judged: a stale answer's log line must not describe a newer one.
-    const fraction = usageFraction(ctx);
+    const fraction = usageFraction(ctx, config);
     try {
       const result = await evaluate(
         view.state,
@@ -221,6 +215,7 @@ export function installAdviser(pi: ExtensionAPI, options: Options): void {
             result,
             fraction,
             profile,
+            config.contextBudgetTokens,
           );
         } catch {
           // Response logging must not replace the gate decision.
@@ -435,13 +430,23 @@ export function installAdviser(pi: ExtensionAPI, options: Options): void {
         "warning",
       );
   }
+  function budget(ctx: ExtensionCommandContext, text: string) {
+    const count = parseBudget(text);
+    save(
+      ctx,
+      { contextBudgetTokens: count },
+      count > 0
+        ? `Context budget saved: ${count.toLocaleString("en-US")} tokens (all sessions).`
+        : "Context budget off (all sessions): the hint floor follows the model's window.",
+    );
+  }
   function status(ctx: ExtensionCommandContext) {
     const c = store.read(),
       s = restoreState(ctx.sessionManager.getBranch()),
       t = ctx.getContextUsage()?.tokens,
-      u = usageFraction(ctx);
+      u = usageFraction(ctx, c);
     ctx.ui.notify(
-      `Mode: ${c.mode}. Minimum: ${c.minContextTokens.toLocaleString("en-US")} tokens. Context: ${t ?? "unknown"}${Number.isFinite(u) ? ` (${Math.round(u * 100)}% of the window; hint floor ${floorFor(u, parseProfile(c.profile)).toFixed(2)})` : ""}. ${formatKeyStatus(resolvedKey(ctx.cwd).source)}. ${typeof t === "number" ? (cooldownReason(s, t, now()) ?? "No cooldown; semantic checks still apply.") : "Waiting for fresh model usage."} Request log: ${c.logRequests ? requestLogPath(options.agentDir) : "off"}. Settings: ${store.path}`,
+      `Mode: ${c.mode}. Minimum: ${c.minContextTokens.toLocaleString("en-US")} tokens. Budget: ${c.contextBudgetTokens > 0 ? `${c.contextBudgetTokens.toLocaleString("en-US")} tokens` : "off"}. Context: ${t ?? "unknown"}${Number.isFinite(u) ? ` (${Math.round(u * 100)}% of the ${c.contextBudgetTokens > 0 ? "budget" : "window"}; hint floor ${floorFor(u, parseProfile(c.profile)).toFixed(2)})` : ""}. ${formatKeyStatus(resolvedKey(ctx.cwd).source)}. ${typeof t === "number" ? `${cooldownReason(s, t, now()) ?? "No cooldown; semantic checks still apply"}.` : "Waiting for fresh model usage."} Request log: ${c.logRequests ? requestLogPath(options.agentDir) : "off"}. Settings: ${store.path}`,
       "info",
     );
   }
@@ -537,7 +542,18 @@ export function installAdviser(pi: ExtensionAPI, options: Options): void {
   pi.registerCommand("compact-adviser", {
     description: "Configure persistent compaction advice, experimental auto, and token minimum",
     getArgumentCompletions: (prefix) =>
-      ["auto", "hint", "off", "status", "threshold ", "threshold default", "snooze", "dismiss"]
+      [
+        "auto",
+        "hint",
+        "off",
+        "status",
+        "threshold ",
+        "threshold default",
+        "budget ",
+        "budget off",
+        "snooze",
+        "dismiss",
+      ]
         .filter((v) => v.startsWith(prefix))
         .map((value) => ({ value, label: value })),
     handler: async (args, ctx) => {
@@ -549,6 +565,7 @@ export function installAdviser(pi: ExtensionAPI, options: Options): void {
         else if (["auto", "hint", "off"].includes(command) && !value)
           await changeMode(ctx, command as Mode);
         else if (command === "threshold" && value) minimum(ctx, value);
+        else if (command === "budget" && value) budget(ctx, value);
         else if (command === "status" && !value) status(ctx);
         else if (["snooze", "dismiss"].includes(command) && !value) {
           const s = restoreState(ctx.sessionManager.getBranch());

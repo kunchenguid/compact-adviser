@@ -266,7 +266,7 @@ test("auto requires explicit confirmation, persist, and never compact on selecti
     h.notifications
       .at(-1)
       ?.includes(
-        "Use /compact-adviser, auto, hint, off, status, threshold <tokens|default>, snooze or dismiss.",
+        "Use /compact-adviser, auto, hint, off, status, threshold <tokens|default>, budget <tokens|off>, snooze or dismiss.",
       ),
   );
   await h.command("hint");
@@ -662,6 +662,35 @@ test("a silent no-qualify turn still logs the Jev response", async (t) => {
   assert.equal(lines[1].qualifies, false);
   assert.equal(lines[1].score, score(judgment));
   assert.ok(!JSON.stringify(lines).includes("test-key"));
+});
+
+test("a context budget relaxes the floor by the person's own token count", async (t) => {
+  for (const budget of ["off", "50000"]) {
+    const judgment = parseJudgment(apiResponse(0.8, 0.5));
+    const h = harness(t, async () => judgment);
+    h.enable();
+    h.store.update({ logRequests: true });
+    await h.command(`budget ${budget}`);
+    h.tokens = 45000;
+    await h.fire("agent_settled");
+    assert.equal(h.calls, 1);
+    const response = readFileSync(requestLogPath(h.dir), "utf8")
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line))[1];
+    // 45k of a 272k window is early (strict floor); 45k of a 50k budget is near the end.
+    assert.equal(response.usage, budget === "off" ? 45000 / 272000 : 45000 / 50000);
+    assert.equal(response.floor, floorFor(response.usage));
+    // A replay can tell a budget fraction from a window fraction.
+    assert.equal(response.budget, budget === "off" ? undefined : 50000);
+    assert.equal(showedHint(h), budget !== "off");
+    await h.command("status");
+    const status = h.notifications.at(-1) ?? "";
+    assert.ok(status.includes(budget === "off" ? "Budget: off." : "Budget: 50,000 tokens."));
+    assert.ok(status.includes(budget === "off" ? "% of the window;" : "90% of the budget;"));
+    // The cooldown reads as its own sentence before the next field.
+    assert.ok(status.includes("since the last judgment. Request log:") || budget !== "off", status);
+  }
 });
 
 test("a judgment failure logs the error kind without the key", async (t) => {

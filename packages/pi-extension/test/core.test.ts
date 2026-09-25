@@ -3,7 +3,13 @@ import { readFileSync, statSync, symlinkSync, unlinkSync, writeFileSync } from "
 import { join } from "node:path";
 import test from "node:test";
 import { lockSync } from "proper-lockfile";
-import { ConfigStore, DEFAULT_CONFIG, parseMinimum, parseSavedApiKey } from "../src/config.ts";
+import {
+  ConfigStore,
+  DEFAULT_CONFIG,
+  parseBudget,
+  parseMinimum,
+  parseSavedApiKey,
+} from "../src/config.ts";
 import { RECENT_TAIL_MESSAGES, snapshot } from "../src/context.ts";
 import { parseDotenvKey, resolveTypesafeApiKey } from "../src/env.ts";
 import {
@@ -76,6 +82,7 @@ test("config defaults, atomic persistence, field merging, contention and invalid
     version: 1,
     mode: "off",
     minContextTokens: 50000,
+    contextBudgetTokens: 0,
     autoAcknowledged: true,
     logRequests: false,
   });
@@ -92,6 +99,17 @@ test("minimum parsing rejects ambiguous, nonpositive or unsafe values", () => {
   assert.equal(parseMinimum(" 40000 "), 40000);
   for (const value of ["", "0", "-1", "1.5", "40k", "4e4", "NaN", "Infinity", "9007199254740992"])
     assert.throws(() => parseMinimum(value), value);
+});
+
+test("budget parsing takes a whole token count, and off or default clears it", (t) => {
+  assert.equal(parseBudget(" 450000 "), 450000);
+  assert.equal(parseBudget("off"), 0);
+  assert.equal(parseBudget("default"), 0);
+  for (const value of ["", "-1", "1.5", "450k", "4e5", "NaN", "9007199254740992"])
+    assert.throws(() => parseBudget(value), value);
+  const store = new ConfigStore(temp(t));
+  writeFileSync(store.path, JSON.stringify({ ...DEFAULT_CONFIG, contextBudgetTokens: -1 }));
+  assert.throws(() => store.read());
 });
 
 test("saved API key parsing trims, rejects empty, overlong, and control characters", () => {

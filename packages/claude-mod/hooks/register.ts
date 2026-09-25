@@ -20,6 +20,7 @@ import type { EngineInterface, PluginOptions, Register, RenderChildren } from "c
 import {
   COOLDOWN_TEXT,
   type Cooldown,
+  contextPressure,
   cooldown,
   judged,
   type Resolution,
@@ -27,6 +28,7 @@ import {
 } from "../lib/checkpoint.ts";
 import {
   API_KEY_KEY,
+  BUDGET_KEY,
   CONSENT_STORE_KEY,
   type Config,
   type Consent,
@@ -36,6 +38,7 @@ import {
   MINIMUM_KEY,
   MODE_KEY,
   type Mode,
+  parseBudget,
   parseConsent,
   parseMinimum,
   parseSavedApiKey,
@@ -86,7 +89,7 @@ const COMPACT_INSTRUCTIONS =
 const PENDING_NOTICE_KEY = "pendingNotice";
 const LOOPBACK_ENDPOINT = /^http:\/\/127\.0\.0\.1:\d{1,5}\/[\x21-\x7e]*$/;
 const USAGE =
-  "Use /compact-adviser, auto, hint, off, status, threshold <tokens|default>, snooze or dismiss.";
+  "Use /compact-adviser, auto, hint, off, status, threshold <tokens|default>, budget <tokens|off>, snooze or dismiss.";
 
 /** Why a turn end was not judged, besides a cooldown. */
 const SKIP_TEXT = {
@@ -346,12 +349,15 @@ async function invalidate($: EngineInterface): Promise<void> {
   }
 }
 
-/** Context tokens over the active limit, or NaN when the engine does not know it (strictest floor). */
-function usageFraction(context: {
-  tokens?: number;
-  window: number;
-  breakdown?: { isAutoCompactEnabled: boolean; autoCompactThreshold?: number };
-}): number {
+/** Context tokens over the budget or the active limit; NaN when unknown (strictest floor). */
+function usageFraction(
+  context: {
+    tokens?: number;
+    window: number;
+    breakdown?: { isAutoCompactEnabled: boolean; autoCompactThreshold?: number };
+  },
+  budget: number,
+): number {
   const threshold = context.breakdown?.autoCompactThreshold;
   const denominator =
     context.breakdown?.isAutoCompactEnabled &&
@@ -360,14 +366,8 @@ function usageFraction(context: {
     threshold > 0
       ? threshold
       : context.window;
-  if (
-    typeof context.tokens !== "number" ||
-    !Number.isFinite(context.tokens) ||
-    !Number.isFinite(denominator) ||
-    denominator <= 0
-  )
-    return Number.NaN;
-  return context.tokens / denominator;
+  if (typeof context.tokens !== "number") return Number.NaN;
+  return contextPressure(context.tokens, denominator, budget);
 }
 
 /** Why this checkpoint may not be judged, cheapest gate first; undefined when it may. */
@@ -502,9 +502,10 @@ async function judgeCheckpoint($: EngineInterface, epoch: number): Promise<void>
           responseLogLine(
             loggedBody ?? requestBody(view.state, profile),
             result,
-            usageFraction(context),
+            usageFraction(context, latest.contextBudgetTokens),
             undefined,
             profile,
+            latest.contextBudgetTokens,
           ),
         );
       } catch {
@@ -526,7 +527,7 @@ async function judgeCheckpoint($: EngineInterface, epoch: number): Promise<void>
     }
     const resolution = resolve({
       fresh: true,
-      qualifies: qualifies(result, usageFraction(context), profile),
+      qualifies: qualifies(result, usageFraction(context, latest.contextBudgetTokens), profile),
       mode: latest.mode,
       autoAcknowledged: latest.autoAcknowledged,
     });
@@ -831,6 +832,20 @@ async function changeMode($: EngineInterface, mode: Mode, fromPane = false): Pro
   );
 }
 
+/** Validates and saves a context budget; throws the validation message for the caller to show. */
+async function changeBudget($: EngineInterface, text: string): Promise<boolean> {
+  const count = parseBudget(text);
+  return saveRow(
+    $,
+    BUDGET_KEY,
+    count,
+    count > 0
+      ? `Context budget saved: ${formatTokens(count)} tokens (all sessions).`
+      : "Context budget off (all sessions).",
+    count > 0 ? undefined : "The hint floor follows Claude Code's own compaction point.",
+  );
+}
+
 /** Validates and saves a minimum; throws the validation message for the caller to show. */
 async function changeMinimum($: EngineInterface, text: string): Promise<boolean> {
   const count = text === "default" ? DEFAULT_MINIMUM : parseMinimum(text);
@@ -901,7 +916,9 @@ async function statusText($: EngineInterface): Promise<string> {
     typeof tokens === "number"
       ? `${cooldownReason(state, tokens, await $.clock.now()) ?? "No cooldown; semantic checks still apply"}.`
       : "Waiting for fresh model usage.";
-  return `Mode: ${config.mode}${config.mode === "auto" && !config.autoAcknowledged ? " (not confirmed)" : ""}. Minimum: ${formatTokens(config.minContextTokens)} tokens. Context: ${typeof tokens === "number" ? formatTokens(tokens) : "unknown"}${Number.isFinite(usageFraction(usage.context)) ? ` (${Math.round(usageFraction(usage.context) * 100)}% of the context limit; hint floor ${floorFor(usageFraction(usage.context), parseProfile(config.profile)).toFixed(2)})` : ""}. ${formatKeyStatus((await resolvedKey($)).source)}. ${waiting}${lastCheck === undefined ? "" : ` Last turn end: ${turnEndText(lastCheck)}.`}${engine} Request log: ${await requestLogStatus($, config)}. Settings: /config (compact-adviser rows) and /compact-adviser.`;
+  const budget = config.contextBudgetTokens;
+  const fraction = usageFraction(usage.context, budget);
+  return `Mode: ${config.mode}${config.mode === "auto" && !config.autoAcknowledged ? " (not confirmed)" : ""}. Minimum: ${formatTokens(config.minContextTokens)} tokens. Budget: ${budget > 0 ? `${formatTokens(budget)} tokens` : "off"}. Context: ${typeof tokens === "number" ? formatTokens(tokens) : "unknown"}${Number.isFinite(fraction) ? ` (${Math.round(fraction * 100)}% of the ${budget > 0 ? "budget" : "context limit"}; hint floor ${floorFor(fraction, parseProfile(config.profile)).toFixed(2)})` : ""}. ${formatKeyStatus((await resolvedKey($)).source)}. ${waiting}${lastCheck === undefined ? "" : ` Last turn end: ${turnEndText(lastCheck)}.`}${engine} Request log: ${await requestLogStatus($, config)}. Settings: /config (compact-adviser rows) and /compact-adviser.`;
 }
 
 async function snoozeOrDismiss($: EngineInterface, command: "snooze" | "dismiss") {
@@ -1041,6 +1058,8 @@ export const register: Register = (on, options) => {
         await placeRing($, 40);
       } else if (["auto", "hint", "off"].includes(command) && !value) {
         await changeMode($, command as Mode);
+      } else if (command === "budget" && value) {
+        await changeBudget($, value);
       } else if (command === "threshold" && value) {
         await changeMinimum($, value);
       } else if (command === "status" && !value) {

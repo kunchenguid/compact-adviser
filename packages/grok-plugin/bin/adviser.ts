@@ -38,6 +38,7 @@ import { judged, resolve } from "../lib/checkpoint.ts";
 import {
   DEFAULT_MINIMUM,
   formatTokens,
+  parseBudget,
   parseMinimum,
   parseMode,
   parseSavedApiKey,
@@ -101,6 +102,7 @@ const USAGE = `compact-adviser (Grok)
   status                     what the adviser would do right now
   mode hint|off              hint shows advice; off disables it (Grok's own auto-compact is unaffected)
   threshold <tokens|default> minimum context tokens before a checkpoint is judged
+  budget <tokens|off>        relax the hint floor toward this context size instead of the window
   key <value>|key clear      save or clear the TypeSafe API key from a shell (TYPESAFE_API_KEY still wins)
   log on|off                 TypeSafe request logging, off by default
   snooze                     no advice for three more completed exchanges in this session
@@ -382,7 +384,7 @@ async function runStop(payload: HookPayload): Promise<void> {
     return;
   }
 
-  const fraction = usageFraction(usage);
+  const fraction = usageFraction(usage, settings.contextBudgetTokens);
   if (settings.logRequests) {
     appendLog(
       sessionId,
@@ -392,6 +394,7 @@ async function runStop(payload: HookPayload): Promise<void> {
         fraction,
         undefined,
         profile,
+        settings.contextBudgetTokens,
       ),
     );
   }
@@ -630,6 +633,7 @@ function statusText(): string {
   const lines = [
     `Mode: ${settings.mode} (Grok is hint-only; nothing outside a session can run /compact).`,
     `Minimum context: ${formatTokens(settings.minContextTokens)} tokens.`,
+    `Budget: ${settings.contextBudgetTokens > 0 ? `${formatTokens(settings.contextBudgetTokens)} tokens` : "off"}.`,
     `${formatKeyStatus(key.source)}.`,
     `Request log: ${settings.logRequests ? requestLogPath(dataDir(env()), "<session-id>") : "off"}.`,
     `Settings file: ${settingsPath(env())}.`,
@@ -640,12 +644,12 @@ function statusText(): string {
     const state = loadSessionState(sessionStatePath(sessionId, env()), Date.now());
     const dir = findSessionDir(process.cwd(), sessionId, env());
     const usage = readSignalsUsage(dir);
-    const fraction = usageFraction(usage);
+    const fraction = usageFraction(usage, settings.contextBudgetTokens);
     lines.push(
       `Session ${sessionId}: ${state.completed} completed exchange(s) since the last compaction.`,
       `Context: ${usage.tokens === undefined ? "unknown" : formatTokens(usage.tokens)}${
         Number.isFinite(fraction)
-          ? ` (${Math.round(fraction * 100)}% of the window; hint floor ${floorFor(fraction, parseProfile(settings.profile)).toFixed(2)})`
+          ? ` (${Math.round(fraction * 100)}% of the ${settings.contextBudgetTokens > 0 ? "budget" : "window"}; hint floor ${floorFor(fraction, parseProfile(settings.profile)).toFixed(2)})`
           : ` (usage unknown; hint floor ${floorFor(Number.NaN, parseProfile(settings.profile)).toFixed(2)})`
       }.`,
       `Cooldown: ${
@@ -706,6 +710,12 @@ function runCommand(argv: readonly string[]): string {
     case "threshold": {
       const count = value === "default" ? DEFAULT_MINIMUM : parseMinimum(value);
       return `Minimum context saved: ${formatTokens(updateSettings({ minContextTokens: count }).minContextTokens)} tokens.`;
+    }
+    case "budget": {
+      const count = updateSettings({ contextBudgetTokens: parseBudget(value) }).contextBudgetTokens;
+      return count > 0
+        ? `Context budget saved: ${formatTokens(count)} tokens.`
+        : "Context budget off: the hint floor follows the model's window.";
     }
     case "key":
       if (value === "clear") {

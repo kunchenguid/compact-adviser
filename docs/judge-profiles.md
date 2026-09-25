@@ -37,7 +37,7 @@ A single point sets a constant floor.
 A profile accepts one to eight points.
 Usage values must strictly increase, and floors must not increase.
 Every value must be between zero and one.
-The same host-specific usage denominator applies with and without a profile.
+The same host-specific usage denominator applies with and without a profile, and a context budget, when set, replaces it in both cases.
 
 The optional `questions` field replaces both questions in full.
 It has the same structure as `QUESTIONS` in `packages/pi-extension/src/judge.ts`.

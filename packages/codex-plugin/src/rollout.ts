@@ -6,6 +6,7 @@
 // and an empty transcript simply yields nothing to judge. Nothing in this file throws.
 
 import { closeSync, openSync, readSync, statSync } from "node:fs";
+import { contextPressure } from "./checkpoint.ts";
 import type { MessageLike, ToolUseLike } from "./snapshot.ts";
 import { MESSAGE_LIMIT, SUMMARY_PREFIX } from "./snapshot.ts";
 
@@ -56,19 +57,11 @@ export const EMPTY_ROLLOUT: Readonly<Rollout> = Object.freeze({
   truncated: false,
 });
 
-/** Context usage as a fraction of the window, or NaN when either number is unusable. */
-export function usageFraction(rollout: Pick<Rollout, "tokens" | "window">): number {
+/** Context usage over the budget or the window, or NaN when either number is unusable. */
+export function usageFraction(rollout: Pick<Rollout, "tokens" | "window">, budget: number): number {
   const { tokens, window } = rollout;
-  if (
-    typeof tokens !== "number" ||
-    !Number.isFinite(tokens) ||
-    typeof window !== "number" ||
-    !Number.isFinite(window) ||
-    window <= 0
-  ) {
-    return Number.NaN;
-  }
-  return tokens / window;
+  if (typeof tokens !== "number" || typeof window !== "number") return Number.NaN;
+  return contextPressure(tokens, window, budget);
 }
 
 /** Reads the first line, and the last `MAX_ROLLOUT_BYTES`, dropping a partial line between. */
