@@ -432,12 +432,7 @@ async function judgeCheckpoint($: EngineInterface, epoch: number): Promise<void>
         profile,
       );
     } catch (error) {
-      if (epoch !== generation) return;
-      // A save from /config reloads this module without invalidating this environment, and
-      // the reload can cancel the request: that is not a TypeSafe failure worth a backoff.
-      const settingsNow = await loadConfig($).catch(() => undefined);
-      if (JSON.stringify(settingsNow) !== JSON.stringify(initial)) return;
-      note(epoch, "failed");
+      // Every logged request gets its outcome, even one a newer turn has made stale.
       if (initial.logRequests) {
         try {
           await appendTypeSafeLog($, errorLogLine(loggedJudgeErrorKind(error), loggedBody));
@@ -445,6 +440,12 @@ async function judgeCheckpoint($: EngineInterface, epoch: number): Promise<void>
           // Error logging must not replace backoff.
         }
       }
+      if (epoch !== generation) return;
+      // A save from /config reloads this module without invalidating this environment, and
+      // the reload can cancel the request: that is not a TypeSafe failure worth a backoff.
+      const settingsNow = await loadConfig($).catch(() => undefined);
+      if (JSON.stringify(settingsNow) !== JSON.stringify(initial)) return;
+      note(epoch, "failed");
       const { key, state } = await loadState($);
       const failedAt = await $.clock.now();
       // Checked right before the write: a newer turn may have stored a record meanwhile.
@@ -453,7 +454,6 @@ async function judgeCheckpoint($: EngineInterface, epoch: number): Promise<void>
       notice($, judgeFailureMessage(error));
       return;
     }
-    if (epoch !== generation) return;
     const latest = await loadConfig($);
     const { key, state: current } = await loadState($);
     const now = await $.clock.now();

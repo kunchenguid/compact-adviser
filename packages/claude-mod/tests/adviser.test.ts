@@ -581,6 +581,41 @@ describe("turn-end gates", () => {
     expect(hinted(w)).toBe(true);
   });
 
+  test("the request log keeps the outcome of a judgment a newer turn made stale", async ($, on) => {
+    const w = world(on, { logRequests: true });
+    let calls = 0;
+    w.respond = async () => {
+      calls++;
+      if (calls > 2) return { status: 200, text: JSON.stringify(jevAnswer()) };
+      await $.turn.start({ turnId: `stale-${calls}`, origin: { kind: "composer" } } as never);
+      w.messages = longConversation(`unit ${calls}`);
+      await $.turn.complete(answered());
+      return calls === 1
+        ? { status: 200, text: JSON.stringify(jevAnswer()) }
+        : { status: 500, text: "" };
+    };
+    await $.session.start(interactiveStart);
+    await turnEnd($, w);
+    expect(w.journal.requests).toHaveLength(3);
+    const lines = (
+      w.logFiles.get("/tmp/fixture-home/.claude/compact-adviser-requests-session-1.jsonl") ?? ""
+    )
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
+    expect(lines.map((line) => line.kind).sort()).toEqual([
+      "error",
+      "request",
+      "request",
+      "request",
+      "response",
+      "response",
+    ]);
+    expect(new Set(lines.map((line) => line.id)).size).toBe(3);
+    // The stale failure is logged but is not this turn's backoff.
+    expect(stored(w).failures).toBe(0);
+  });
+
   test("status says a checkpoint is being judged, and why a late answer was discarded", async ($, on) => {
     const w = world(on);
     w.respond = async () => {

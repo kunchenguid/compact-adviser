@@ -369,6 +369,32 @@ test("a cross-session disable or new pending message wins over a favorable in-fl
   }
 });
 
+test("the request log keeps the outcome of an answer a newer leaf made stale", async (t) => {
+  for (const outcome of ["response", "error"]) {
+    let settle: (() => void) | undefined;
+    const h = harness(
+      t,
+      () =>
+        new Promise((resolve, reject) => {
+          settle = () =>
+            outcome === "response" ? resolve(success()) : reject(new JudgeError("server"));
+        }),
+    );
+    h.enable();
+    h.store.update({ logRequests: true });
+    await h.fire("agent_settled");
+    h.next("Newer context");
+    settle?.();
+    await flush();
+    const kinds = readFileSync(requestLogPath(h.dir), "utf8")
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line).kind);
+    assert.deepEqual(kinds, ["request", outcome], outcome);
+    assert.equal(h.compactions.length, 0, outcome);
+  }
+});
+
 test("a judgment discarded by a settings change mid-flight does not start the re-ask wait", async (t) => {
   let answer: ((j: ReturnType<typeof parseJudgment>) => void) | undefined;
   const h = harness(
