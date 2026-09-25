@@ -91,7 +91,7 @@ const USAGE =
 /** Why a turn end was not judged, besides a cooldown. */
 const SKIP_TEXT = {
   "not-interactive": "the session is not interactive",
-  compacting: "a compaction is running",
+  compacting: "a compaction started",
   off: "mode is off",
   "unknown-usage": "context size unknown",
   "below-minimum": "context below the minimum",

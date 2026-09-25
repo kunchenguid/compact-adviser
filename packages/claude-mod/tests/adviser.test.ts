@@ -670,7 +670,7 @@ describe("turn-end gates", () => {
       expect(status).not.toContain("being judged");
       expect(status).toContain(
         interrupt === "compact"
-          ? "Last turn end: judgment discarded, a compaction is running."
+          ? "Last turn end: judgment discarded, a compaction started."
           : "Last turn end: judgment discarded, settings or session changed meanwhile.",
       );
       // The cooldown sentence ends before the next one starts.
@@ -723,7 +723,7 @@ describe("turn-end gates", () => {
     await turnEnd($, w);
     expect(w.journal.requests).toHaveLength(1);
     await $.command.run(commandRun("status"));
-    expect(w.journal.logs.at(-1)).toContain("Last turn end: not checked, a compaction is running.");
+    expect(w.journal.logs.at(-1)).toContain("Last turn end: not checked, a compaction started.");
   });
 
   test("a request log pauses after its last part instead of growing without end", async ($, on) => {
