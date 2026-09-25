@@ -7,9 +7,14 @@
 /** After a compaction, judging waits for this much new context and these many exchanges. */
 export const AFTER_COMPACTION_TOKENS = 20000;
 export const AFTER_COMPACTION_EXCHANGES = 3;
-/** After a judgment that did not act, the next waits for this much new context or exchanges. */
+/**
+ * After a judgment that did not act, the next waits for this much new context, or for these
+ * many exchanges that also changed the context by `REASK_MIN_TOKENS`: exchanges that add
+ * almost nothing (background notifications) do not make a new checkpoint.
+ */
 export const REASK_TOKENS = 20000;
 export const REASK_EXCHANGES = 3;
+export const REASK_MIN_TOKENS = 5000;
 
 /** The per-session facts the policy reads and writes; each host's record carries them. */
 export interface Gates {
@@ -33,7 +38,8 @@ export const COOLDOWN_TEXT: Readonly<Record<Cooldown, string>> = {
   backoff: "TypeSafe backoff",
   snoozed: "Snoozed",
   "after-compaction": "Waiting for 20k new tokens and 3 completed exchanges after compaction",
-  "re-ask": "Waiting for 20k new tokens or 3 completed exchanges since the last judgment",
+  "re-ask":
+    "Waiting for 20k new tokens, or 3 completed exchanges and 5k new tokens, since the last judgment",
 };
 
 /** Why this session may not be judged yet at `tokens`, or undefined when it may. */
@@ -56,7 +62,8 @@ export function cooldown(
     gates.judgedTokens !== null &&
     gates.judgedAt !== null &&
     tokens - gates.judgedTokens < REASK_TOKENS &&
-    gates.completed - gates.judgedAt < REASK_EXCHANGES
+    (gates.completed - gates.judgedAt < REASK_EXCHANGES ||
+      Math.abs(tokens - gates.judgedTokens) < REASK_MIN_TOKENS)
   )
     return "re-ask";
   return undefined;

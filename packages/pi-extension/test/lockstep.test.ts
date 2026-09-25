@@ -360,7 +360,8 @@ test("every package writes the same TypeSafe log line shape", () => {
 
 test("every package applies the same cooldownReason gates", () => {
   const waiting = "Waiting for 20k new tokens and 3 completed exchanges after compaction";
-  const rejudge = "Waiting for 20k new tokens or 3 completed exchanges since the last judgment";
+  const rejudge =
+    "Waiting for 20k new tokens, or 3 completed exchanges and 5k new tokens, since the last judgment";
   const cases: Array<{
     name: string;
     tokens: number;
@@ -443,8 +444,24 @@ test("every package applies the same cooldownReason gates", () => {
       reason: undefined,
     },
     {
-      name: "re-ask gate: 3 more exchanges",
-      tokens: 100000,
+      name: "re-ask gate: 3 more exchanges and 5k more tokens",
+      tokens: 105000,
+      now: 0,
+      compacted: false,
+      patch: { completed: 7, judgedTokens: 100000, judgedAt: 4 },
+      reason: undefined,
+    },
+    {
+      name: "re-ask gate: 3 more exchanges that barely changed the context",
+      tokens: 104999,
+      now: 0,
+      compacted: false,
+      patch: { completed: 9, judgedTokens: 100000, judgedAt: 4 },
+      reason: rejudge,
+    },
+    {
+      name: "re-ask gate: 3 more exchanges after the context shrank 5k",
+      tokens: 95000,
       now: 0,
       compacted: false,
       patch: { completed: 7, judgedTokens: 100000, judgedAt: 4 },

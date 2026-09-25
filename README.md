@@ -112,7 +112,7 @@ On Grok, save the TypeSafe key as `TYPESAFE_API_KEY` or a cwd `.env`, or with th
 | --- | --- |
 | `Key: missing` in `/compact-adviser status` (Pi, Claude Code) or `/compact-adviser` (Grok) | No `TYPESAFE_API_KEY` in the launch environment, saved settings, or the session cwd's `./.env` |
 | No `/compact-adviser` command in Claude Code | `CLAUDE_CODE_ENABLE_FUNCTION_HOOKS` is not exactly `1` |
-| Command exists, no hint | Context is below the constant 40,000-token minimum, the session is not idle, the last turn was not a settled final answer, or the last judgment said "not yet" and the next waits for 20k more tokens or 3 more exchanges |
+| Command exists, no hint | Context is below the constant 40,000-token minimum, the session is not idle, the last turn was not a settled final answer, or the last judgment said "not yet" and the next waits for 20k more tokens, or 3 more exchanges that add 5k |
 | Claude Code: still unsure why | `/compact-adviser status` has a `Last turn end:` line naming what the latest settled turn came to: not checked (and which gate), being judged, discarded (and which gate stopped holding), judged not a checkpoint yet, or judged a checkpoint |
 | Claude Code: "nonessential traffic" | `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` blocks plugin network requests |
 | No hint in Codex | The hook is untrusted (review it in `/hooks`), Node is older than 22.18, or the hook cannot find Node at all - Codex rebuilds its PATH, so set `COMPACT_ADVISER_NODE` to an absolute `node` path |

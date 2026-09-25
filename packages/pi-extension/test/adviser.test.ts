@@ -60,7 +60,7 @@ test("a new checkpoint can be judged immediately; the same checkpoint is not", a
   assert.equal(h.calls, 2);
 });
 
-test("after a judgment that did not advise, re-ask waits for 20k more tokens or 3 exchanges", async (t) => {
+test("after a judgment that did not advise, re-ask waits for 20k more tokens or 3 exchanges that add 5k", async (t) => {
   const h = harness(t, async () => parseJudgment(apiResponse(0.1, 0.99)));
   h.enable();
   h.tokens = 45000;
@@ -81,7 +81,12 @@ test("after a judgment that did not advise, re-ask waits for 20k more tokens or 
     await h.fire("agent_settled");
   }
   assert.equal(h.calls, 2);
+  h.tokens = 69999;
   h.next("f");
+  await h.fire("agent_settled");
+  assert.equal(h.calls, 2, "3 exchanges that added under 5k tokens are not a new checkpoint");
+  h.tokens = 70000;
+  h.next("g");
   await h.fire("agent_settled");
   assert.equal(h.calls, 3);
 });

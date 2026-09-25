@@ -664,7 +664,7 @@ describe("turn-end gates", () => {
     expect([stored(w).compacted, stored(w).judgedTokens]).toEqual([true, null]);
   });
 
-  test("after a judgment that did not advise, re-ask waits for 20k more tokens or 3 exchanges", async ($, on) => {
+  test("after a judgment that did not advise, re-ask waits for 20k more tokens or 3 exchanges that add 5k", async ($, on) => {
     const w = world(on);
     w.respond = async () => ({
       status: 200,
@@ -686,13 +686,18 @@ describe("turn-end gates", () => {
     w.messages = longConversation("c");
     await turnEnd($, w);
     expect(w.journal.requests).toHaveLength(2);
-    // So does the third completed exchange, even without growth.
+    // So does the third completed exchange, once the context has grown 5k.
     for (const ask of ["d", "e"]) {
       w.messages = longConversation(ask);
       await turnEnd($, w);
     }
     expect(w.journal.requests).toHaveLength(2);
+    w.usage.tokens = 84999;
     w.messages = longConversation("f");
+    await turnEnd($, w);
+    expect(w.journal.requests).toHaveLength(2);
+    w.usage.tokens = 85000;
+    w.messages = longConversation("g");
     await turnEnd($, w);
     expect(w.journal.requests).toHaveLength(3);
   });
@@ -1194,7 +1199,7 @@ describe("commands", () => {
     await turnEnd($, w);
     await $.command.run(commandRun("status"));
     expect(last()).toBe(
-      "Last turn end: not checked, cooldown: Waiting for 20k new tokens or 3 completed exchanges since the last judgment.",
+      "Last turn end: not checked, cooldown: Waiting for 20k new tokens, or 3 completed exchanges and 5k new tokens, since the last judgment.",
     );
     w.usage.tokens = 170000;
     w.respond = async () => ({ status: 200, text: JSON.stringify(jevAnswer()) });

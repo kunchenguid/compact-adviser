@@ -148,7 +148,7 @@ test("a materially different next checkpoint is judged again straight away", asy
   });
 });
 
-test("after a judgment below the floor, re-ask waits for 20k more tokens or 3 exchanges", async () => {
+test("after a judgment below the floor, re-ask waits for 20k more tokens or 3 exchanges that add 5k", async () => {
   await withLab(async (lab) => {
     // 0.6 x (0.5 + 0.5 x 0.6) = 0.48, under every floor this test reaches.
     const typesafe = fakeTypesafe(() => ({ body: jevAnswer(0.6, 0.6) }));
@@ -172,7 +172,9 @@ test("after a judgment below the floor, re-ask waits for 20k more tokens or 3 ex
     await turn("fifth", 90000);
     await turn("sixth", 90000);
     assert.equal(typesafe.requests.length, 2);
-    await turn("seventh", 90000);
+    await turn("seventh", 94999);
+    assert.equal(typesafe.requests.length, 2);
+    await turn("eighth", 95000);
     assert.equal(typesafe.requests.length, 3);
   });
 });
