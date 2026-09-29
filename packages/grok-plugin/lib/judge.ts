@@ -8,9 +8,7 @@
 
 import type { JudgeProfile } from "./profile.ts";
 
-/** TypeSafe's public API base, where the direct judge sends every request. */
-export const TYPESAFE_API_BASE = "https://api.typesafe.ai";
-export const ENDPOINT = `${TYPESAFE_API_BASE}/v1/systemone`;
+export const ENDPOINT = "https://api.typesafe.ai/v1/systemone";
 export const MAX_REQUEST_BYTES = 32000;
 /**
  * Who carries the checkpoint to Jev: TypeSafe's own API (the default), or Vercel's AI
@@ -353,16 +351,14 @@ export interface JudgeAdapter {
 function bearer(key: string): Record<string, string> {
   return { "Content-Type": "application/json", Authorization: `Bearer ${key}` };
 }
-/** TypeSafe's own API; the base is an argument so a vetted override can be passed in. */
-export function typesafeAdapter(base: string = TYPESAFE_API_BASE): JudgeAdapter {
-  return {
-    provider: "typesafe",
-    endpoint: `${base}/v1/systemone`,
-    headers: bearer,
-    body: (state, questions) => ({ model: "jev-latest", state, questions }),
-    parse: parseJudgment,
-  };
-}
+/** TypeSafe's own API, the default judge. */
+export const TYPESAFE_ADAPTER: JudgeAdapter = {
+  provider: "typesafe",
+  endpoint: ENDPOINT,
+  headers: bearer,
+  body: (state, questions) => ({ model: "jev-latest", state, questions }),
+  parse: parseJudgment,
+};
 /**
  * Jev through Vercel's AI Gateway: the same state and questions, with the model named in a
  * header instead of the body, and the reply mapped from the AI SDK's evaluation shape.
@@ -383,7 +379,7 @@ export const GATEWAY_ADAPTER: JudgeAdapter = {
 export function requestBody(
   state: unknown,
   profile?: JudgeProfile,
-  adapter: JudgeAdapter = typesafeAdapter(),
+  adapter: JudgeAdapter = TYPESAFE_ADAPTER,
 ): string {
   const body = JSON.stringify(adapter.body(state, profile?.questions ?? QUESTIONS));
   if (byteLength(body) > MAX_REQUEST_BYTES)
@@ -408,7 +404,7 @@ export async function judge(
   key: string,
   transport: Transport,
   profile?: JudgeProfile,
-  adapter: JudgeAdapter = typesafeAdapter(),
+  adapter: JudgeAdapter = TYPESAFE_ADAPTER,
 ): Promise<Judgment> {
   const provider = adapter.provider;
   const body = requestBody(state, profile, adapter);

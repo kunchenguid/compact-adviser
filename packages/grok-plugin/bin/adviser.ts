@@ -53,6 +53,7 @@ import {
   judgeSavedMessage,
   KEY_LABELS,
   KEY_NAMES,
+  knownJudgeKeys,
   PROVIDER_ENV,
   parseDotenvKey,
   parseJudgeProvider,
@@ -156,12 +157,17 @@ function updateSettings(patch: Partial<Settings>): Settings {
   return next;
 }
 
-function dotenvKey(cwd: string, name: string): string | undefined {
+function readDotenv(cwd: string): string | undefined {
   try {
-    return parseDotenvKey(readFileSync(join(cwd, ".env"), "utf8"), name);
+    return readFileSync(join(cwd, ".env"), "utf8");
   } catch {
     return undefined;
   }
+}
+
+function dotenvKey(cwd: string, name: string): string | undefined {
+  const dotenv = readDotenv(cwd);
+  return dotenv === undefined ? undefined : parseDotenvKey(dotenv, name);
 }
 
 /** The judge in effect: the hook environment's, then the saved one, then TypeSafe. */
@@ -367,7 +373,7 @@ async function runStop(payload: HookPayload): Promise<void> {
   if (!transcript.messages.length) return;
   const view = snapshot(
     transcript.messages,
-    [activeKey, settings.typesafeApiKey, settings.aiGatewayApiKey],
+    [activeKey, ...knownJudgeKeys(process.env, settings, readDotenv(cwd))],
     transcript.hasImages,
   );
   if (view.conversationTokens <= MINIMUM_CONVERSATION_TOKENS) return;

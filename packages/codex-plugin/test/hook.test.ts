@@ -100,6 +100,44 @@ test("with the gateway judge, the checkpoint goes to Vercel's AI Gateway with th
   });
 });
 
+test("the inactive provider's keys in the transcript never reach the active judge", async () => {
+  const inactive = {
+    vercel: ["tsk-env-key-value", "tsk-dotenv-key-value"],
+    typesafe: ["vck-env-key-value", "vck-dotenv-key-value"],
+  } as const;
+  for (const provider of ["vercel", "typesafe"] as const) {
+    await withLab(async (lab) => {
+      const rollout = settledRollout();
+      rollout.splice(-2, 0, assistantMessage(`echo shows ${inactive[provider].join(" and ")}`));
+      writeRollout(lab.transcript, rollout);
+      writeFileSync(
+        `${lab.cwd}/.env`,
+        "TYPESAFE_API_KEY=tsk-dotenv-key-value\nAI_GATEWAY_API_KEY=vck-dotenv-key-value\n",
+      );
+      const judge = fakeTypesafe(() => ({
+        body: provider === "vercel" ? gatewayAnswer() : undefined,
+      }));
+      const output = await handle(
+        stop(lab),
+        environment(lab, {
+          fetch: judge.fetch,
+          env: {
+            CODEX_HOME: lab.home,
+            TYPESAFE_API_KEY: "tsk-env-key-value",
+            AI_GATEWAY_API_KEY: "vck-env-key-value",
+            COMPACT_ADVISER_JUDGE_PROVIDER: provider,
+          },
+        }),
+      );
+      assert.deepEqual(output, { systemMessage: HINT });
+      assert.equal(judge.requests.length, 1);
+      const body = JSON.stringify(judge.requests[0]?.body);
+      for (const secret of inactive[provider]) assert.ok(!body.includes(secret), secret);
+      assert.ok(body.includes("[REDACTED]"));
+    });
+  }
+});
+
 test("the gateway judge without its own key, or an unknown judge, asks nobody", async () => {
   for (const env of [
     { COMPACT_ADVISER_JUDGE_PROVIDER: "vercel", TYPESAFE_API_KEY: TYPESAFE_KEY },

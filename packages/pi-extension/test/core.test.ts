@@ -33,8 +33,7 @@ import {
   qualifies,
   requestBody,
   score,
-  TYPESAFE_API_BASE,
-  typesafeAdapter,
+  TYPESAFE_ADAPTER,
   USAGE_LOOSE_AT,
   USAGE_STRICT_UNTIL,
 } from "../src/judge.ts";
@@ -656,7 +655,7 @@ test("the judge provider comes from the launch environment, then settings, then 
   assert.equal(resolveJudge(undefined).adapter?.endpoint, ENDPOINT);
 });
 
-test("the TypeSafe adapter takes its base as an argument and changes nothing else", async () => {
+test("the default TypeSafe adapter posts the unchanged request to ENDPOINT", async () => {
   let url: unknown;
   let seen: RequestInit | undefined;
   const transport = (async (input, init) => {
@@ -664,22 +663,19 @@ test("the TypeSafe adapter takes its base as an argument and changes nothing els
     seen = init;
     return new Response(JSON.stringify(apiResponse()), { status: 200 });
   }) as typeof fetch;
-  assert.equal(TYPESAFE_API_BASE, "https://api.typesafe.ai");
-  assert.equal(typesafeAdapter().endpoint, ENDPOINT);
   assert.equal(ENDPOINT, "https://api.typesafe.ai/v1/systemone");
-  const adapter = typesafeAdapter("https://proxy.example.test/typesafe");
-  assert.deepEqual(adapter.headers("k"), typesafeAdapter().headers("k"));
-  assert.equal(requestBody({ phase: "done" }, undefined, adapter), requestBody({ phase: "done" }));
+  assert.equal(TYPESAFE_ADAPTER.endpoint, ENDPOINT);
+  assert.equal(
+    requestBody({ phase: "done" }, undefined, TYPESAFE_ADAPTER),
+    requestBody({ phase: "done" }),
+  );
   const result = await judge(
     { phase: "done" },
     "fake-test-key",
     new AbortController().signal,
     transport,
-    undefined,
-    undefined,
-    adapter,
   );
-  assert.equal(url, "https://proxy.example.test/typesafe/v1/systemone");
+  assert.equal(url, ENDPOINT);
   assert.equal(
     (seen?.headers as Record<string, string> | undefined)?.Authorization,
     "Bearer fake-test-key",

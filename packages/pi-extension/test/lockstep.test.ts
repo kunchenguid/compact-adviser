@@ -62,22 +62,17 @@ test("every package asks Jev through the gateway with the same request", () => {
         other.requestBody(s, undefined, other.GATEWAY_ADAPTER),
         pi.requestBody(s, undefined, pi.GATEWAY_ADAPTER),
       );
-      const base = "https://proxy.example.test/typesafe";
-      assert.equal(other.requestBody(s, undefined, other.typesafeAdapter(base)), pi.requestBody(s));
+      assert.equal(other.requestBody(s, undefined, other.TYPESAFE_ADAPTER), pi.requestBody(s));
     }
   }
   for (const other of [claude, codex, grok]) {
     assert.equal(other.GATEWAY_ENDPOINT, pi.GATEWAY_ENDPOINT);
     assert.equal(other.GATEWAY_MODEL, pi.GATEWAY_MODEL);
     assert.deepEqual(other.JUDGE_PROVIDERS, pi.JUDGE_PROVIDERS);
-    assert.equal(other.TYPESAFE_API_BASE, pi.TYPESAFE_API_BASE);
+    assert.equal(other.ENDPOINT, pi.ENDPOINT);
     for (const [mine, theirs] of [
       [pi.GATEWAY_ADAPTER, other.GATEWAY_ADAPTER],
-      [pi.typesafeAdapter(), other.typesafeAdapter()],
-      [
-        pi.typesafeAdapter("https://proxy.example.test"),
-        other.typesafeAdapter("https://proxy.example.test"),
-      ],
+      [pi.TYPESAFE_ADAPTER, other.TYPESAFE_ADAPTER],
     ] as const) {
       assert.equal(theirs.provider, mine.provider);
       assert.equal(theirs.endpoint, mine.endpoint);

@@ -175,6 +175,44 @@ test("the gateway judge asks Jev through Vercel's AI Gateway with only the gatew
   assert.ok(!status.stdout.includes("vck-test-key"));
 });
 
+test("the inactive provider's keys in the transcript never reach the active judge", async (t) => {
+  const inactive = {
+    vercel: ["tsk-env-key-value", "tsk-dotenv-key-value"],
+    typesafe: ["vck-env-key-value", "vck-dotenv-key-value"],
+  } as const;
+  for (const provider of ["vercel", "typesafe"] as const) {
+    const l = lab(t);
+    const fixture = await typesafeFixture(t);
+    fixture.gateway = provider === "vercel";
+    const history = workedHistory();
+    history.splice(-1, 0, {
+      type: "assistant",
+      content: `echo shows ${inactive[provider].join(" and ")}`,
+    });
+    writeHistory(l, history);
+    writeSignals(l, 150000);
+    writeFileSync(
+      join(l.cwd, ".env"),
+      "TYPESAFE_API_KEY=tsk-dotenv-key-value\nAI_GATEWAY_API_KEY=vck-dotenv-key-value\n",
+    );
+    const stop = await runCli(["hook", "stop"], {
+      lab: l,
+      stdin: stopPayload(l),
+      env: {
+        COMPACT_ADVISER_TEST_ENDPOINT: fixture.url,
+        TYPESAFE_API_KEY: "tsk-env-key-value",
+        AI_GATEWAY_API_KEY: "vck-env-key-value",
+        COMPACT_ADVISER_JUDGE_PROVIDER: provider,
+      },
+    });
+    assert.equal(stop.code, 0, stop.stderr);
+    assert.equal(fixture.bodies.length, 1);
+    const body = fixture.bodies[0] ?? "";
+    for (const secret of inactive[provider]) assert.ok(!body.includes(secret), secret);
+    assert.ok(body.includes("[REDACTED]"));
+  }
+});
+
 test("the gateway judge never falls back to a TypeSafe key, and an unknown judge asks nobody", async (t) => {
   const { l, fixture } = await judgeTurn(t);
   fixture.gateway = true;

@@ -9,7 +9,7 @@ const expected = [
   "hooks: session.start, turn.start, turn.complete, session.compact, command.run{command=compact-adviser}, config.describe{key=compact-adviser.typesafeApiKey}, config.describe{key=compact-adviser.aiGatewayApiKey}, ui.close{id=compact-adviser}, ui.render{component=Pane}",
   "env reads: AI_GATEWAY_API_KEY, CLAUDE_CODE_ENABLE_FUNCTION_HOOKS, COMPACT_ADVISER_DISABLE, COMPACT_ADVISER_JUDGE_PROVIDER, COMPACT_ADVISER_TEST_ENDPOINT, HOME, TYPESAFE_API_KEY",
   "env writes: nothing",
-  "$.fs.read (via appendTypeSafeLog, resolvedKey)",
+  "$.fs.read (via appendTypeSafeLog, knownKeys, resolvedKey)",
   "$.fs.write (via appendTypeSafeLog)",
   "Validation passed",
 ];

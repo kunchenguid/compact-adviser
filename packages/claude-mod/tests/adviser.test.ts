@@ -349,7 +349,6 @@ describe("turn-end gates", () => {
     const w = world(on, { dotenv: "TYPESAFE_API_KEY=from-dotenv\n" });
     await $.session.start(interactiveStart);
     await turnEnd($, w);
-    expect(w.journal.fsReads).toEqual([]);
     expect(w.journal.requests).toHaveLength(1);
     expect(w.journal.requests[0]?.headers.Authorization).toBe(`Bearer ${KEY}`);
     expect(w.journal.requests[0]?.body.includes("from-dotenv")).toBe(false);
@@ -363,7 +362,6 @@ describe("turn-end gates", () => {
     });
     await $.session.start(interactiveStart);
     await turnEnd($, w);
-    expect(w.journal.fsReads).toEqual([]);
     expect(w.journal.requests).toHaveLength(1);
     expect(w.journal.requests[0]?.headers.Authorization).toBe("Bearer from-saved");
     expect(w.journal.requests[0]?.body.includes("from-saved")).toBe(false);
@@ -960,6 +958,35 @@ describe("the Vercel AI Gateway judge", () => {
       "Judge: Jev through Vercel's AI Gateway (checkpoint context goes to Vercel's AI Gateway on its way to Jev). Key: missing.",
     );
   });
+
+  for (const [provider, inactive] of [
+    ["vercel", ["tsk-env-key-value", "tsk-dotenv-key-value"]],
+    ["typesafe", ["vck-env-key-value", "vck-dotenv-key-value"]],
+  ] as const) {
+    test(`the inactive provider's keys in the transcript never reach the ${provider} judge`, async ($, on) => {
+      const w = world(on, {
+        judgeEnv: provider,
+        key: "tsk-env-key-value",
+        gatewayKey: "vck-env-key-value",
+        dotenv: "TYPESAFE_API_KEY=tsk-dotenv-key-value\nAI_GATEWAY_API_KEY=vck-dotenv-key-value\n",
+      });
+      if (provider === "vercel")
+        w.respond = async () => ({ status: 200, text: JSON.stringify(gatewayAnswer()) });
+      const messages = longConversation();
+      messages.splice(-1, 0, {
+        role: "assistant",
+        text: `echo shows ${inactive.join(" and ")}`,
+        toolUses: [],
+      });
+      w.messages = messages;
+      await $.session.start(interactiveStart);
+      await turnEnd($, w);
+      expect(w.journal.requests).toHaveLength(1);
+      const body = w.journal.requests[0]?.body ?? "";
+      for (const secret of inactive) expect(body.includes(secret)).toBe(false);
+      expect(body.includes("[REDACTED]")).toBe(true);
+    });
+  }
 
   test("the launch environment's judge wins over the saved row; an unknown one asks nobody", async ($, on) => {
     const w = world(on, { judgeEnv: "vercel", savedGatewayKey: "vck-saved" });

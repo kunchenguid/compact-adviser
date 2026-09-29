@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import test, { type TestContext } from "node:test";
 import {
   ENDPOINT,
@@ -277,6 +278,33 @@ test("judge vercel asks Jev through the gateway with the gateway key, never the 
   await h.command("judge openai");
   assert.match(h.notifications.at(-1) ?? "", /typesafe or vercel/);
   assert.equal(h.store.read().judgeProvider, "typesafe");
+});
+
+test("the inactive provider's keys in the transcript never reach the active judge", async (t) => {
+  isolateJudgeEnv(t, {
+    TYPESAFE_API_KEY: "typesafe-env-key-value",
+    AI_GATEWAY_API_KEY: "gateway-env-key-value",
+  });
+  const inactive = {
+    vercel: ["typesafe-env-key-value", "typesafe-dotenv-key-value"],
+    typesafe: ["gateway-env-key-value", "gateway-dotenv-key-value"],
+  } as const;
+  for (const provider of ["vercel", "typesafe"] as const) {
+    const h = harness(t);
+    h.install("0.82.0", false);
+    h.enable("hint");
+    writeFileSync(
+      join(h.dir, ".env"),
+      "TYPESAFE_API_KEY=typesafe-dotenv-key-value\nAI_GATEWAY_API_KEY=gateway-dotenv-key-value\n",
+    );
+    await h.command(`judge ${provider}`);
+    h.next(`echo shows ${inactive[provider].join(" and ")}`);
+    await h.fire("agent_settled");
+    assert.deepEqual(h.providers, [provider]);
+    const body = requestBody(h.payloads[0]);
+    for (const secret of inactive[provider]) assert.ok(!body.includes(secret), secret);
+    assert.ok(body.includes("[REDACTED]"));
+  }
 });
 
 test("the launch environment's judge provider wins, and one naming no provider asks no judge", async (t) => {

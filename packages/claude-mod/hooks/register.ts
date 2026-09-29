@@ -44,6 +44,7 @@ import {
   judgeSavedMessage,
   KEY_LABELS,
   KEY_NAMES,
+  knownJudgeKeys,
   parseDotenvKey,
   parseJudgeProvider,
   type ResolvedJudge,
@@ -167,6 +168,29 @@ async function resolvedKey($: EngineInterface) {
     dotenv = undefined;
   }
   return resolveTypesafeApiKey(undefined, undefined, dotenv);
+}
+
+/** Every provider's key, whichever judge is active: none of them may reach the judge. */
+async function knownKeys(
+  $: EngineInterface,
+  rows: Parameters<typeof readSavedApiKey>[0],
+): Promise<(string | undefined)[]> {
+  let dotenv: string | undefined;
+  try {
+    dotenv = await $.fs.read(".env");
+  } catch {
+    dotenv = undefined;
+  }
+  // Each read names its variable literally, as `$.env.get` requires.
+  const env = {
+    TYPESAFE_API_KEY: await $.env.get("TYPESAFE_API_KEY"),
+    AI_GATEWAY_API_KEY: await $.env.get("AI_GATEWAY_API_KEY"),
+  };
+  const saved = {
+    typesafeApiKey: readSavedApiKey(rows, loadedOptions, "typesafe"),
+    aiGatewayApiKey: readSavedApiKey(rows, loadedOptions, "vercel"),
+  };
+  return knownJudgeKeys(env, saved, dotenv);
 }
 
 async function apiKey($: EngineInterface): Promise<string> {
@@ -309,11 +333,7 @@ async function judgeCheckpoint($: EngineInterface, epoch: number): Promise<void>
     ]);
     const adapter = judgeProvider.adapter;
     if (adapter === undefined) return;
-    const view = snapshot(messages, [
-      activeKey,
-      readSavedApiKey(rows, loadedOptions, "typesafe"),
-      readSavedApiKey(rows, loadedOptions, "vercel"),
-    ]);
+    const view = snapshot(messages, [activeKey, ...(await knownKeys($, rows))]);
     if (view.conversationTokens <= 20000) return;
     const fingerprint = await checkpointKey(view.checkpointText);
     if ((await loadState($)).state.lastHintKey === fingerprint) return;

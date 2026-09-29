@@ -18,6 +18,7 @@ import { type Config, ConfigStore } from "./config.ts";
 import { DISABLE_ENV, disabledByEnv } from "./disable.ts";
 import {
   KEY_NAMES,
+  knownJudgeKeys,
   PROVIDER_ENV,
   parseDotenvKey,
   type ResolvedJudge,
@@ -97,13 +98,20 @@ export function resolveKey(
   const provider = resolveProvider(env, config).provider;
   if (provider === undefined) return { value: undefined, source: "missing" };
   const name = KEY_NAMES[provider];
-  let dotenv: string | undefined;
+  const dotenv = readDotenv(cwd);
+  return resolveTypesafeApiKey(
+    env[name],
+    config[SAVED_KEY_FIELDS[provider]],
+    dotenv === undefined ? undefined : parseDotenvKey(dotenv, name),
+  );
+}
+
+function readDotenv(cwd: string): string | undefined {
   try {
-    dotenv = parseDotenvKey(readFileSync(join(cwd, ".env"), "utf8"), name);
+    return readFileSync(join(cwd, ".env"), "utf8");
   } catch {
-    dotenv = undefined;
+    return undefined;
   }
-  return resolveTypesafeApiKey(env[name], config[SAVED_KEY_FIELDS[provider]], dotenv);
 }
 
 async function checkpointKey(text: string): Promise<string> {
@@ -186,7 +194,8 @@ async function onStop(payload: HookPayload, environment: Environment): Promise<H
   if (!payload.last_assistant_message?.trim()) return {};
 
   const adapter = resolveProvider(environment.env, config).adapter;
-  const key = resolveKey(environment.env, config, payload.cwd ?? process.cwd());
+  const cwd = payload.cwd ?? process.cwd();
+  const key = resolveKey(environment.env, config, cwd);
   if (!adapter || !key.value) return {};
 
   const tokens = rollout.tokens;
@@ -196,7 +205,7 @@ async function onStop(payload: HookPayload, environment: Environment): Promise<H
 
   const view = snapshot(
     rollout.messages,
-    [key.value, config.typesafeApiKey, config.aiGatewayApiKey],
+    [key.value, ...knownJudgeKeys(environment.env, config, readDotenv(cwd))],
     {
       truncated: rollout.truncated,
     },

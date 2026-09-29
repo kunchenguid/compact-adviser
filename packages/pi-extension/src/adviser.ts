@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import type {
   ExtensionAPI,
   ExtensionCommandContext,
@@ -19,6 +21,7 @@ import {
   formatKeyStatus,
   judgeSavedMessage,
   KEY_LABELS,
+  knownJudgeKeys,
   PROVIDER_ENV,
   parseJudgeProvider,
   type ResolvedJudge,
@@ -75,10 +78,15 @@ function savedConfig(store: ConfigStore): Config | undefined {
     return undefined;
   }
 }
-/** Every saved key, whichever provider is in effect: none of them may reach the judge. */
-function savedApiKeys(store: ConfigStore): (string | undefined)[] {
-  const c = savedConfig(store);
-  return [c?.typesafeApiKey, c?.aiGatewayApiKey];
+/** Every provider's key, whichever provider is in effect: none of them may reach the judge. */
+function knownKeys(store: ConfigStore, cwd: string): (string | undefined)[] {
+  let dotenv: string | undefined;
+  try {
+    dotenv = readFileSync(join(cwd, ".env"), "utf8");
+  } catch {
+    dotenv = undefined;
+  }
+  return knownJudgeKeys(process.env, savedConfig(store) ?? {}, dotenv);
 }
 export function installAdviser(pi: ExtensionAPI, options: Options): void {
   // `COMPACT_ADVISER_DISABLE` is read once per install: a session's environment is fixed,
@@ -217,7 +225,7 @@ export function installAdviser(pi: ExtensionAPI, options: Options): void {
     const profile = parseProfile(config.profile);
     const adapter = resolvedJudge().adapter;
     if (!adapter) return;
-    const view = snapshot(ctx, [key(ctx.cwd), ...savedApiKeys(store)]);
+    const view = snapshot(ctx, [key(ctx.cwd), ...knownKeys(store, ctx.cwd)]);
     if (view.conversationTokens <= 20000 || view.checkpointKey === state.lastHintKey) return;
     let loggedBody: string | undefined;
     if (config.logRequests) {

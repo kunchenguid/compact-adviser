@@ -8,7 +8,7 @@ import {
   JUDGE_PROVIDERS,
   type JudgeAdapter,
   type JudgeProvider,
-  typesafeAdapter,
+  TYPESAFE_ADAPTER,
 } from "./judge.ts";
 
 const PREFIX = /^(?:export|declare\s+-x)\s+/;
@@ -82,6 +82,22 @@ export const SAVED_KEY_FIELDS = {
   typesafe: "typesafeApiKey",
   vercel: "aiGatewayApiKey",
 } as const;
+/**
+ * Every provider's key from each place one is read (the launch environment by variable name,
+ * saved settings by field, and the cwd .env text), whichever judge is active, so checkpoint
+ * text scrubbed of these never carries one provider's key to the other.
+ */
+export function knownJudgeKeys(
+  env: Readonly<Record<string, string | undefined>>,
+  saved: Readonly<Partial<Record<(typeof SAVED_KEY_FIELDS)[JudgeProvider], string | undefined>>>,
+  dotenv: string | undefined,
+): (string | undefined)[] {
+  return JUDGE_PROVIDERS.flatMap((provider) => [
+    env[KEY_NAMES[provider]],
+    saved[SAVED_KEY_FIELDS[provider]],
+    dotenv === undefined ? undefined : parseDotenvKey(dotenv, KEY_NAMES[provider]),
+  ]);
+}
 export const KEY_LABELS: Readonly<Record<JudgeProvider, string>> = {
   typesafe: "TypeSafe API key",
   vercel: "AI Gateway API key",
@@ -144,7 +160,7 @@ export function resolveJudge(
   }
   return {
     ...resolved,
-    adapter: resolved.provider === "vercel" ? GATEWAY_ADAPTER : typesafeAdapter(),
+    adapter: resolved.provider === "vercel" ? GATEWAY_ADAPTER : TYPESAFE_ADAPTER,
   };
 }
 
