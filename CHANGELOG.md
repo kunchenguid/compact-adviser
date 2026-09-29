@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.11](https://github.com/kunchenguid/compact-adviser/compare/compact-adviser-v0.1.10...compact-adviser-v0.1.11) (2026-09-29)
+
+
+### Bug Fixes
+
+* require https for TYPESAFE_BASE except on loopback hosts ([#62](https://github.com/kunchenguid/compact-adviser/issues/62)) ([a73995f](https://github.com/kunchenguid/compact-adviser/commit/a73995f775695859547682f99b463c0b29941ebc))
+
 ## [0.1.10](https://github.com/kunchenguid/compact-adviser/compare/compact-adviser-v0.1.9...compact-adviser-v0.1.10) (2026-09-29)
 
 
