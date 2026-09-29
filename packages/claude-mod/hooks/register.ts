@@ -1153,8 +1153,8 @@ export const register: Register = (on, options) => {
             label: setting(
               "Judge",
               provider === undefined
-                ? "none (COMPACT_ADVISER_JUDGE_PROVIDER is invalid)"
-                : `${JUDGE_LABELS[provider]}${judgeProvider.source === "env" ? ", from the environment" : ""}`,
+                ? "none (invalid env)"
+                : `${JUDGE_LABELS[provider]}${judgeProvider.source === "env" ? ", from env" : ""}`,
             ),
             onPress: open("judge", "menu:judge", `judge:${config.judgeProvider ?? "typesafe"}`),
           },

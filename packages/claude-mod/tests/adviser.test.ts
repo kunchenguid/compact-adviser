@@ -1008,6 +1008,20 @@ describe("the Vercel AI Gateway judge", () => {
     );
   });
 
+  test("the pane's judge row stays short enough to fit beside its label", async ($, on) => {
+    world(on, { judgeEnv: "vercel", gatewayKey: GATEWAY_KEY });
+    await $.session.start(interactiveStart);
+    await $.command.run(commandRun(""));
+    expect(rows(await $.ui.render(pane))[3]).toBe("Judge Vercel AI Gateway, from env");
+  });
+
+  test("the pane's judge row names an invalid launch setting briefly", async ($, on) => {
+    world(on, { judgeEnv: "openai", gatewayKey: GATEWAY_KEY });
+    await $.session.start(interactiveStart);
+    await $.command.run(commandRun(""));
+    expect(rows(await $.ui.render(pane))[3]).toBe("Judge none (invalid env)");
+  });
+
   test("the gateway key comes from cwd .env when neither env nor a saved key has one", async ($, on) => {
     const w = world(on, {
       judgeProvider: "vercel",
