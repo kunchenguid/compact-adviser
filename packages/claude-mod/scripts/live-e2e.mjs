@@ -386,26 +386,26 @@ try {
   }
 
   step = "request logging";
-  await moveTo("Log TypeSafe requests");
+  await moveTo("Log Jev requests");
   key("Enter");
-  await waitText("› Log TypeSafe requests");
+  await waitText("› Log Jev requests");
   await waitText("● Off (default)");
   await moveTo("On");
   key("Enter");
-  await waitText("TypeSafe request logging on (all sessions)", 20000);
+  await waitText("Jev request logging on (all sessions)", 20000);
   await waitFor(() => pluginOptions().logRequests === true, "the host to enable request logging");
-  await waitText("Log TypeSafe requests   On");
+  await waitText("Log Jev requests        On");
   pass("request logging is enabled by arrows and Enter alone through the real settings pane");
 
   step = "escape back";
   // After the save the ring is back on the row that was opened; Escape inside a view returns
   // to the list with the keyboard, and the list then closes on Escape.
-  await moveTo("Log TypeSafe requests");
+  await moveTo("Log Jev requests");
   key("Enter");
   await waitText("● On");
   key("Escape");
   await waitText("↑↓ move · Enter select · Esc close");
-  await moveTo("Log TypeSafe requests", "Up");
+  await moveTo("Log Jev requests", "Up");
   pass("Escape in a view returns to the list, keeping the keyboard and the row");
 
   step = "pane minimum";

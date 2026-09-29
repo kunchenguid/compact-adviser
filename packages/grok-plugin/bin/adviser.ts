@@ -118,7 +118,7 @@ const USAGE = `compact-adviser (Grok)
   judge typesafe|vercel      ask Jev at TypeSafe (default) or through Vercel's AI Gateway
   key <value>|key clear      save or clear the judge's API key from a shell (TYPESAFE_API_KEY,
                              or AI_GATEWAY_API_KEY for the gateway, still wins)
-  log on|off                 TypeSafe request logging, off by default
+  log on|off                 Jev request logging, off by default
   snooze                     no advice for three more completed exchanges in this session
   dismiss                    take the current hint off the status row
   install                    register the hooks in your Grok home, then print the status-line block`;
@@ -759,7 +759,7 @@ function runCommand(argv: readonly string[]): string {
     case "log": {
       if (value !== "on" && value !== "off") throw new SettingsError("Choose on or off.");
       updateSettings({ logRequests: value === "on" });
-      return `TypeSafe request logging ${value}.`;
+      return `Jev request logging ${value}.`;
     }
     case "snooze":
       return snooze();

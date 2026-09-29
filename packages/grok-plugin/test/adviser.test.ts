@@ -417,7 +417,7 @@ test("a refused judgment backs off, reports its kind, and never hints", async (t
   assert.ok(!row.stdout.includes(HINT));
   const status = await runCli(["status"], { lab: l });
   assert.match(status.stdout, /Last TypeSafe outcome: authentication/);
-  assert.match(status.stdout, /TypeSafe backoff/);
+  assert.match(status.stdout, /Jev backoff/);
 });
 
 test("TYPESAFE_BASE sends the judgment to that base's /v1/systemone", async (t) => {

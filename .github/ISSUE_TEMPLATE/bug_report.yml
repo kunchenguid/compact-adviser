@@ -73,7 +73,7 @@ body:
     attributes:
       label: Redacted request log (optional)
       description: |
-        If **Log TypeSafe requests** is on, paste a redacted excerpt from the log.
+        If **Log Jev requests** is on, paste a redacted excerpt from the log.
         Pi writes `~/.pi/agent/compact-adviser-requests.jsonl`.
         Claude Code writes `~/.claude/compact-adviser-requests-<session-id>.jsonl` (one file per session).
         The log is the redacted request body plus sanitized Jev outcome fields and never includes the API key; still strip anything you do not want in a public issue.

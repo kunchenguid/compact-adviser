@@ -46,7 +46,7 @@ Usage: compact-adviser <command> [value]
   hint                      Advise with a hint at eligible checkpoints (default)
   off                       Stop advising; Codex's own compaction is unaffected
   threshold <tokens>        Save an absolute token minimum, or "default" for ${DEFAULT_MINIMUM}
-  log <on|off>              Log each TypeSafe request and its outcome to a local jsonl file
+  log <on|off>              Log each Jev request and its outcome to a local jsonl file
   judge <typesafe|vercel>   Ask Jev at TypeSafe (default) or through Vercel's AI Gateway
   key <set|clear|status>    Save, clear, or report the judge's API key (never printed)
 
@@ -108,8 +108,8 @@ function saveLog(environment: CliEnvironment, value: string): string {
   const root = adviserRoot(environment.env);
   new ConfigStore(root).update({ logRequests: value === "on" });
   return value === "on"
-    ? `TypeSafe request logging on (all sessions). ${requestLogPath(root, "<session>")}`
-    : "TypeSafe request logging off (all sessions).";
+    ? `Jev request logging on (all sessions). ${requestLogPath(root, "<session>")}`
+    : "Jev request logging off (all sessions).";
 }
 
 function saveJudge(environment: CliEnvironment, value: string): string {

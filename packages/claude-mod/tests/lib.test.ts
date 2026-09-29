@@ -204,7 +204,7 @@ describe("session cooldowns", () => {
     expect(cooldownReason({ ...hinted, completed: 5 }, 60000, 0)).toBeUndefined();
     const failed = backoff(initialState(false, 0), 1000);
     expect(failed.retryAfter).toBe(11000);
-    expect(cooldownReason(failed, 60000, 10999)).toBe("TypeSafe backoff");
+    expect(cooldownReason(failed, 60000, 10999)).toBe("Jev backoff");
     let many = initialState(false, 0);
     for (let i = 0; i < 10; i++) many = backoff(many, 0);
     expect(many.failures).toBe(6);

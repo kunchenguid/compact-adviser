@@ -599,7 +599,7 @@ test("draft input and an absent active model suppress judgment", async (t) => {
   assert.equal(h.calls, 0);
 });
 
-test("TypeSafe request logging is off by default and writes a redacted body without the key", async (t) => {
+test("Jev request logging is off by default and writes a redacted body without the key", async (t) => {
   const off = harness(t);
   off.enable();
   await off.fire("agent_settled");
@@ -607,7 +607,7 @@ test("TypeSafe request logging is off by default and writes a redacted body with
   assert.equal(existsSync(requestLogPath(off.dir)), false);
   const on = harness(t);
   on.enable();
-  on.selects.push("Log TypeSafe requests: off", "On", "Close");
+  on.selects.push("Log Jev requests: off", "On", "Close");
   await on.command("");
   assert.equal(on.store.read().logRequests, true);
   assert.ok(on.notifications.at(-1)?.includes(requestLogPath(on.dir)));

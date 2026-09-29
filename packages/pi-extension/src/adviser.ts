@@ -468,8 +468,8 @@ export function installAdviser(pi: ExtensionAPI, options: Options): void {
       ctx,
       { logRequests: enabled },
       enabled
-        ? `TypeSafe request logging on (all sessions). ${requestLogPath(options.agentDir)}`
-        : "TypeSafe request logging off (all sessions).",
+        ? `Jev request logging on (all sessions). ${requestLogPath(options.agentDir)}`
+        : "Jev request logging off (all sessions).",
     );
   }
   function changeJudge(ctx: ExtensionCommandContext, judgeProvider: JudgeProvider) {
@@ -504,7 +504,7 @@ export function installAdviser(pi: ExtensionAPI, options: Options): void {
       const labels = [
         `Mode: ${c.mode}`,
         `Minimum context: ${c.minContextTokens.toLocaleString("en-US")} tokens`,
-        `Log TypeSafe requests: ${c.logRequests ? "on" : "off"}`,
+        `Log Jev requests: ${c.logRequests ? "on" : "off"}`,
         judgeLabel,
         ...(keyLabel === undefined ? [] : [keyLabel]),
         "Reset minimum to 40,000",
@@ -539,7 +539,7 @@ export function installAdviser(pi: ExtensionAPI, options: Options): void {
           }
         }
       } else if (selected === labels[2]) {
-        const logging = await ctx.ui.select("Log TypeSafe requests", ["Off (default)", "On"]);
+        const logging = await ctx.ui.select("Log Jev requests", ["Off (default)", "On"]);
         if (logging) await changeLogRequests(ctx, logging.startsWith("On"));
       } else if (selected === judgeLabel) {
         const judgeChoice = await ctx.ui.select("Judge", [

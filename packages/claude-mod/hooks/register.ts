@@ -702,8 +702,8 @@ async function changeLogRequests($: EngineInterface, enabled: boolean): Promise<
     LOG_KEY,
     enabled,
     enabled
-      ? `TypeSafe request logging on (all sessions). ${await sessionLogPath($)}`
-      : "TypeSafe request logging off (all sessions).",
+      ? `Jev request logging on (all sessions). ${await sessionLogPath($)}`
+      : "Jev request logging off (all sessions).",
   );
 }
 
@@ -1019,7 +1019,7 @@ export const register: Register = (on, options) => {
     }
     if (view === "logging") {
       return options(
-        "Log TypeSafe requests",
+        "Log Jev requests",
         config.logRequests ? "on" : "off",
         [
           { value: "off", label: "Off (default)" },
@@ -1141,7 +1141,7 @@ export const register: Register = (on, options) => {
           },
           {
             key: "menu:logRequests",
-            label: setting("Log TypeSafe requests", config.logRequests ? "On" : "Off"),
+            label: setting("Log Jev requests", config.logRequests ? "On" : "Off"),
             onPress: open(
               "logging",
               "menu:logRequests",

@@ -1114,7 +1114,7 @@ describe("settings pane", () => {
     expect(rows(tree)).toEqual([
       "Mode Hints only (default)",
       "Minimum context 40,000 tokens",
-      "Log TypeSafe requests Off",
+      "Log Jev requests Off",
       "Judge TypeSafe (default)",
       "TypeSafe API key from the environment",
       "Reset minimum to 40,000",
@@ -1146,15 +1146,15 @@ describe("settings pane", () => {
     await $.ui.press({ plugin: PLUGIN, key: "menu:logRequests" });
     await drain(w);
     let tree = await $.ui.render(pane);
-    expect(text(tree)).toContain("› Log TypeSafe requests");
+    expect(text(tree)).toContain("› Log Jev requests");
     expect(rows(tree)).toEqual(["● Off (default)", "On", "Back"]);
     expect(autoFocused(tree)).toBe("logging:off");
     await $.ui.press({ plugin: PLUGIN, key: "logging:on" });
     await drain(w);
     expect(w.rows.get(`${PLUGIN}.logRequests`)).toBe(true);
-    expect(w.journal.toasts.at(-1)).toContain("TypeSafe request logging on (all sessions).");
+    expect(w.journal.toasts.at(-1)).toContain("Jev request logging on (all sessions).");
     tree = await $.ui.render(pane);
-    expect(rows(tree)[2]).toBe("Log TypeSafe requests On");
+    expect(rows(tree)[2]).toBe("Log Jev requests On");
     // The ring goes back to the row that was opened, so the arrows continue from there.
     expect(autoFocused(tree)).toBe("menu:logRequests");
 
