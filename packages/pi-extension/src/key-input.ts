@@ -10,7 +10,10 @@ export function maskSecret(value: string): string {
 }
 
 /** Empty prompt; typed characters are masked. Escape cancels. Never prefills a saved key. */
-export function promptSecret(ctx: ExtensionCommandContext): Promise<string | undefined> {
+export function promptSecret(
+  ctx: ExtensionCommandContext,
+  label = "TypeSafe API key",
+): Promise<string | undefined> {
   return ctx.ui.custom<string | undefined>((tui, theme, keybindings, done) => {
     const input = new Input();
     const box = new Container();
@@ -29,9 +32,7 @@ export function promptSecret(ctx: ExtensionCommandContext): Promise<string | und
         input.focused = value;
       },
       render(width: number) {
-        heading.setText(
-          theme.fg("accent", "TypeSafe API key (saved for all sessions; never shown again)"),
-        );
+        heading.setText(theme.fg("accent", `${label} (saved for all sessions; never shown again)`));
         help.setText(
           theme.fg(
             "dim",

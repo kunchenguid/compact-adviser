@@ -47,7 +47,19 @@ import {
   writeSettings,
 } from "../lib/config.ts";
 import { DISABLE_ENV, disabledByEnv } from "../lib/disable.ts";
-import { formatKeyStatus, parseDotenvKey, resolveTypesafeApiKey } from "../lib/env.ts";
+import {
+  formatJudgeStatus,
+  formatKeyStatus,
+  judgeSavedMessage,
+  KEY_LABELS,
+  KEY_NAMES,
+  PROVIDER_ENV,
+  parseDotenvKey,
+  parseJudgeProvider,
+  resolveJudge,
+  resolveTypesafeApiKey,
+  SAVED_KEY_FIELDS,
+} from "../lib/env.ts";
 import {
   floorFor,
   JudgeError,
@@ -102,7 +114,9 @@ const USAGE = `compact-adviser (Grok)
   status                     what the adviser would do right now
   mode hint|off              hint shows advice; off disables it (Grok's own auto-compact is unaffected)
   threshold <tokens|default> minimum context tokens before a checkpoint is judged
-  key <value>|key clear      save or clear the TypeSafe API key from a shell (TYPESAFE_API_KEY still wins)
+  judge typesafe|vercel      ask Jev at TypeSafe (default) or through Vercel's AI Gateway
+  key <value>|key clear      save or clear the judge's API key from a shell (TYPESAFE_API_KEY,
+                             or AI_GATEWAY_API_KEY for the gateway, still wins)
   log on|off                 TypeSafe request logging, off by default
   snooze                     no advice for three more completed exchanges in this session
   dismiss                    take the current hint off the status row
@@ -142,19 +156,28 @@ function updateSettings(patch: Partial<Settings>): Settings {
   return next;
 }
 
-function dotenvKey(cwd: string): string | undefined {
+function dotenvKey(cwd: string, name: string): string | undefined {
   try {
-    return parseDotenvKey(readFileSync(join(cwd, ".env"), "utf8"), "TYPESAFE_API_KEY");
+    return parseDotenvKey(readFileSync(join(cwd, ".env"), "utf8"), name);
   } catch {
     return undefined;
   }
 }
 
+/** The judge in effect: the hook environment's, then the saved one, then TypeSafe. */
+function resolveProvider(settings: Settings) {
+  return resolveJudge(process.env[PROVIDER_ENV], settings.judgeProvider);
+}
+
+/** The key of the judge in effect; a setting that names no judge has no key. */
 function resolveKey(settings: Settings, cwd: string) {
+  const provider = resolveProvider(settings).provider;
+  if (provider === undefined) return resolveTypesafeApiKey(undefined);
+  const name = KEY_NAMES[provider];
   return resolveTypesafeApiKey(
-    process.env.TYPESAFE_API_KEY,
-    settings.typesafeApiKey,
-    dotenvKey(cwd),
+    process.env[name],
+    settings[SAVED_KEY_FIELDS[provider]],
+    dotenvKey(cwd, name),
   );
 }
 
@@ -334,14 +357,19 @@ async function runStop(payload: HookPayload): Promise<void> {
     clearVerdict(verdict);
     return;
   }
+  const adapter = resolveProvider(settings).adapter;
   const key = resolveKey(settings, cwd);
   const activeKey = key.value?.trim() ?? "";
-  if (!activeKey) return;
+  if (!adapter || !activeKey) return;
 
   const transcript = readTranscript(dir);
   if (transcript.unreadableLines !== 0) return;
   if (!transcript.messages.length) return;
-  const view = snapshot(transcript.messages, [activeKey], transcript.hasImages);
+  const view = snapshot(
+    transcript.messages,
+    [activeKey, settings.typesafeApiKey, settings.aiGatewayApiKey],
+    transcript.hasImages,
+  );
   if (view.conversationTokens <= MINIMUM_CONVERSATION_TOKENS) return;
 
   // `contextTokensUsed` is the honest number when signals.json is readable; the local estimate
@@ -357,7 +385,7 @@ async function runStop(payload: HookPayload): Promise<void> {
   let loggedBody: string | undefined;
   if (settings.logRequests) {
     try {
-      loggedBody = requestBody(view.state, profile);
+      loggedBody = requestBody(view.state, profile, adapter);
       appendLog(sessionId, requestLogLine(loggedBody));
     } catch {
       // A body too large to send is reported by `judge` below; logging does not decide.
@@ -373,6 +401,7 @@ async function runStop(payload: HookPayload): Promise<void> {
         endpoint: judgeEndpoint(),
       },
       profile,
+      adapter,
     );
   } catch (error) {
     if (settings.logRequests) {
@@ -389,7 +418,7 @@ async function runStop(payload: HookPayload): Promise<void> {
     appendLog(
       sessionId,
       responseLogLine(
-        loggedBody ?? requestBody(view.state, profile),
+        loggedBody ?? requestBody(view.state, profile, adapter),
         judgment,
         fraction,
         undefined,
@@ -620,6 +649,7 @@ function statusText(): string {
   const lines = [
     `Mode: ${settings.mode} (Grok is hint-only; nothing outside a session can run /compact).`,
     `Minimum context: ${formatTokens(settings.minContextTokens)} tokens.`,
+    `${formatJudgeStatus(resolveProvider(settings))}.`,
     `${formatKeyStatus(key.source)}.`,
     `Request log: ${settings.logRequests ? requestLogPath(dataDir(env()), "<session-id>") : "off"}.`,
     `Settings file: ${settingsPath(env())}.`,
@@ -646,7 +676,10 @@ function statusText(): string {
       }`,
     );
     const diagnostic = loadDiagnostic(diagnosticPath(dataDir(env()), sessionId));
-    if (diagnostic) lines.push(`Last TypeSafe outcome: ${diagnostic}.`);
+    if (diagnostic) {
+      const via = resolveProvider(settings).provider === "vercel" ? "AI Gateway" : "TypeSafe";
+      lines.push(`Last ${via} outcome: ${diagnostic}.`);
+    }
   }
   return lines.join("\n");
 }
@@ -697,13 +730,26 @@ function runCommand(argv: readonly string[]): string {
       const count = value === "default" ? DEFAULT_MINIMUM : parseMinimum(value);
       return `Minimum context saved: ${formatTokens(updateSettings({ minContextTokens: count }).minContextTokens)} tokens.`;
     }
-    case "key":
-      if (value === "clear") {
-        updateSettings({ typesafeApiKey: "" });
-        return "Saved TypeSafe API key cleared. TYPESAFE_API_KEY and a cwd .env still apply.";
+    case "judge": {
+      const provider = parseJudgeProvider(value);
+      updateSettings({ judgeProvider: provider });
+      return judgeSavedMessage(provider, process.env[PROVIDER_ENV]);
+    }
+    case "key": {
+      const provider = resolveProvider(settingsOrThrow()).provider;
+      if (provider === undefined) {
+        throw new SettingsError(
+          `${PROVIDER_ENV} names no provider; set it to typesafe or vercel first.`,
+        );
       }
-      updateSettings({ typesafeApiKey: parseSavedApiKey(value) });
-      return "TypeSafe API key saved. Status shows the source, never the value.";
+      const label = KEY_LABELS[provider];
+      if (value === "clear") {
+        updateSettings({ [SAVED_KEY_FIELDS[provider]]: "" });
+        return `Saved ${label} cleared. ${KEY_NAMES[provider]} and a cwd .env still apply.`;
+      }
+      updateSettings({ [SAVED_KEY_FIELDS[provider]]: parseSavedApiKey(value, label) });
+      return `${label} saved. Status shows the source, never the value.`;
+    }
     case "log": {
       if (value !== "on" && value !== "off") throw new SettingsError("Choose on or off.");
       updateSettings({ logRequests: value === "on" });

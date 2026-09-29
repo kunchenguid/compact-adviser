@@ -92,6 +92,10 @@ export function workedHistory(marker = "one"): Record_[] {
 export interface Fixture {
   url: string;
   bodies: string[];
+  /** The authorization and model headers of each request, in order. */
+  headers: { authorization?: string; model?: string }[];
+  /** When true, answers in Vercel AI Gateway's evaluation shape instead of TypeSafe's. */
+  gateway: boolean;
   close: () => void;
   /** Probabilities the next judgment answers with. */
   verdict: { finished: number; handsOn: number };
@@ -110,6 +114,8 @@ export function typesafeFixture(t: TestContext): Promise<Fixture> {
   const state: Fixture = {
     url: "",
     bodies,
+    headers: [],
+    gateway: false,
     close: () => undefined,
     verdict: { finished: 0.97, handsOn: 0.96 },
     oversize: false,
@@ -128,6 +134,11 @@ export function typesafeFixture(t: TestContext): Promise<Fixture> {
     });
     request.on("end", () => {
       bodies.push(body);
+      const model = request.headers["ai-model-id"];
+      state.headers.push({
+        ...(request.headers.authorization ? { authorization: request.headers.authorization } : {}),
+        ...(typeof model === "string" ? { model } : {}),
+      });
       state.onRequest?.();
       if (state.hang) return;
       if (state.status !== undefined) {
@@ -141,6 +152,23 @@ export function typesafeFixture(t: TestContext): Promise<Fixture> {
         return;
       }
       response.writeHead(200, { "content-type": "application/json" });
+      if (state.gateway) {
+        const answer = (name: string, p: number, others: [string, string]) => {
+          const { type, choice: chosen, probabilities } = choice(name, p, others);
+          return { type, choice: chosen, probabilities };
+        };
+        response.end(
+          JSON.stringify({
+            model: "typesafe-ai/jev",
+            answers: {
+              done: answer("finished", state.verdict.finished, ["not_finished", "unclear"]),
+              shape: answer("hands_on", state.verdict.handsOn, ["coordinating", "unclear"]),
+            },
+            usage: { inputTokens: 2500, outputTokens: 40 },
+          }),
+        );
+        return;
+      }
       response.end(
         JSON.stringify({
           model: "jev-1.13.0",
@@ -180,7 +208,8 @@ export function runShell(
     env: {
       ...process.env,
       TYPESAFE_API_KEY: undefined,
-      TYPESAFE_BASE: undefined,
+      AI_GATEWAY_API_KEY: undefined,
+      COMPACT_ADVISER_JUDGE_PROVIDER: undefined,
       ...(lab ? { GROK_HOME: lab.home, GROK_SESSION_ID: lab.sessionId } : {}),
       NO_COLOR: "1",
       ...env,
@@ -241,6 +270,8 @@ export function runCli(
     env: {
       ...process.env,
       TYPESAFE_API_KEY: undefined,
+      AI_GATEWAY_API_KEY: undefined,
+      COMPACT_ADVISER_JUDGE_PROVIDER: undefined,
       ...(lab ? { GROK_HOME: lab.home, GROK_SESSION_ID: lab.sessionId } : {}),
       NO_COLOR: "1",
       ...env,

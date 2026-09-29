@@ -21,6 +21,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { dirname, join } from "node:path";
+import { JUDGE_PROVIDERS, type JudgeProvider } from "./judge.ts";
 import { parseProfile } from "./profile.ts";
 
 export type Mode = "hint" | "off";
@@ -37,6 +38,8 @@ export interface Config {
   minContextTokens: number;
   logRequests: boolean;
   typesafeApiKey?: string;
+  judgeProvider?: JudgeProvider;
+  aiGatewayApiKey?: string;
   profile?: string;
 }
 
@@ -66,11 +69,11 @@ export function parseMode(text: string): Mode {
   return value as Mode;
 }
 
-export function parseSavedApiKey(text: string): string {
+export function parseSavedApiKey(text: string, label = "TypeSafe API key"): string {
   const value = text.trim();
-  if (!value) throw new Error("Enter a TypeSafe API key, or cancel to leave it unchanged.");
+  if (!value) throw new Error(`Enter a ${label}, or cancel to leave it unchanged.`);
   if (value.length > MAX_SAVED_API_KEY_LENGTH) {
-    throw new Error("That value is too long to save as a TypeSafe API key.");
+    throw new Error(`That value is too long to save as a ${label}.`);
   }
   for (let i = 0; i < value.length; i++) {
     const code = value.charCodeAt(i);
@@ -79,6 +82,15 @@ export function parseSavedApiKey(text: string): string {
     }
   }
   return value;
+}
+
+/** A saved key: blank means none; one longer than any key this product saves is refused. */
+function savedKey(value: unknown): string | undefined {
+  const key = typeof value === "string" && value.trim() !== "" ? value.trim() : undefined;
+  if (key !== undefined && key.length > MAX_SAVED_API_KEY_LENGTH) {
+    throw new Error("Invalid or unsupported settings. Restore a valid version-1 configuration.");
+  }
+  return key;
 }
 
 export function validateConfig(value: unknown): Config {
@@ -94,24 +106,24 @@ export function validateConfig(value: unknown): Config {
     !Number.isSafeInteger(c.minContextTokens) ||
     c.minContextTokens <= 0 ||
     (c.logRequests !== undefined && typeof c.logRequests !== "boolean") ||
-    (c.typesafeApiKey !== undefined && typeof c.typesafeApiKey !== "string")
+    (c.typesafeApiKey !== undefined && typeof c.typesafeApiKey !== "string") ||
+    (c.judgeProvider !== undefined &&
+      !JUDGE_PROVIDERS.includes(c.judgeProvider as JudgeProvider)) ||
+    (c.aiGatewayApiKey !== undefined && typeof c.aiGatewayApiKey !== "string")
   ) {
     throw new Error("Invalid or unsupported settings. Restore a valid version-1 configuration.");
   }
   parseProfile(c.profile);
-  const typesafeApiKey =
-    typeof c.typesafeApiKey === "string" && c.typesafeApiKey.trim() !== ""
-      ? c.typesafeApiKey.trim()
-      : undefined;
-  if (typesafeApiKey !== undefined && typesafeApiKey.length > MAX_SAVED_API_KEY_LENGTH) {
-    throw new Error("Invalid or unsupported settings. Restore a valid version-1 configuration.");
-  }
+  const typesafeApiKey = savedKey(c.typesafeApiKey);
+  const aiGatewayApiKey = savedKey(c.aiGatewayApiKey);
   return {
     version: 1,
     mode: c.mode as Mode,
     minContextTokens: c.minContextTokens,
     logRequests: c.logRequests === true,
     ...(typesafeApiKey !== undefined ? { typesafeApiKey } : {}),
+    ...(c.judgeProvider !== undefined ? { judgeProvider: c.judgeProvider as JudgeProvider } : {}),
+    ...(aiGatewayApiKey !== undefined ? { aiGatewayApiKey } : {}),
     ...(c.profile !== undefined ? { profile: c.profile as string } : {}),
   };
 }

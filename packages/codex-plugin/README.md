@@ -36,9 +36,15 @@ Judgment is two one-sentence Jev questions in one request (is the unit finished;
 
 ## Quick Start
 
-Prerequisites: Node 22+ (22.18+ for Codex and Grok), and one of [Pi](https://pi.dev) 0.82.0 or newer (verified on **0.85.1**), Claude Code 2.1.274 or newer (verified on **2.1.275**), Codex CLI 0.153.0 or newer (verified on **0.153.4**), or [Grok Build](https://docs.x.ai/build/overview) 1.0.34 or newer (verified on **1.0.34**), plus a [TypeSafe API key](https://console.typesafe.ai/settings/keys). Supply it as `TYPESAFE_API_KEY` in the launch environment or put it in the session cwd's `./.env`; Pi and Claude Code can also save it through their settings, while Codex and Grok provide an external compact-adviser CLI. Jev is TypeSafe's structured decision model; this package asks it two one-sentence classification questions and never asks it to write a summary.
+Prerequisites: Node 22+ (22.18+ for Codex and Grok), and one of [Pi](https://pi.dev) 0.82.0 or newer (verified on **0.85.1**), Claude Code 2.1.274 or newer (verified on **2.1.275**), Codex CLI 0.153.0 or newer (verified on **0.153.4**), or [Grok Build](https://docs.x.ai/build/overview) 1.0.34 or newer (verified on **1.0.34**), plus a [TypeSafe API key](https://console.typesafe.ai/settings/keys) (or a Vercel AI Gateway key; see [Jev through Vercel's AI Gateway](#jev-through-vercels-ai-gateway)). Supply it as `TYPESAFE_API_KEY` in the launch environment or put it in the session cwd's `./.env`; Pi and Claude Code can also save it through their settings, while Codex and Grok provide an external compact-adviser CLI. Jev is TypeSafe's structured decision model; this package asks it two one-sentence classification questions and never asks it to write a summary.
 
-Installing the package is consent to send eligible checkpoint context to TypeSafe when a key is available and the other product gates pass. With `TYPESAFE_BASE` set, that context and the key go to that base instead.
+Installing the package is consent to send eligible checkpoint context to TypeSafe when a key is available and the other product gates pass. If you choose Vercel's AI Gateway as the judge instead, that context goes to Vercel's AI Gateway on its way to Jev.
+
+### Jev through Vercel's AI Gateway
+
+[Vercel's AI Gateway](https://vercel.com/ai-gateway/models/jev) also serves Jev, as `typesafe-ai/jev`, so an AI Gateway key can stand in for a TypeSafe key. Choose it with `COMPACT_ADVISER_JUDGE_PROVIDER=vercel` in the launch environment, or save it with `/compact-adviser judge vercel` (Pi and Claude Code) or the CLI `judge vercel` command (Codex and Grok); `typesafe`, the default, switches back. Then supply `AI_GATEWAY_API_KEY` the same ways as the TypeSafe key: the launch environment, a saved key, or the session cwd's `./.env`. A TypeSafe key is never sent to the gateway, nor a gateway key to TypeSafe, and a working directory's `./.env` never chooses the judge.
+
+With this judge, eligible checkpoint context goes to Vercel's AI Gateway, which routes it to a provider it lists for Jev (TypeSafe AI or DigitalOcean at the time of writing). The questions, score, floors and request bound are the same, the reply is validated as strictly as a direct one, and any gateway error gives no advice. `status` names the judge in effect and where the context goes. The published eval numbers were measured against TypeSafe directly.
 
 ### Pi
 
@@ -47,7 +53,7 @@ pi install npm:compact-adviser
 ```
 
 Restart Pi or run `/reload`, then `/compact-adviser`.
-`/compact-adviser status` should say `Key: env`, `Key: saved`, or `Key: .env`.
+`/compact-adviser status` should say `Key: env`, `Key: saved`, or `Key: .env`, after the judge in effect.
 
 To install from git: `pi install git:github.com/kunchenguid/compact-adviser` (add `-l` for project-local).
 
@@ -104,13 +110,14 @@ That writes `${GROK_HOME:-~/.grok}/hooks/compact-adviser.json`, because **Grok 1
 
 Then paste the `[ui.status_line]` block `install` printed into the config.toml path it named and restart Grok. The status row is off by default and only your own config can turn it on - a plugin cannot, and neither can a repository. Grok has one status row, so this script paints the built-in segments (`cwd`, `model`, `context`) too. Minimal render mode has no status row at all.
 
-On Grok, save the TypeSafe key as `TYPESAFE_API_KEY` or a cwd `.env`, or with the CLI `key` command from a shell outside Grok. Do not type secrets after a Grok slash command; Grok appends those words to the model.
+On Grok, save the TypeSafe key as `TYPESAFE_API_KEY` or a cwd `.env`, or with the CLI `key` command from a shell outside Grok (`judge vercel` first to save an AI Gateway key instead). Do not type secrets after a Grok slash command; Grok appends those words to the model.
 
 ## If it does nothing
 
 | Symptom | Cause |
 | --- | --- |
-| `Key: missing` in `/compact-adviser status` (Pi, Claude Code) or `/compact-adviser` (Grok) | No `TYPESAFE_API_KEY` in the launch environment, saved settings, or the session cwd's `./.env` |
+| `Key: missing` in `/compact-adviser status` (Pi, Claude Code) or `/compact-adviser` (Grok) | No key for the judge in effect (`TYPESAFE_API_KEY`, or `AI_GATEWAY_API_KEY` for Vercel's AI Gateway) in the launch environment, saved settings, or the session cwd's `./.env` |
+| `Judge: none` in status | `COMPACT_ADVISER_JUDGE_PROVIDER` is set to something other than `typesafe` or `vercel` |
 | No `/compact-adviser` command in Claude Code | `CLAUDE_CODE_ENABLE_FUNCTION_HOOKS` is not exactly `1` |
 | Command exists, no hint | Context is below the constant 40,000-token minimum, the session is not idle, or the last turn was not a settled final answer |
 | Claude Code: "nonessential traffic" | `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` blocks plugin network requests |
@@ -125,7 +132,8 @@ On Grok, save the TypeSafe key as `TYPESAFE_API_KEY` or a cwd `.env`, or with th
 | Variable | Effect |
 | --- | --- |
 | `TYPESAFE_API_KEY` | The Jev key; a saved key or the session cwd's `./.env` is used when this is unset |
-| `TYPESAFE_BASE` | Replaces the TypeSafe API base URL, `https://api.typesafe.ai` by default; the request goes to `<base>/v1/systemone` with a trailing slash dropped. Read from the launch environment only, never a saved setting or `./.env`. A value that is not an `http` or `https` URL, or that carries credentials, a query or a fragment, is a configuration error: no request and no advice |
+| `COMPACT_ADVISER_JUDGE_PROVIDER` | `typesafe` (default) asks TypeSafe directly; `vercel` asks Jev through Vercel's AI Gateway. Wins over the saved judge; any other value gives no advice |
+| `AI_GATEWAY_API_KEY` | The Vercel AI Gateway key, used only with the `vercel` judge; a saved key or the session cwd's `./.env` is used when this is unset |
 | `COMPACT_ADVISER_DISABLE` | `1`, `true`, `yes` or `on` (any case) makes the session inert: no TypeSafe request, no hint, no automatic compaction, no command. It wins over a saved `hint` or `auto` mode |
 | `CLAUDE_CODE_ENABLE_FUNCTION_HOOKS` | Claude Code only; must be exactly `1` for the mod to load |
 | `COMPACT_ADVISER_NODE` | Codex only; absolute path to a Node 22.18 or newer executable when the hook cannot find one on its rebuilt PATH |
@@ -139,8 +147,9 @@ Export `COMPACT_ADVISER_DISABLE=1` for unattended agent sessions, where advice h
 | Bounded user constraints, up to the last 64 visible replies and tool results (clipped), short tool-result excerpts, an existing summary, saved-artifact names, omission markers | System prompts, hidden reasoning, images, environment variables, the API key in the model context and request body, complete transcripts |
 | Best-effort redaction of known key patterns and obvious sensitive-file results | A guarantee. Uninstall or set mode Off for material that must not leave the machine |
 
-Requests go to `https://api.typesafe.ai/v1/systemone`, or `<TYPESAFE_BASE>/v1/systemone` when that is set, are capped at 32,000 serialized UTF-8 bytes, and never treat an error as an affirmative judgment.
-The TypeSafe API key never enters the model context or the request body; it is sent as the Authorization header to authenticate the call.
+Requests go to `https://api.typesafe.ai/v1/systemone`, are capped at 32,000 serialized UTF-8 bytes, and never treat an error as an affirmative judgment.
+With the `vercel` judge the same bounded state and questions go to `https://ai-gateway.vercel.sh/v4/ai/evaluation-model` instead, under the same cap.
+The API key never enters the model context or the request body; it is sent as the Authorization header to authenticate the call.
 Details: [SECURITY.md](https://github.com/kunchenguid/compact-adviser/blob/main/SECURITY.md).
 
 ## How It Works
@@ -170,9 +179,10 @@ hint can never be fed back to the model.
 
 | Command | Effect |
 | --- | --- |
-| `/compact-adviser` (Pi and Claude Code) | Settings (mode, minimum, request log, TypeSafe API key) |
+| `/compact-adviser` (Pi and Claude Code) | Settings (mode, minimum, request log, judge, the judge's API key) |
 | `/compact-adviser auto` / `hint` / `off` (Pi and Claude Code) | Save that mode; auto asks for first-use confirmation |
-| `/compact-adviser status` (Pi and Claude Code) | Mode, minimum, context, key source (`env` / `saved` / `.env` / `missing`), cooldown |
+| `/compact-adviser status` (Pi and Claude Code) | Mode, minimum, context, the judge and where context goes, key source (`env` / `saved` / `.env` / `missing`), cooldown |
+| `/compact-adviser judge vercel` / `judge typesafe` (Pi and Claude Code) | Ask Jev through Vercel's AI Gateway, or TypeSafe directly (the default) |
 | `/compact-adviser threshold 60000` (Pi and Claude Code) | Save an absolute token minimum |
 | `/compact-adviser snooze` / `dismiss` (Pi and Claude Code) | Suppress the next three exchanges, or clear the current hint |
 | `/compact-adviser` (Grok) | Show status; do not add arguments because Grok sends them to the model |
@@ -182,7 +192,7 @@ hint can never be fed back to the model.
 | `${GROK_HOME:-$HOME/.grok}/compact-adviser/adviser.sh threshold 60000` (Grok shell) | Save an absolute token minimum; `help` lists the other shell-only settings |
 
 On Codex the same commands are arguments to the plugin's `src/cli.ts` (`status`, `hint`, `off`,
-`threshold`, `log on|off`, `key set|clear|status`) rather than a slash
+`threshold`, `log on|off`, `judge typesafe|vercel`, `key set|clear|status`) rather than a slash
 command, because Codex plugins cannot register a command with code behind it. Codex has no
 snooze or dismiss: the CLI cannot tell which session is current.
 

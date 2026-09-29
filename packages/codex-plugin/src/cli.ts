@@ -20,8 +20,16 @@ import {
   parseSavedApiKey,
 } from "./config.ts";
 import { DISABLE_ENV, disabledByEnv } from "./disable.ts";
-import { formatKeyStatus } from "./env.ts";
-import { resolveKey } from "./hook.ts";
+import {
+  formatJudgeStatus,
+  formatKeyStatus,
+  judgeSavedMessage,
+  KEY_LABELS,
+  PROVIDER_ENV,
+  parseJudgeProvider,
+  SAVED_KEY_FIELDS,
+} from "./env.ts";
+import { resolveKey, resolveProvider } from "./hook.ts";
 import { floorFor } from "./judge.ts";
 import { requestLogPath } from "./log.ts";
 import { adviserRoot } from "./paths.ts";
@@ -34,16 +42,18 @@ export const USAGE = `compact-adviser (Codex) - suggests /compact at a completed
 
 Usage: compact-adviser <command> [value]
 
-  status                    Mode, minimum, key source, and the latest session's cooldown
+  status                    Mode, minimum, judge, key source, and the latest session's cooldown
   hint                      Advise with a hint at eligible checkpoints (default)
   off                       Stop advising; Codex's own compaction is unaffected
   threshold <tokens>        Save an absolute token minimum, or "default" for ${DEFAULT_MINIMUM}
   log <on|off>              Log each TypeSafe request and its outcome to a local jsonl file
-  key <set|clear|status>    Save, clear, or report the TypeSafe API key (never printed)
+  judge <typesafe|vercel>   Ask Jev at TypeSafe (default) or through Vercel's AI Gateway
+  key <set|clear|status>    Save, clear, or report the judge's API key (never printed)
 
 Automatic compaction is not available on Codex: nothing outside a session can run /compact.
-A key may also come from TYPESAFE_API_KEY in the environment or a .env file in the session's
-working directory; that takes precedence over the saved one.`;
+A key may also come from TYPESAFE_API_KEY (AI_GATEWAY_API_KEY for the gateway) in the
+environment, which takes precedence over the saved one, or from a .env file in the session's
+working directory. COMPACT_ADVISER_JUDGE_PROVIDER in the environment overrides the saved judge.`;
 
 export interface CliEnvironment {
   env: NodeJS.ProcessEnv;
@@ -56,7 +66,7 @@ export interface CliEnvironment {
 function statusText(environment: CliEnvironment): string {
   const root = adviserRoot(environment.env);
   const config = new ConfigStore(root).read();
-  const key = resolveKey(environment.env, config.typesafeApiKey, environment.cwd);
+  const key = resolveKey(environment.env, config, environment.cwd);
   const store = new SessionStore(root);
   const latest = store.latest();
   const now = environment.now();
@@ -72,6 +82,7 @@ function statusText(environment: CliEnvironment): string {
   return [
     `Mode: ${config.mode}.`,
     `Minimum: ${formatTokens(config.minContextTokens)} tokens.`,
+    `${formatJudgeStatus(resolveProvider(environment.env, config))}.`,
     `${formatKeyStatus(key.source)}.`,
     `${cooldown}${window}`,
     `Request log: ${config.logRequests ? requestLogPath(root, latest?.id ?? "<session>") : "off"}.`,
@@ -101,23 +112,36 @@ function saveLog(environment: CliEnvironment, value: string): string {
     : "TypeSafe request logging off (all sessions).";
 }
 
+function saveJudge(environment: CliEnvironment, value: string): string {
+  const root = adviserRoot(environment.env);
+  const provider = parseJudgeProvider(value);
+  new ConfigStore(root).update({ judgeProvider: provider });
+  return judgeSavedMessage(provider, environment.env[PROVIDER_ENV]);
+}
+
+/** The key commands act on the key of the judge in effect. */
 async function changeKey(environment: CliEnvironment, action: string): Promise<string> {
   const root = adviserRoot(environment.env);
   const store = new ConfigStore(root);
-  if (action === "clear") {
-    store.update({ typesafeApiKey: "" });
-    return "Saved TypeSafe API key cleared (all sessions). Environment and .env still apply.";
-  }
+  const config = store.read();
   if (action === "status" || action === "") {
-    const config = store.read();
-    return formatKeyStatus(
-      resolveKey(environment.env, config.typesafeApiKey, environment.cwd).source,
-    );
+    return formatKeyStatus(resolveKey(environment.env, config, environment.cwd).source);
   }
-  if (action !== "set") throw new Error("Use key set, key clear, or key status.");
-  const value = parseSavedApiKey(await environment.readSecret("TypeSafe API key: "));
-  store.update({ typesafeApiKey: value });
-  return "TypeSafe API key saved (all sessions). Status shows the source, never the value.";
+  if (action !== "set" && action !== "clear") {
+    throw new Error("Use key set, key clear, or key status.");
+  }
+  const provider = resolveProvider(environment.env, config).provider;
+  if (provider === undefined) {
+    throw new Error(`${PROVIDER_ENV} names no provider; set it to typesafe or vercel first.`);
+  }
+  const label = KEY_LABELS[provider];
+  if (action === "clear") {
+    store.update({ [SAVED_KEY_FIELDS[provider]]: "" });
+    return `Saved ${label} cleared (all sessions). Environment and .env still apply.`;
+  }
+  const value = parseSavedApiKey(await environment.readSecret(`${label}: `), label);
+  store.update({ [SAVED_KEY_FIELDS[provider]]: value });
+  return `${label} saved (all sessions). Status shows the source, never the value.`;
 }
 
 export async function run(argv: readonly string[], environment: CliEnvironment): Promise<string> {
@@ -136,6 +160,9 @@ export async function run(argv: readonly string[], environment: CliEnvironment):
       return saveThreshold(environment, value);
     case "log":
       return saveLog(environment, value);
+    case "judge":
+      if (!value) throw new Error("Enter typesafe or vercel.");
+      return saveJudge(environment, value);
     case "key":
       return changeKey(environment, value);
     case "":

@@ -18,6 +18,7 @@ export const MAX_SAVED_API_KEY_LENGTH = 1024;
 /** The built-in status-line segments this package paints in place of Grok's own row. */
 export const STATUS_LINE_ITEMS = ["cwd", "model", "context"] as const;
 
+import { JUDGE_PROVIDERS, type JudgeProvider } from "./judge.ts";
 import { parseProfile } from "./profile.ts";
 
 export interface Settings {
@@ -27,6 +28,10 @@ export interface Settings {
   logRequests: boolean;
   /** Saved TypeSafe key; a non-empty `TYPESAFE_API_KEY` in the environment still wins. */
   typesafeApiKey: string;
+  /** `typesafe` (the default when absent) or `vercel`; `COMPACT_ADVISER_JUDGE_PROVIDER` wins. */
+  judgeProvider?: JudgeProvider;
+  /** Saved AI Gateway key; a non-empty `AI_GATEWAY_API_KEY` in the environment still wins. */
+  aiGatewayApiKey?: string;
   profile?: string;
 }
 
@@ -65,11 +70,11 @@ export function parseMode(text: string): Mode {
   return value as Mode;
 }
 
-export function parseSavedApiKey(text: string): string {
+export function parseSavedApiKey(text: string, label = "TypeSafe API key"): string {
   const value = text.trim();
-  if (!value) throw new SettingsError("Enter a TypeSafe API key, or clear it with `key clear`.");
+  if (!value) throw new SettingsError(`Enter a ${label}, or clear it with \`key clear\`.`);
   if (value.length > MAX_SAVED_API_KEY_LENGTH) {
-    throw new SettingsError("That value is too long to save as a TypeSafe API key.");
+    throw new SettingsError(`That value is too long to save as a ${label}.`);
   }
   for (let i = 0; i < value.length; i++) {
     const code = value.charCodeAt(i);
@@ -112,6 +117,16 @@ export function parseSettings(value: unknown): Settings {
       "Cannot read the compact-adviser TypeSafe key setting; no action is taken.",
     );
   }
+  const provider = s.judgeProvider;
+  if (provider !== undefined && !JUDGE_PROVIDERS.includes(provider)) {
+    throw new SettingsError("Cannot read the compact-adviser judge setting; no action is taken.");
+  }
+  const gatewayKey = s.aiGatewayApiKey;
+  if (gatewayKey !== undefined && typeof gatewayKey !== "string") {
+    throw new SettingsError(
+      "Cannot read the compact-adviser AI Gateway key setting; no action is taken.",
+    );
+  }
   parseProfile(s.profile);
   return {
     version: 1,
@@ -120,6 +135,8 @@ export function parseSettings(value: unknown): Settings {
     minContextTokens: minimum,
     logRequests,
     typesafeApiKey: key,
+    ...(provider !== undefined ? { judgeProvider: provider } : {}),
+    ...(gatewayKey ? { aiGatewayApiKey: gatewayKey } : {}),
   };
 }
 

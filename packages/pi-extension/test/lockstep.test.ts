@@ -9,23 +9,27 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import * as claudeDisable from "../../claude-mod/lib/disable.ts";
+import * as claudeEnv from "../../claude-mod/lib/env.ts";
 import * as claude from "../../claude-mod/lib/judge.ts";
 import * as claudeLog from "../../claude-mod/lib/log.ts";
 import * as claudeSnapshot from "../../claude-mod/lib/snapshot.ts";
 import * as claudeState from "../../claude-mod/lib/state.ts";
 import * as codexDisable from "../../codex-plugin/src/disable.ts";
+import * as codexEnv from "../../codex-plugin/src/env.ts";
 import * as codex from "../../codex-plugin/src/judge.ts";
 import * as codexLog from "../../codex-plugin/src/log.ts";
 import * as codexRollout from "../../codex-plugin/src/rollout.ts";
 import * as codexSnapshot from "../../codex-plugin/src/snapshot.ts";
 import * as codexState from "../../codex-plugin/src/state.ts";
 import * as grokDisable from "../../grok-plugin/lib/disable.ts";
+import * as grokEnv from "../../grok-plugin/lib/env.ts";
 import * as grok from "../../grok-plugin/lib/judge.ts";
 import * as grokLog from "../../grok-plugin/lib/log.ts";
 import * as grokSnapshot from "../../grok-plugin/lib/snapshot.ts";
 import * as grokState from "../../grok-plugin/lib/state.ts";
 import * as piContext from "../src/context.ts";
 import * as piDisable from "../src/disable.ts";
+import * as piEnv from "../src/env.ts";
 import * as pi from "../src/judge.ts";
 import * as piLog from "../src/log.ts";
 import * as piState from "../src/state.ts";
@@ -48,6 +52,67 @@ test("every package sends byte-identical request bodies", () => {
     assert.equal(claude.requestBody(s), pi.requestBody(s));
     assert.equal(codex.requestBody(s), pi.requestBody(s));
     assert.equal(grok.requestBody(s), pi.requestBody(s));
+  }
+});
+
+test("every package asks Jev through the gateway with the same request", () => {
+  for (const s of [state, {}, null]) {
+    for (const other of [claude, codex, grok]) {
+      assert.equal(
+        other.requestBody(s, undefined, other.GATEWAY_ADAPTER),
+        pi.requestBody(s, undefined, pi.GATEWAY_ADAPTER),
+      );
+      const base = "https://proxy.example.test/typesafe";
+      assert.equal(other.requestBody(s, undefined, other.typesafeAdapter(base)), pi.requestBody(s));
+    }
+  }
+  for (const other of [claude, codex, grok]) {
+    assert.equal(other.GATEWAY_ENDPOINT, pi.GATEWAY_ENDPOINT);
+    assert.equal(other.GATEWAY_MODEL, pi.GATEWAY_MODEL);
+    assert.deepEqual(other.JUDGE_PROVIDERS, pi.JUDGE_PROVIDERS);
+    assert.equal(other.TYPESAFE_API_BASE, pi.TYPESAFE_API_BASE);
+    for (const [mine, theirs] of [
+      [pi.GATEWAY_ADAPTER, other.GATEWAY_ADAPTER],
+      [pi.typesafeAdapter(), other.typesafeAdapter()],
+      [
+        pi.typesafeAdapter("https://proxy.example.test"),
+        other.typesafeAdapter("https://proxy.example.test"),
+      ],
+    ] as const) {
+      assert.equal(theirs.provider, mine.provider);
+      assert.equal(theirs.endpoint, mine.endpoint);
+      assert.deepEqual(theirs.headers("k"), mine.headers("k"));
+    }
+    for (const provider of pi.JUDGE_PROVIDERS) {
+      for (const kind of ["timeout", "network", "authentication", "server", "response"] as const)
+        assert.equal(other.judgeErrorMessage(kind, provider), pi.judgeErrorMessage(kind, provider));
+    }
+  }
+});
+
+test("every package resolves and describes the judge the same way", () => {
+  const providers = [undefined, "", "typesafe", "vercel", " vercel ", "openai"];
+  for (const other of [claudeEnv, codexEnv, grokEnv]) {
+    assert.deepEqual(other.KEY_NAMES, piEnv.KEY_NAMES);
+    assert.equal(other.PROVIDER_ENV, piEnv.PROVIDER_ENV);
+    for (const env of providers) {
+      for (const saved of providers) {
+        const mine = piEnv.resolveJudge(env, saved);
+        const theirs = other.resolveJudge(env, saved);
+        assert.equal(theirs.provider, mine.provider);
+        assert.equal(theirs.source, mine.source);
+        assert.equal(theirs.adapter?.endpoint, mine.adapter?.endpoint);
+        assert.equal(other.formatJudgeStatus(theirs), piEnv.formatJudgeStatus(mine));
+      }
+    }
+    for (const provider of pi.JUDGE_PROVIDERS) {
+      for (const env of [undefined, "vercel"]) {
+        assert.equal(
+          other.judgeSavedMessage(provider, env),
+          piEnv.judgeSavedMessage(provider, env),
+        );
+      }
+    }
   }
 });
 
@@ -159,6 +224,41 @@ test("every package parses the same wire response into the same judgment", () =>
       other.qualifies(pi.parseJudgment(response), 0.2),
       pi.qualifies(pi.parseJudgment(response), 0.2),
     );
+  }
+});
+
+test("every package parses the same gateway response into the same judgment", () => {
+  const answer = (choice: string, probabilities: Record<string, number>) => ({
+    type: "choice",
+    choice,
+    probabilities,
+  });
+  const responses = [
+    {
+      model: "typesafe-ai/jev",
+      answers: {
+        done: answer("finished", { finished: 0.93, not_finished: 0.06, unclear: 0.01 }),
+        shape: answer("hands_on", { hands_on: 0.97, coordinating: 0.02, unclear: 0.01 }),
+      },
+      usage: { inputTokens: 7440, outputTokens: 44 },
+      providerMetadata: { typesafe: { confidence: { done: 0.88, shape: 0.95 } } },
+    },
+    {
+      answers: {
+        done: answer("finished", { finished: 0.93, not_finished: 0.06, unclear: 0.01 }),
+        shape: answer("coordinating", { hands_on: 0.2, coordinating: 0.79, unclear: 0.01 }),
+      },
+    },
+  ];
+  for (const response of responses) {
+    for (const other of [claude, codex, grok]) {
+      assert.deepEqual(other.parseGatewayJudgment(response), pi.parseGatewayJudgment(response));
+    }
+  }
+  for (const malformed of [{}, { answers: { done: answer("finished", {}) } }]) {
+    for (const other of [pi, claude, codex, grok]) {
+      assert.throws(() => other.parseGatewayJudgment(malformed));
+    }
   }
 });
 
@@ -316,16 +416,21 @@ test("every package scrubs owned settings fields and known key values the same w
     mode: "hint",
     typesafeApiKey: secret,
     "compact-adviser.typesafeApiKey": secret,
+    aiGatewayApiKey: secret,
+    "compact-adviser.aiGatewayApiKey": secret,
   });
+  const clipped = `aiGatewayApiKey=${secret} "compact-adviser.aiGatewayApiKey": "${secret}", "mo`;
   for (const other of [claudeSnapshot, codexSnapshot, grokSnapshot]) {
     assert.deepEqual(other.redact(dump), piContext.redact(dump));
     assert.deepEqual(other.redactOwnedSettings(dump), piContext.redactOwnedSettings(dump));
+    assert.deepEqual(other.redactOwnedSettings(clipped), piContext.redactOwnedSettings(clipped));
     assert.deepEqual(
       other.scrubKnownSecrets(`keep ${secret} nearby`, [secret]),
       piContext.scrubKnownSecrets(`keep ${secret} nearby`, [secret]),
     );
   }
   assert.ok(!claudeSnapshot.redact(dump).text.includes(secret));
+  assert.ok(!piContext.redactOwnedSettings(clipped).text.includes(secret));
   assert.ok(claudeSnapshot.redact(dump).text.includes("hint"));
 });
 

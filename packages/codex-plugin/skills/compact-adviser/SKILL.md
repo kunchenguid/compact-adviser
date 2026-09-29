@@ -1,6 +1,6 @@
 ---
 name: compact-adviser
-description: Read or change compact-adviser settings for Codex - the mode (hint or off), the minimum context before a checkpoint is judged, TypeSafe request logging, and the TypeSafe API key. Use when the user asks about compaction advice, the /compact hint, compact-adviser status, or wants to turn the adviser on or off.
+description: Read or change compact-adviser settings for Codex - the mode (hint or off), the minimum context before a checkpoint is judged, TypeSafe request logging, the judge (TypeSafe directly or Vercel's AI Gateway), and the judge's API key. Use when the user asks about compaction advice, the /compact hint, compact-adviser status, or wants to turn the adviser on or off.
 ---
 
 # compact-adviser settings
@@ -24,13 +24,16 @@ macOS or Linux and Node 22.18 or newer are required, because the CLI is TypeScri
 
 | Command | Effect |
 | --- | --- |
-| `status` | Mode, minimum, key source, the latest session's cooldown, and the request-log path |
+| `status` | Mode, minimum, judge, key source, the latest session's cooldown, and the request-log path |
 | `hint` | Advise with a hint at eligible checkpoints (the default) |
 | `off` | Stop advising; Codex's own compaction is unaffected |
 | `threshold <tokens\|default>` | Save an absolute token minimum |
 | `log <on\|off>` | Log each TypeSafe request and its outcome to a local jsonl file |
-| `key set` | Prompt for a TypeSafe API key and save it; the value is never printed |
+| `judge <typesafe\|vercel>` | Ask Jev at TypeSafe (the default) or through Vercel's AI Gateway, which then receives the checkpoint context on its way to Jev |
+| `key set` | Prompt for the judge's API key (TypeSafe, or AI Gateway for `vercel`) and save it; the value is never printed |
 | `key clear` / `key status` | Remove the saved key, or report which source the key in effect came from |
 
 `key set` reads the key from the terminal, so ask the user to run that one themselves rather
 than passing a key on a command line. Never print, echo, or repeat a key value.
+Choose `judge vercel` only when the user asks for it: it changes who receives the checkpoint
+context, from TypeSafe to Vercel's AI Gateway on its way to Jev.

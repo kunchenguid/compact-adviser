@@ -194,7 +194,7 @@ test("holdout unlock binds exact checkpoint bytes and rejects cross-split sessio
     partition(text, "holdout", selection).map((row) => row.id),
     ["b"],
   );
-  assert.throws(() => partition(text + "\n", "holdout", selection), /locked/);
+  assert.throws(() => partition(`${text}\n`, "holdout", selection), /locked/);
   rows[1].group = "one";
   assert.throws(
     () => partition(rows.map((row) => JSON.stringify(row)).join("\n"), "development"),

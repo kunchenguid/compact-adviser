@@ -449,8 +449,11 @@ function fileExists(path: string): boolean {
   }
 }
 
+/** The product's saved-key settings fields, one per judge provider. */
+const OWNED_SECRET_FIELDS = ["typesafeApiKey", "aiGatewayApiKey"];
+
 function isOwnedSecretField(key: string): boolean {
-  return key === "typesafeApiKey" || key.endsWith(".typesafeApiKey");
+  return OWNED_SECRET_FIELDS.some((field) => key === field || key.endsWith(`.${field}`));
 }
 
 function redactOwnedSecretFields(value: unknown): { value: unknown; redacted: boolean } {
@@ -474,7 +477,7 @@ function redactOwnedSecretFields(value: unknown): { value: unknown; redacted: bo
 
 /** Strip the product's saved-key fields from JSON text; keep non-secret settings. */
 export function redactOwnedSettings(text: string): { text: string; redacted: boolean } {
-  if (!text.includes("typesafeApiKey")) return { text, redacted: false };
+  if (!OWNED_SECRET_FIELDS.some((field) => text.includes(field))) return { text, redacted: false };
   try {
     const parsed = JSON.parse(text) as unknown;
     const walked = redactOwnedSecretFields(parsed);
@@ -483,8 +486,11 @@ export function redactOwnedSettings(text: string): { text: string; redacted: boo
     // Clipped or non-JSON tool output still goes through the field regex below.
   }
   const clean = text
-    .replace(/("(?:[^"\\]*\.)?typesafeApiKey")\s*:\s*"(?:\\.|[^"\\])*"/g, '$1:"[REDACTED]"')
-    .replace(/\b(typesafeApiKey)\s*[=:]\s*["']?[^\s"',}]+/g, "$1=[REDACTED]");
+    .replace(
+      /("(?:[^"\\]*\.)?(?:typesafeApiKey|aiGatewayApiKey)")\s*:\s*"(?:\\.|[^"\\])*"/g,
+      '$1:"[REDACTED]"',
+    )
+    .replace(/\b(typesafeApiKey|aiGatewayApiKey)\s*[=:]\s*["']?[^\s"',}]+/g, "$1=[REDACTED]");
   return { text: clean, redacted: clean !== text };
 }
 

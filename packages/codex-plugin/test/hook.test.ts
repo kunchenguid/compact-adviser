@@ -13,6 +13,7 @@ import {
   assistantMessage,
   environment,
   fakeTypesafe,
+  gatewayAnswer,
   type Lab,
   makeLab,
   sessionMeta,
@@ -64,6 +65,84 @@ test("a settled, large-enough checkpoint is judged once and hints", async () => 
     assert.deepEqual(body.state.savedArtifacts, ["src/parser.ts"]);
     assert.ok(!JSON.stringify(body).includes(TYPESAFE_KEY), "the key never travels in the body");
   });
+});
+
+test("with the gateway judge, the checkpoint goes to Vercel's AI Gateway with the gateway key", async () => {
+  await withLab(async (lab) => {
+    writeRollout(lab.transcript, settledRollout());
+    const gateway = fakeTypesafe(() => ({ body: gatewayAnswer() }));
+    const gatewayKey = "vck-gateway-key-must-not-leave";
+    const output = await handle(
+      stop(lab),
+      environment(lab, {
+        fetch: gateway.fetch,
+        env: {
+          CODEX_HOME: lab.home,
+          TYPESAFE_API_KEY: TYPESAFE_KEY,
+          AI_GATEWAY_API_KEY: gatewayKey,
+          COMPACT_ADVISER_JUDGE_PROVIDER: "vercel",
+        },
+      }),
+    );
+    assert.deepEqual(output, { systemMessage: HINT });
+    assert.equal(gateway.requests.length, 1);
+    const request = gateway.requests[0];
+    assert.equal(request?.url, "https://ai-gateway.vercel.sh/v4/ai/evaluation-model");
+    assert.equal(request?.authorization, `Bearer ${gatewayKey}`);
+    assert.equal(request?.headers["ai-model-id"], "typesafe-ai/jev");
+    const body = request?.body as { model?: string; state: { savedArtifacts: string[] } };
+    assert.equal(body.model, undefined);
+    assert.deepEqual(Object.keys(body), ["state", "questions"]);
+    assert.deepEqual(body.state.savedArtifacts, ["src/parser.ts"]);
+    const sent = JSON.stringify(request);
+    assert.ok(!sent.includes(TYPESAFE_KEY), "the TypeSafe key never goes to the gateway");
+    assert.ok(!JSON.stringify(body).includes(gatewayKey), "the key never travels in the body");
+  });
+});
+
+test("the gateway judge without its own key, or an unknown judge, asks nobody", async () => {
+  for (const env of [
+    { COMPACT_ADVISER_JUDGE_PROVIDER: "vercel", TYPESAFE_API_KEY: TYPESAFE_KEY },
+    { COMPACT_ADVISER_JUDGE_PROVIDER: "gateway", AI_GATEWAY_API_KEY: "vck-x" },
+  ]) {
+    await withLab(async (lab) => {
+      writeRollout(lab.transcript, settledRollout());
+      const typesafe = fakeTypesafe(() => ({ body: gatewayAnswer() }));
+      const output = await handle(
+        stop(lab),
+        environment(lab, { fetch: typesafe.fetch, env: { CODEX_HOME: lab.home, ...env } }),
+      );
+      assert.deepEqual(output, {});
+      assert.equal(typesafe.requests.length, 0);
+    });
+  }
+});
+
+test("a failed or malformed gateway reply gives no hint and backs off", async () => {
+  for (const reply of [
+    { status: 401, body: {} },
+    { status: 500, body: {} },
+    { status: 200, body: { answers: {} } },
+    { status: 200, body: { answers: { done: { type: "choice", choice: "finished" } } } },
+  ]) {
+    await withLab(async (lab) => {
+      writeRollout(lab.transcript, settledRollout());
+      new ConfigStore(adviserRoot({ CODEX_HOME: lab.home })).update({
+        judgeProvider: "vercel",
+        aiGatewayApiKey: "vck-saved",
+      });
+      const gateway = fakeTypesafe(() => reply);
+      const output = await handle(
+        stop(lab),
+        environment(lab, { fetch: gateway.fetch, env: { CODEX_HOME: lab.home } }),
+      );
+      assert.deepEqual(output, {});
+      assert.equal(gateway.requests.length, 1);
+      assert.equal(gateway.requests[0]?.authorization, "Bearer vck-saved");
+      const record = new SessionStore(adviserRoot({ CODEX_HOME: lab.home })).read("s1", 1_000_000);
+      assert.ok(record.state.failures > 0, JSON.stringify(reply));
+    });
+  }
 });
 
 test("an exec program's shell writes reach the saved artifacts end to end", async () => {

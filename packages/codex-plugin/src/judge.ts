@@ -3,35 +3,19 @@
 
 import type { JudgeProfile } from "./profile.ts";
 
-export const DEFAULT_BASE = "https://api.typesafe.ai";
-export const ENDPOINT = `${DEFAULT_BASE}/v1/systemone`;
-
-/**
- * The judge endpoint under a `TYPESAFE_BASE` override: unset or blank keeps TypeSafe's own
- * base, trailing slashes are dropped, and `/v1/systemone` is appended as with the default.
- * Anything but a plain http(s) base (no credentials, query or fragment) is undefined, which
- * callers treat as invalid configuration: no request and no advice, never an affirmative one.
- */
-export function typesafeEndpoint(base: string | undefined): string | undefined {
-  const value = base?.trim() ?? "";
-  if (value === "") return ENDPOINT;
-  let url: URL;
-  try {
-    url = new URL(value);
-  } catch {
-    return undefined;
-  }
-  if (
-    (url.protocol !== "https:" && url.protocol !== "http:") ||
-    url.username !== "" ||
-    url.password !== "" ||
-    value.includes("?") ||
-    value.includes("#")
-  )
-    return undefined;
-  return `${url.origin}${url.pathname.replace(/\/+$/, "")}/v1/systemone`;
-}
+/** TypeSafe's public API base, where the direct judge sends every request. */
+export const TYPESAFE_API_BASE = "https://api.typesafe.ai";
+export const ENDPOINT = `${TYPESAFE_API_BASE}/v1/systemone`;
 export const MAX_REQUEST_BYTES = 32000;
+/**
+ * Who carries the checkpoint to Jev: TypeSafe's own API (the default), or Vercel's AI
+ * Gateway, which serves the same model to a person holding an AI Gateway key instead.
+ */
+export type JudgeProvider = "typesafe" | "vercel";
+export const JUDGE_PROVIDERS: readonly JudgeProvider[] = ["typesafe", "vercel"];
+/** Vercel AI Gateway's evaluation-model endpoint and its id for Jev. */
+export const GATEWAY_ENDPOINT = "https://ai-gateway.vercel.sh/v4/ai/evaluation-model";
+export const GATEWAY_MODEL = "typesafe-ai/jev";
 export const MAX_RESPONSE_BYTES = 32768;
 export const TIMEOUT_MS = 2000;
 
@@ -78,7 +62,8 @@ export const QUESTIONS = {
 export interface Choice {
   choice: string;
   probabilities: Record<string, number>;
-  confidence: number;
+  /** TypeSafe always reports it; through the gateway it is present only when passed on. */
+  confidence?: number;
 }
 
 export interface Judgment {
@@ -118,12 +103,30 @@ const JUDGE_KIND_CAUSE: Record<JudgeErrorKind, string> = {
   configuration: "TYPESAFE_BASE is not a valid http or https URL",
 };
 
-export function judgeErrorMessage(kind: JudgeErrorKind): string {
+const GATEWAY_KIND_CAUSE: Record<JudgeErrorKind, string> = {
+  timeout: "the request timed out",
+  network: "the request could not reach Vercel's AI Gateway",
+  authentication: "Vercel's AI Gateway rejected the API key",
+  "rate-limit": "Vercel's AI Gateway rate-limited the request",
+  server: "Vercel's AI Gateway returned a server error",
+  response: "the reply through Vercel's AI Gateway was not a usable judgment",
+  input: "this checkpoint is too large to send",
+};
+
+function askedJudge(provider: JudgeProvider): string {
+  return provider === "vercel" ? "Jev through Vercel's AI Gateway" : "TypeSafe (Jev)";
+}
+
+export function judgeErrorMessage(
+  kind: JudgeErrorKind,
+  provider: JudgeProvider = "typesafe",
+): string {
+  const cause = (provider === "vercel" ? GATEWAY_KIND_CAUSE : JUDGE_KIND_CAUSE)[kind];
   const core =
-    `The compact adviser asked TypeSafe (Jev) but did not get a usable judgment (${JUDGE_KIND_CAUSE[kind]}). ` +
+    `The compact adviser asked ${askedJudge(provider)} but did not get a usable judgment (${cause}). ` +
     "Context was left unchanged on purpose so a compact or hint cannot come from a bad answer.";
   if (kind === "authentication") {
-    return `${core} Check the TypeSafe key configuration; this is not a temporary glitch.`;
+    return `${core} Check the ${provider === "vercel" ? "AI Gateway" : "TypeSafe"} key configuration; this is not a temporary glitch.`;
   }
   if (kind === "configuration") {
     return `${core} Fix or unset TYPESAFE_BASE; this is not a temporary glitch.`;
@@ -142,17 +145,33 @@ export const JUDGE_UNAVAILABLE_MESSAGE =
   "Context was left unchanged on purpose so a compact or hint cannot come from a bad answer. " +
   "This can be temporary; the adviser will try again later. No action needed unless it keeps repeating.";
 
+export function judgeUnavailableMessage(provider: JudgeProvider = "typesafe"): string {
+  return JUDGE_UNAVAILABLE_MESSAGE.replace("TypeSafe (Jev)", askedJudge(provider));
+}
+
 export const JUDGE_DISABLED_NETWORK_MESSAGE =
   "The compact adviser could not ask TypeSafe (Jev): Claude Code has nonessential network traffic disabled. " +
   "Context was left unchanged on purpose so a compact or hint cannot run without a judgment. " +
   "Enable nonessential network traffic if TypeSafe should run; this is a configuration setting, not a temporary glitch.";
 
+export function judgeDisabledNetworkMessage(provider: JudgeProvider = "typesafe"): string {
+  return provider === "vercel"
+    ? JUDGE_DISABLED_NETWORK_MESSAGE.replace("TypeSafe (Jev)", askedJudge(provider)).replace(
+        "if TypeSafe should run",
+        "if the judge should run",
+      )
+    : JUDGE_DISABLED_NETWORK_MESSAGE;
+}
+
 export class JudgeError extends Error {
   // A plain field assignment, not a constructor parameter property: the Codex adapter runs
   // this module through Node's own type stripping, which only erases, never transforms.
   readonly kind: JudgeErrorKind;
-  constructor(kind: JudgeErrorKind, options?: { cause?: unknown }) {
-    super(judgeErrorMessage(kind), options);
+  constructor(kind: JudgeErrorKind, options?: { cause?: unknown; provider?: JudgeProvider }) {
+    super(
+      judgeErrorMessage(kind, options?.provider),
+      options?.cause === undefined ? undefined : { cause: options.cause },
+    );
     this.kind = kind;
     this.name = "JudgeError";
   }
@@ -162,7 +181,7 @@ function probability(v: unknown): v is number {
   return typeof v === "number" && Number.isFinite(v) && v >= 0 && v <= 1;
 }
 
-function choice(value: unknown, options: string[]): Choice {
+function choice(value: unknown, options: string[], requireConfidence: boolean): Choice {
   const c = value as {
     type?: unknown;
     choice?: unknown;
@@ -173,7 +192,7 @@ function choice(value: unknown, options: string[]): Choice {
     c?.type !== "choice" ||
     typeof c.choice !== "string" ||
     !options.includes(c.choice) ||
-    !probability(c.confidence) ||
+    ((requireConfidence || c.confidence !== undefined) && !probability(c.confidence)) ||
     !c.probabilities ||
     typeof c.probabilities !== "object" ||
     Object.keys(c.probabilities).sort().join() !== [...options].sort().join() ||
@@ -187,10 +206,51 @@ function choice(value: unknown, options: string[]): Choice {
     (probabilities[c.choice] ?? 0) < Math.max(...values)
   )
     throw new JudgeError("response");
-  return { choice: c.choice, confidence: c.confidence, probabilities };
+  return {
+    choice: c.choice,
+    ...(c.confidence !== undefined ? { confidence: c.confidence as number } : {}),
+    probabilities,
+  };
 }
-
 export function parseJudgment(value: unknown): Judgment {
+  return judgment(value, true);
+}
+/**
+ * Vercel's AI Gateway answers in the AI SDK's evaluation shape: each choice carries its
+ * probabilities but no `confidence` (TypeSafe's own rides in `providerMetadata.typesafe`
+ * when the gateway passes it on), and `usage` is camelCase and optional. It is mapped onto
+ * TypeSafe's wire shape and validated exactly as a direct reply, so a reply missing a
+ * probability distribution is refused rather than guessed at.
+ */
+export function parseGatewayJudgment(value: unknown): Judgment {
+  const r = value as {
+    model?: unknown;
+    answers?: unknown;
+    usage?: { inputTokens?: unknown; outputTokens?: unknown } | null;
+    providerMetadata?: { typesafe?: { confidence?: Record<string, unknown> | null } | null } | null;
+  } | null;
+  if (!r || typeof r !== "object" || !r.answers || typeof r.answers !== "object")
+    throw new JudgeError("response", { provider: "vercel" });
+  const answers = r.answers as Record<string, unknown>;
+  const confidence = r.providerMetadata?.typesafe?.confidence;
+  const answer = (id: string) => {
+    const a = answers[id];
+    const c = confidence?.[id];
+    return a && typeof a === "object" && probability(c) ? { ...a, confidence: c } : a;
+  };
+  return judgment(
+    {
+      model: r.model ?? GATEWAY_MODEL,
+      answers: { done: answer("done"), shape: answer("shape") },
+      usage: {
+        input_tokens: r.usage?.inputTokens ?? 0,
+        output_tokens: r.usage?.outputTokens ?? 0,
+      },
+    },
+    false,
+  );
+}
+function judgment(value: unknown, requireConfidence: boolean): Judgment {
   const r = value as {
     model?: unknown;
     answers?: Record<string, unknown>;
@@ -208,8 +268,8 @@ export function parseJudgment(value: unknown): Judgment {
   )
     throw new JudgeError("response");
   return {
-    done: choice(r.answers.done, Object.keys(QUESTIONS.done.criteria)),
-    shape: choice(r.answers.shape, Object.keys(QUESTIONS.shape.criteria)),
+    done: choice(r.answers.done, Object.keys(QUESTIONS.done.criteria), requireConfidence),
+    shape: choice(r.answers.shape, Object.keys(QUESTIONS.shape.criteria), requireConfidence),
     model: r.model,
     inputTokens: Number(r.usage?.input_tokens),
     outputTokens: Number(r.usage?.output_tokens),
@@ -286,13 +346,58 @@ export function byteLength(text: string): number {
   return new TextEncoder().encode(text).byteLength;
 }
 
-export function requestBody(state: unknown, profile?: JudgeProfile): string {
-  const body = JSON.stringify({
-    model: "jev-latest",
-    state,
-    questions: profile?.questions ?? QUESTIONS,
-  });
-  if (byteLength(body) > MAX_REQUEST_BYTES) throw new JudgeError("input");
+/**
+ * Where a judgment request goes and how it is spelled on the wire. `judge()` owns the
+ * question set, the bounds, the timeout, and the rule that any failure gives no advice; an
+ * adapter only names the endpoint, the key header, and the request and response mappings.
+ */
+export interface JudgeAdapter {
+  readonly provider: JudgeProvider;
+  readonly endpoint: string;
+  /** The key travels only in these headers: never in a body, a log line, or a status. */
+  headers(key: string): Record<string, string>;
+  body(state: unknown, questions: unknown): unknown;
+  /** Maps a parsed reply onto a validated judgment, or throws. */
+  parse(value: unknown): Judgment;
+}
+function bearer(key: string): Record<string, string> {
+  return { "Content-Type": "application/json", Authorization: `Bearer ${key}` };
+}
+/** TypeSafe's own API; the base is an argument so a vetted override can be passed in. */
+export function typesafeAdapter(base: string = TYPESAFE_API_BASE): JudgeAdapter {
+  return {
+    provider: "typesafe",
+    endpoint: `${base}/v1/systemone`,
+    headers: bearer,
+    body: (state, questions) => ({ model: "jev-latest", state, questions }),
+    parse: parseJudgment,
+  };
+}
+/**
+ * Jev through Vercel's AI Gateway: the same state and questions, with the model named in a
+ * header instead of the body, and the reply mapped from the AI SDK's evaluation shape.
+ */
+export const GATEWAY_ADAPTER: JudgeAdapter = {
+  provider: "vercel",
+  endpoint: GATEWAY_ENDPOINT,
+  headers: (key) => ({
+    ...bearer(key),
+    "ai-gateway-protocol-version": "0.0.1",
+    "ai-gateway-auth-method": "api-key",
+    "ai-evaluation-model-specification-version": "4",
+    "ai-model-id": GATEWAY_MODEL,
+  }),
+  body: (state, questions) => ({ state, questions }),
+  parse: parseGatewayJudgment,
+};
+export function requestBody(
+  state: unknown,
+  profile?: JudgeProfile,
+  adapter: JudgeAdapter = typesafeAdapter(),
+): string {
+  const body = JSON.stringify(adapter.body(state, profile?.questions ?? QUESTIONS));
+  if (byteLength(body) > MAX_REQUEST_BYTES)
+    throw new JudgeError("input", { provider: adapter.provider });
   return body;
 }
 
@@ -313,22 +418,24 @@ export async function judge(
   key: string,
   transport: Transport,
   profile?: JudgeProfile,
+  adapter: JudgeAdapter = typesafeAdapter(),
 ): Promise<Judgment> {
-  const body = requestBody(state, profile);
+  const provider = adapter.provider;
+  const body = requestBody(state, profile, adapter);
   let response: { status: number; ok: boolean; text: string } | typeof TIMED_OUT;
   try {
     response = await Promise.race([
-      transport.fetch(transport.endpoint ?? ENDPOINT, {
+      transport.fetch(transport.endpoint ?? adapter.endpoint, {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
+        headers: adapter.headers(key),
         body,
       }),
       transport.sleep(TIMEOUT_MS).then((): typeof TIMED_OUT => TIMED_OUT),
     ]);
   } catch (cause) {
-    throw new JudgeError("network", { cause });
+    throw new JudgeError("network", { cause, provider });
   }
-  if (response === TIMED_OUT) throw new JudgeError("timeout");
+  if (response === TIMED_OUT) throw new JudgeError("timeout", { provider });
   if (!response.ok) {
     throw new JudgeError(
       response.status === 401 || response.status === 403
@@ -336,14 +443,15 @@ export async function judge(
         : response.status === 429
           ? "rate-limit"
           : "server",
+      { provider },
     );
   }
   if (typeof response.text !== "string" || byteLength(response.text) > MAX_RESPONSE_BYTES) {
-    throw new JudgeError("response");
+    throw new JudgeError("response", { provider });
   }
   try {
-    return parseJudgment(JSON.parse(response.text));
+    return adapter.parse(JSON.parse(response.text));
   } catch {
-    throw new JudgeError("response");
+    throw new JudgeError("response", { provider });
   }
 }

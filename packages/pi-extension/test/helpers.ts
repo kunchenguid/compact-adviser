@@ -204,12 +204,10 @@ export function harness(
   let calls = 0;
   const payloads: unknown[] = [];
   const signals: AbortSignal[] = [];
-  /** `hostJudge` keeps the product's own judge, so a test stubs `fetch` instead. */
-  const install = (
-    version = "0.82.0",
-    credential: string | undefined | false = "test-key",
-    hostJudge = false,
-  ) => {
+  const keys: string[] = [];
+  const providers: (string | undefined)[] = [];
+  const endpoints: (string | undefined)[] = [];
+  const install = (version = "0.82.0", credential: string | undefined | false = "test-key") => {
     handlers.clear();
     command = undefined;
     installAdviser(api, {
@@ -217,16 +215,15 @@ export function harness(
       version,
       ...(credential === false ? {} : { key: () => credential }),
       now: () => clock,
-      ...(hostJudge
-        ? {}
-        : {
-            evaluate: async (state: unknown, key: string, signal: AbortSignal) => {
-              calls++;
-              payloads.push(state);
-              signals.push(signal);
-              return evaluate(state, key, signal);
-            },
-          }),
+      evaluate: async (state, key, signal, _profile, adapter) => {
+        calls++;
+        payloads.push(state);
+        signals.push(signal);
+        keys.push(key);
+        providers.push(adapter?.provider);
+        endpoints.push(adapter?.endpoint);
+        return evaluate(state, key, signal);
+      },
     });
   };
   install();
@@ -257,6 +254,9 @@ export function harness(
     customRenders,
     payloads,
     signals,
+    keys,
+    providers,
+    endpoints,
     fire,
     next,
     install,

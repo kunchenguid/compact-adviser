@@ -145,6 +145,95 @@ test("a cwd .env supplies the key when the environment does not", async (t) => {
   assert.equal(fixture.bodies.length, 1);
 });
 
+test("the gateway judge asks Jev through Vercel's AI Gateway with only the gateway key", async (t) => {
+  const { l, fixture } = await judgeTurn(t);
+  fixture.gateway = true;
+  const chosen = await runCli(["judge", "vercel"], { lab: l });
+  assert.equal(chosen.code, 0, chosen.stderr);
+  assert.match(chosen.stdout, /Vercel's AI Gateway on its way to Jev/);
+  const env = {
+    COMPACT_ADVISER_TEST_ENDPOINT: fixture.url,
+    TYPESAFE_API_KEY: "tsk-test-key",
+    AI_GATEWAY_API_KEY: "vck-test-key",
+  };
+  await runCli(["hook", "stop"], { lab: l, stdin: stopPayload(l), env });
+  assert.equal(fixture.bodies.length, 1);
+  assert.deepEqual(fixture.headers[0], {
+    authorization: "Bearer vck-test-key",
+    model: "typesafe-ai/jev",
+  });
+  const body = JSON.parse(fixture.bodies[0] ?? "{}");
+  assert.deepEqual(Object.keys(body), ["state", "questions"]);
+  assert.ok(!fixture.bodies[0]?.includes("tsk-test-key"));
+  const row = await runCli(["status-line"], { lab: l, stdin: statusPayload(l) });
+  assert.ok(row.stdout.includes(HINT));
+  const status = await runCli(["status"], { lab: l, env });
+  assert.match(
+    status.stdout,
+    /Judge: Jev through Vercel's AI Gateway \(checkpoint context goes to Vercel's AI Gateway on its way to Jev\)\./,
+  );
+  assert.ok(!status.stdout.includes("vck-test-key"));
+});
+
+test("the gateway judge never falls back to a TypeSafe key, and an unknown judge asks nobody", async (t) => {
+  const { l, fixture } = await judgeTurn(t);
+  fixture.gateway = true;
+  await runCli(["hook", "stop"], {
+    lab: l,
+    stdin: stopPayload(l),
+    env: { ...keyed(fixture), COMPACT_ADVISER_JUDGE_PROVIDER: "vercel" },
+  });
+  assert.equal(fixture.bodies.length, 0);
+  await runCli(["hook", "stop"], {
+    lab: l,
+    stdin: stopPayload(l, { prompt_id: "another" }),
+    env: { ...keyed(fixture), AI_GATEWAY_API_KEY: "vck-x", COMPACT_ADVISER_JUDGE_PROVIDER: "x" },
+  });
+  assert.equal(fixture.bodies.length, 0);
+  const status = await runCli(["status"], {
+    lab: l,
+    env: { COMPACT_ADVISER_JUDGE_PROVIDER: "x" },
+  });
+  assert.match(status.stdout, /Judge: none, COMPACT_ADVISER_JUDGE_PROVIDER names no provider/);
+  const refused = await runCli(["judge", "openai"], { lab: l });
+  assert.notEqual(refused.code, 0);
+  assert.match(refused.stderr, /typesafe or vercel/);
+});
+
+test("key commands save and clear the key of the judge in effect", async (t) => {
+  const l = lab(t);
+  await runCli(["judge", "vercel"], { lab: l });
+  const saved = await runCli(["key", "vck-saved-by-hand"], { lab: l });
+  assert.match(saved.stdout, /AI Gateway API key saved/);
+  const settings = JSON.parse(readFileSync(join(l.dataDir, "settings.json"), "utf8"));
+  assert.equal(settings.judgeProvider, "vercel");
+  assert.equal(settings.aiGatewayApiKey, "vck-saved-by-hand");
+  assert.equal(settings.typesafeApiKey, "");
+  assert.match((await runCli(["status"], { lab: l })).stdout, /Key: saved\./);
+  assert.match(
+    (await runCli(["key", "clear"], { lab: l })).stdout,
+    /Saved AI Gateway API key cleared/,
+  );
+  assert.match((await runCli(["status"], { lab: l })).stdout, /Key: missing\./);
+});
+
+test("a refused gateway judgment backs off and reports the gateway's outcome", async (t) => {
+  const { l, fixture } = await judgeTurn(t);
+  fixture.gateway = true;
+  fixture.status = 401;
+  const env = {
+    COMPACT_ADVISER_TEST_ENDPOINT: fixture.url,
+    AI_GATEWAY_API_KEY: "vck-test-key",
+    COMPACT_ADVISER_JUDGE_PROVIDER: "vercel",
+  };
+  await runCli(["hook", "stop"], { lab: l, stdin: stopPayload(l), env });
+  assert.equal(fixture.bodies.length, 1);
+  const row = await runCli(["status-line"], { lab: l, stdin: statusPayload(l) });
+  assert.ok(!row.stdout.includes(HINT));
+  const status = await runCli(["status"], { lab: l, env });
+  assert.match(status.stdout, /Last AI Gateway outcome: authentication/);
+});
+
 test("mode off asks nothing and clears a hint already earned", async (t) => {
   const { l, fixture } = await judgeTurn(t);
   await runCli(["hook", "stop"], { lab: l, stdin: stopPayload(l), env: keyed(fixture) });

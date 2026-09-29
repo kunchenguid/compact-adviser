@@ -109,8 +109,29 @@ export function jevAnswer(finished = 0.99, handsOn = 0.99): unknown {
   };
 }
 
+/** The same judgment as `jevAnswer`, in the shape Vercel's AI Gateway returns it. */
+export function gatewayAnswer(finished = 0.99, handsOn = 0.99): unknown {
+  const direct = jevAnswer(finished, handsOn) as {
+    answers: Record<string, { type: string; choice: string; probabilities: unknown }>;
+  };
+  const answer = (id: string) => {
+    const { type, choice, probabilities } = direct.answers[id] ?? {};
+    return { type, choice, probabilities };
+  };
+  return {
+    model: "typesafe-ai/jev",
+    answers: { done: answer("done"), shape: answer("shape") },
+    usage: { inputTokens: 2500, outputTokens: 0 },
+  };
+}
+
 export interface FakeTypesafe {
-  requests: { url: string; authorization: string | undefined; body: unknown }[];
+  requests: {
+    url: string;
+    authorization: string | undefined;
+    headers: Record<string, string>;
+    body: unknown;
+  }[];
   fetch: Environment["fetch"];
 }
 
@@ -124,6 +145,7 @@ export function fakeTypesafe(
     requests.push({
       url: String(url),
       authorization: headers.Authorization,
+      headers,
       body: JSON.parse(String(init?.body ?? "{}")),
     });
     const { status = 200, body = jevAnswer() } = reply(requests.length);

@@ -222,6 +222,132 @@ test("settings menu saves and clears a TypeSafe key without printing it", async 
   assert.ok(!h.notifications.at(-1)?.includes(secret));
 });
 
+/** Clears the judge's environment for one test and restores it afterwards. */
+function isolateJudgeEnv(t: TestContext, values: Record<string, string> = {}) {
+  const names = ["TYPESAFE_API_KEY", "AI_GATEWAY_API_KEY", "COMPACT_ADVISER_JUDGE_PROVIDER"];
+  const previous = names.map((name) => [name, process.env[name]] as const);
+  t.after(() => {
+    for (const [name, value] of previous) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+  });
+  for (const name of names) delete process.env[name];
+  Object.assign(process.env, values);
+}
+
+test("judge vercel asks Jev through the gateway with the gateway key, never the TypeSafe key", async (t) => {
+  isolateJudgeEnv(t, {
+    TYPESAFE_API_KEY: "typesafe-env-key",
+    AI_GATEWAY_API_KEY: "gateway-env-key",
+  });
+  const h = harness(t);
+  h.install("0.82.0", false);
+  h.enable("hint");
+  await h.command("judge vercel");
+  assert.equal(h.store.read().judgeProvider, "vercel");
+  assert.match(
+    h.notifications.at(-1) ?? "",
+    /Judge saved \(all sessions\): Jev through Vercel's AI Gateway \(checkpoint context goes to Vercel's AI Gateway on its way to Jev\)/,
+  );
+  await h.command("status");
+  assert.match(h.notifications.at(-1) ?? "", /Judge: Jev through Vercel's AI Gateway/);
+  assert.match(h.notifications.at(-1) ?? "", /Key: env/);
+  await h.fire("agent_settled");
+  assert.deepEqual(h.keys, ["gateway-env-key"]);
+  assert.deepEqual(h.providers, ["vercel"]);
+  assert.ok(showedHint(h));
+  assert.ok(!JSON.stringify(h.payloads).includes("typesafe-env-key"));
+  assert.ok(!JSON.stringify(h.payloads).includes("gateway-env-key"));
+
+  // Without a gateway key, a TypeSafe key is never sent to the gateway instead.
+  delete process.env.AI_GATEWAY_API_KEY;
+  h.next();
+  await h.fire("agent_settled");
+  assert.equal(h.calls, 1);
+  await h.command("status");
+  assert.match(h.notifications.at(-1) ?? "", /Key: missing/);
+
+  await h.command("judge typesafe");
+  assert.equal(h.store.read().judgeProvider, "typesafe");
+  h.next();
+  await h.fire("agent_settled");
+  assert.deepEqual(h.keys, ["gateway-env-key", "typesafe-env-key"]);
+  assert.deepEqual(h.providers, ["vercel", "typesafe"]);
+  await h.command("judge openai");
+  assert.match(h.notifications.at(-1) ?? "", /typesafe or vercel/);
+  assert.equal(h.store.read().judgeProvider, "typesafe");
+});
+
+test("the launch environment's judge provider wins, and one naming no provider asks no judge", async (t) => {
+  isolateJudgeEnv(t, {
+    TYPESAFE_API_KEY: "typesafe-env-key",
+    AI_GATEWAY_API_KEY: "gateway-env-key",
+    COMPACT_ADVISER_JUDGE_PROVIDER: "vercel",
+  });
+  const h = harness(t);
+  h.install("0.82.0", false);
+  h.enable("hint");
+  h.store.update({ judgeProvider: "typesafe" });
+  await h.fire("agent_settled");
+  assert.deepEqual(h.providers, ["vercel"]);
+  assert.deepEqual(h.keys, ["gateway-env-key"]);
+  await h.command("judge typesafe");
+  assert.match(
+    h.notifications.at(-1) ?? "",
+    /COMPACT_ADVISER_JUDGE_PROVIDER in the launch environment still wins/,
+  );
+
+  process.env.COMPACT_ADVISER_JUDGE_PROVIDER = "gateway";
+  h.next();
+  await h.fire("agent_settled");
+  assert.equal(h.calls, 1);
+  await h.command("status");
+  assert.match(
+    h.notifications.at(-1) ?? "",
+    /Judge: none, COMPACT_ADVISER_JUDGE_PROVIDER names no provider \(use typesafe or vercel\); no advice is given/,
+  );
+  assert.match(h.notifications.at(-1) ?? "", /Key: missing/);
+});
+
+test("the settings menu chooses the judge and saves each provider's key apart", async (t) => {
+  isolateJudgeEnv(t);
+  const h = harness(t);
+  h.install("0.82.0", false);
+  const secret = "vck-menu-fixture-not-for-display";
+  h.selects.push(
+    "Judge: TypeSafe",
+    "Vercel AI Gateway",
+    "AI Gateway API key: not saved",
+    "Set key",
+    "Close",
+  );
+  h.inputs.push(secret);
+  await h.command("");
+  assert.equal(h.store.read().judgeProvider, "vercel");
+  assert.equal(h.store.read().aiGatewayApiKey, secret);
+  assert.equal(h.store.read().typesafeApiKey, undefined);
+  assert.ok(
+    h.notifications.includes(
+      "AI Gateway API key saved (all sessions). Status shows the source, never the value.",
+    ),
+  );
+  assert.ok(h.notifications.every((n) => !n.includes(secret)));
+  assert.ok(
+    h.customRenders.some((lines) => lines.some((line) => line.includes("AI Gateway API key"))),
+  );
+  h.enable("hint");
+  await h.fire("agent_settled");
+  assert.deepEqual(h.keys, [secret]);
+  assert.deepEqual(h.providers, ["vercel"]);
+  await h.command("status");
+  assert.match(h.notifications.at(-1) ?? "", /Key: saved/);
+  h.selects.push("AI Gateway API key: saved", "Clear saved key", "Close");
+  await h.command("");
+  assert.equal(h.store.read().aiGatewayApiKey, undefined);
+  assert.equal(h.store.read().judgeProvider, "vercel");
+});
+
 test("auto requires explicit confirmation, persist, and never compact on selection", async (t) => {
   const h = harness(t);
   h.confirms.push(false);
@@ -236,7 +362,7 @@ test("auto requires explicit confirmation, persist, and never compact on selecti
     h.notifications
       .at(-1)
       ?.includes(
-        "Use /compact-adviser, auto, hint, off, status, threshold <tokens|default>, snooze or dismiss.",
+        "Use /compact-adviser, auto, hint, off, status, threshold <tokens|default>, judge <typesafe|vercel>, snooze or dismiss.",
       ),
   );
   await h.command("hint");

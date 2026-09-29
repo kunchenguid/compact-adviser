@@ -46,6 +46,22 @@
       "description": "Optional version-1 judge profile JSON. Empty uses shipped defaults. Invalid profiles disable advice. This does not grant auto consent.",
       "default": ""
     },
+    "judgeProvider": {
+      "type": "string",
+      "title": "Judge",
+      "description": "Who carries the checkpoint to Jev: typesafe asks TypeSafe directly; vercel asks Jev through Vercel's AI Gateway, so checkpoint context goes to Vercel's AI Gateway on its way to Jev, with AI_GATEWAY_API_KEY or a key saved from /compact-adviser. A non-empty COMPACT_ADVISER_JUDGE_PROVIDER in the launch environment wins.",
+      "options": [
+        "typesafe",
+        "vercel"
+      ],
+      "default": "typesafe"
+    },
+    "aiGatewayApiKey": {
+      "type": "string",
+      "title": "AI Gateway API key",
+      "description": "Saved from /compact-adviser for the vercel judge. Hidden in /config so the value is never shown. A non-empty AI_GATEWAY_API_KEY in the launch environment wins. Do not commit this value.",
+      "default": ""
+    },
     "typesafeApiKey": {
       "type": "string",
       "title": "TypeSafe API key",

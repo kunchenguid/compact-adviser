@@ -174,6 +174,47 @@ test("the CLI saves and clears a key without ever printing it", async () => {
   });
 });
 
+test("the CLI chooses the judge, and key commands act on that judge's own key", async () => {
+  await withLab(async (lab) => {
+    const store = new ConfigStore(adviserRoot({ CODEX_HOME: lab.home }));
+    const chosen = await run(["judge", "vercel"], cli(lab));
+    assert.match(chosen, /Vercel's AI Gateway on its way to Jev/);
+    assert.equal(store.read().judgeProvider, "vercel");
+    assert.match(await run(["key", "set"], cli(lab)), /AI Gateway API key saved/);
+    assert.equal(store.read().aiGatewayApiKey, "tsk-typed-by-hand");
+    assert.equal(store.read().typesafeApiKey, undefined);
+    const status = await run(["status"], cli(lab));
+    assert.match(
+      status,
+      /Judge: Jev through Vercel's AI Gateway \(checkpoint context goes to Vercel's AI Gateway on its way to Jev\)\./,
+    );
+    assert.match(status, /Key: saved\./);
+    assert.ok(!status.includes("tsk-typed-by-hand"));
+    assert.match(await run(["key", "clear"], cli(lab)), /Saved AI Gateway API key cleared/);
+    assert.equal(store.read().aiGatewayApiKey, undefined);
+    assert.equal(await run(["key", "status"], cli(lab)), "Key: missing");
+    assert.match(await run(["judge", "typesafe"], cli(lab)), /TypeSafe Jev/);
+    assert.equal(store.read().judgeProvider, "typesafe");
+    await assert.rejects(run(["judge", "openai"], cli(lab)), /typesafe or vercel/);
+    await assert.rejects(run(["judge"], cli(lab)), /typesafe or vercel/);
+    const overridden = cli(lab, {
+      env: { CODEX_HOME: lab.home, COMPACT_ADVISER_JUDGE_PROVIDER: "nope" },
+    });
+    assert.match(
+      await run(["status"], overridden),
+      /Judge: none, COMPACT_ADVISER_JUDGE_PROVIDER names no provider/,
+    );
+    await assert.rejects(run(["key", "set"], overridden), /names no provider/);
+    assert.match(
+      await run(
+        ["judge", "vercel"],
+        cli(lab, { env: { CODEX_HOME: lab.home, COMPACT_ADVISER_JUDGE_PROVIDER: "typesafe" } }),
+      ),
+      /COMPACT_ADVISER_JUDGE_PROVIDER in the launch environment still wins/,
+    );
+  });
+});
+
 test("key set never writes the typed secret to the terminal", async () => {
   await withLab((lab) => {
     const secret = "tsk-must-never-echo";

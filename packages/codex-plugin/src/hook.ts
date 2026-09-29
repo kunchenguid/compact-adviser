@@ -14,10 +14,19 @@
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { ConfigStore } from "./config.ts";
+import { type Config, ConfigStore } from "./config.ts";
 import { DISABLE_ENV, disabledByEnv } from "./disable.ts";
-import { parseDotenvKey, type ResolvedTypesafeApiKey, resolveTypesafeApiKey } from "./env.ts";
-import { JudgeError, judge, qualifies, requestBody, typesafeEndpoint } from "./judge.ts";
+import {
+  KEY_NAMES,
+  PROVIDER_ENV,
+  parseDotenvKey,
+  type ResolvedJudge,
+  type ResolvedTypesafeApiKey,
+  resolveJudge,
+  resolveTypesafeApiKey,
+  SAVED_KEY_FIELDS,
+} from "./env.ts";
+import { judge, qualifies, requestBody } from "./judge.ts";
 import {
   appendRequestLogLine,
   errorLogLine,
@@ -67,26 +76,34 @@ function testEndpoint(env: NodeJS.ProcessEnv): string | undefined {
   return value !== undefined && LOOPBACK_ENDPOINT.test(value) ? value : undefined;
 }
 
-/** The live regression's fixture, else TypeSafe under `TYPESAFE_BASE` from the launch environment. */
-function judgeEndpoint(env: NodeJS.ProcessEnv): string {
-  const endpoint = testEndpoint(env) ?? typesafeEndpoint(env.TYPESAFE_BASE);
-  if (endpoint === undefined) throw new JudgeError("configuration");
-  return endpoint;
+/** The judge in effect: `COMPACT_ADVISER_JUDGE_PROVIDER` from the launch environment, then
+ * settings, then TypeSafe. */
+export function resolveProvider(
+  env: NodeJS.ProcessEnv,
+  config: Pick<Config, "judgeProvider">,
+): ResolvedJudge {
+  return resolveJudge(env[PROVIDER_ENV], config.judgeProvider);
 }
 
-/** Launch environment, then the key saved in settings, then `TYPESAFE_API_KEY` in `cwd/.env`. */
+/**
+ * The key of the provider in effect: its variable in the launch environment, then the key
+ * saved for it in settings, then its variable in `cwd/.env`. No provider means no key.
+ */
 export function resolveKey(
   env: NodeJS.ProcessEnv,
-  saved: string | undefined,
+  config: Pick<Config, "judgeProvider" | "typesafeApiKey" | "aiGatewayApiKey">,
   cwd: string,
 ): ResolvedTypesafeApiKey {
+  const provider = resolveProvider(env, config).provider;
+  if (provider === undefined) return { value: undefined, source: "missing" };
+  const name = KEY_NAMES[provider];
   let dotenv: string | undefined;
   try {
-    dotenv = parseDotenvKey(readFileSync(join(cwd, ".env"), "utf8"), "TYPESAFE_API_KEY");
+    dotenv = parseDotenvKey(readFileSync(join(cwd, ".env"), "utf8"), name);
   } catch {
     dotenv = undefined;
   }
-  return resolveTypesafeApiKey(env.TYPESAFE_API_KEY, saved, dotenv);
+  return resolveTypesafeApiKey(env[name], config[SAVED_KEY_FIELDS[provider]], dotenv);
 }
 
 async function checkpointKey(text: string): Promise<string> {
@@ -168,17 +185,22 @@ async function onStop(payload: HookPayload, environment: Environment): Promise<H
   if (!isInteractive(rollout)) return {};
   if (!payload.last_assistant_message?.trim()) return {};
 
-  const key = resolveKey(environment.env, config.typesafeApiKey, payload.cwd ?? process.cwd());
-  if (!key.value) return {};
+  const adapter = resolveProvider(environment.env, config).adapter;
+  const key = resolveKey(environment.env, config, payload.cwd ?? process.cwd());
+  if (!adapter || !key.value) return {};
 
   const tokens = rollout.tokens;
   if (typeof tokens !== "number" || !Number.isFinite(tokens)) return {};
   if (tokens < config.minContextTokens) return {};
   if (cooldownReason(state, tokens, now) !== undefined) return {};
 
-  const view = snapshot(rollout.messages, [key.value, config.typesafeApiKey], {
-    truncated: rollout.truncated,
-  });
+  const view = snapshot(
+    rollout.messages,
+    [key.value, config.typesafeApiKey, config.aiGatewayApiKey],
+    {
+      truncated: rollout.truncated,
+    },
+  );
   if (view.conversationTokens <= MINIMUM_CONVERSATION_TOKENS) return {};
   const fingerprint = await checkpointKey(view.checkpointText);
   if (state.lastHintKey === fingerprint) return {};
@@ -186,7 +208,7 @@ async function onStop(payload: HookPayload, environment: Environment): Promise<H
   let loggedBody: string | undefined;
   if (config.logRequests) {
     try {
-      loggedBody = requestBody(view.state, profile);
+      loggedBody = requestBody(view.state, profile, adapter);
       appendRequestLogLine(root, sessionId, requestLogLine(loggedBody));
     } catch {
       // Request logging must not replace or delay the judgment.
@@ -203,6 +225,7 @@ async function onStop(payload: HookPayload, environment: Environment): Promise<H
         endpoint: judgeEndpoint(environment.env),
       },
       profile,
+      adapter,
     );
   } catch (error) {
     if (config.logRequests) {
@@ -230,7 +253,7 @@ async function onStop(payload: HookPayload, environment: Environment): Promise<H
         root,
         sessionId,
         responseLogLine(
-          loggedBody ?? requestBody(view.state, profile),
+          loggedBody ?? requestBody(view.state, profile, adapter),
           result,
           fraction,
           undefined,

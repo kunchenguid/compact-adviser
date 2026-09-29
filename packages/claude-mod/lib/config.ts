@@ -2,12 +2,14 @@
 //
 // `mode`, `minContextTokens`, and `logRequests` are the plugin's manifest `userConfig` rows: the host
 // validates them, stores them in the user's settings.json, and shows them in /config.
-// `typesafeApiKey` is also a userConfig row so it lives in that same settings path, but this
-// module hides it from `/config` so the secret is never drawn there. Set, clear, and presence
-// are the compact-adviser pane's job.
+// `judgeProvider` is a userConfig row too: `typesafe` or `vercel` (Vercel's AI Gateway).
+// `typesafeApiKey` and `aiGatewayApiKey` are also userConfig rows so they live in that same
+// settings path, but this module hides them from `/config` so a secret is never drawn there.
+// Set, clear, and presence are the compact-adviser pane's job.
 // `autoAcknowledged` lives in the plugin's own store so that only this mod's confirmation
 // dialog can grant experimental automatic mode. A legacy `sharingConsent` field is ignored.
 
+import { JUDGE_PROVIDERS, type JudgeProvider } from "./judge.ts";
 import { parseProfile } from "./profile.ts";
 
 export type Mode = "hint" | "auto" | "off";
@@ -18,6 +20,13 @@ export const MINIMUM_KEY = `${PLUGIN}.minContextTokens`;
 export const LOG_KEY = `${PLUGIN}.logRequests`;
 export const PROFILE_KEY = `${PLUGIN}.profile`;
 export const API_KEY_KEY = `${PLUGIN}.typesafeApiKey`;
+export const JUDGE_KEY = `${PLUGIN}.judgeProvider`;
+export const GATEWAY_API_KEY_KEY = `${PLUGIN}.aiGatewayApiKey`;
+/** Each judge's saved-key row. */
+export const SAVED_KEY_ROWS: Readonly<Record<JudgeProvider, string>> = {
+  typesafe: API_KEY_KEY,
+  vercel: GATEWAY_API_KEY_KEY,
+};
 export const CONSENT_STORE_KEY = "preferences";
 export const DEFAULT_MINIMUM = 40000;
 export const MAX_SAVED_API_KEY_LENGTH = 1024;
@@ -27,6 +36,8 @@ export interface Config {
   minContextTokens: number;
   autoAcknowledged: boolean;
   logRequests: boolean;
+  /** The saved judge setting; the launch environment may still override it. */
+  judgeProvider?: JudgeProvider;
   profile?: string;
 }
 
@@ -49,11 +60,11 @@ export function parseMinimum(text: string): number {
   return number;
 }
 
-export function parseSavedApiKey(text: string): string {
+export function parseSavedApiKey(text: string, label = "TypeSafe API key"): string {
   const value = text.trim();
-  if (!value) throw new Error("Enter a TypeSafe API key, or cancel to leave it unchanged.");
+  if (!value) throw new Error(`Enter a ${label}, or cancel to leave it unchanged.`);
   if (value.length > MAX_SAVED_API_KEY_LENGTH) {
-    throw new Error("That value is too long to save as a TypeSafe API key.");
+    throw new Error(`That value is too long to save as a ${label}.`);
   }
   for (let i = 0; i < value.length; i++) {
     const code = value.charCodeAt(i);
@@ -126,6 +137,14 @@ export function readConfig(
       "Cannot read the compact-adviser request-log setting; no action is taken.",
     );
   }
+  const judgeProvider = row(JUDGE_KEY, "judgeProvider");
+  if (
+    judgeProvider !== undefined &&
+    judgeProvider !== "" &&
+    !JUDGE_PROVIDERS.includes(judgeProvider as JudgeProvider)
+  ) {
+    throw new SettingsError("Cannot read the compact-adviser judge setting; no action is taken.");
+  }
   const profile = row(PROFILE_KEY, "profile");
   parseProfile(profile);
   const consent = parseConsent(consentValue);
@@ -134,17 +153,20 @@ export function readConfig(
     minContextTokens: minimum,
     autoAcknowledged: consent.autoAcknowledged,
     logRequests: logRequests === true,
+    ...(judgeProvider ? { judgeProvider: judgeProvider as JudgeProvider } : {}),
     ...(profile !== undefined ? { profile: profile as string } : {}),
   };
 }
 
-/** Menu-saved TypeSafe key from live `/config` rows or the options this module loaded with. */
+/** A judge's menu-saved key from live `/config` rows or the options this module loaded with. */
 export function readSavedApiKey(
   rows: readonly ConfigRowLike[],
   loaded: Readonly<Record<string, unknown>> = {},
+  provider: JudgeProvider = "typesafe",
 ): string | undefined {
+  const key = SAVED_KEY_ROWS[provider];
   const value =
-    rows.find((candidate) => candidate.key === API_KEY_KEY)?.value ?? loaded.typesafeApiKey;
+    rows.find((candidate) => candidate.key === key)?.value ?? loaded[key.slice(PLUGIN.length + 1)];
   return typeof value === "string" && value.trim() !== "" ? value : undefined;
 }
 

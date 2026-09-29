@@ -5,23 +5,36 @@ import test from "node:test";
 import { lockSync } from "proper-lockfile";
 import { ConfigStore, DEFAULT_CONFIG, parseMinimum, parseSavedApiKey } from "../src/config.ts";
 import { RECENT_TAIL_MESSAGES, snapshot } from "../src/context.ts";
-import { parseDotenvKey, resolveTypesafeApiKey } from "../src/env.ts";
+import {
+  formatJudgeStatus,
+  parseDotenvKey,
+  parseJudgeProvider,
+  resolveJudge,
+  resolveJudgeApiKey,
+  resolveJudgeProvider,
+  resolveTypesafeApiKey,
+} from "../src/env.ts";
 import {
   DEFAULT_BASE,
   ENDPOINT,
   FLOOR_MAX,
   FLOOR_MIN,
   floorFor,
+  GATEWAY_ADAPTER,
+  GATEWAY_ENDPOINT,
+  GATEWAY_MODEL,
   JUDGE_UNAVAILABLE_MESSAGE,
   JudgeError,
   judge,
   judgeErrorMessage,
   MAX_REQUEST_BYTES,
+  parseGatewayJudgment,
   parseJudgment,
   qualifies,
   requestBody,
   score,
-  typesafeEndpoint,
+  TYPESAFE_API_BASE,
+  typesafeAdapter,
   USAGE_LOOSE_AT,
   USAGE_STRICT_UNTIL,
 } from "../src/judge.ts";
@@ -424,51 +437,284 @@ test("HTTP contract, output bound, status classification, and cancellation", asy
   );
 });
 
-test("TYPESAFE_BASE keeps the default, swaps the base, and rejects what is not an http(s) base", async () => {
-  assert.equal(ENDPOINT, `${DEFAULT_BASE}/v1/systemone`);
-  assert.equal(DEFAULT_BASE, "https://api.typesafe.ai");
-  for (const base of [undefined, "", "   "]) assert.equal(typesafeEndpoint(base), ENDPOINT);
-  for (const [base, endpoint] of [
-    ["https://api.typesafe.ai", ENDPOINT],
-    ["https://api.typesafe.ai/", ENDPOINT],
-    [
-      "https://proxy.example.test/vendors/typesafe",
-      "https://proxy.example.test/vendors/typesafe/v1/systemone",
-    ],
-    [
-      " https://proxy.example.test/vendors/typesafe// ",
-      "https://proxy.example.test/vendors/typesafe/v1/systemone",
-    ],
-    ["http://127.0.0.1:8787", "http://127.0.0.1:8787/v1/systemone"],
-    ["HTTPS://Proxy.Example.Test", "https://proxy.example.test/v1/systemone"],
-  ] as const) {
-    assert.equal(typesafeEndpoint(base), endpoint, base);
-  }
-  for (const base of [
-    "api.typesafe.ai",
-    "not a url",
-    "ftp://proxy.example.test",
-    "file:///tmp/typesafe",
-    "https://user:secret@proxy.example.test",
-    "https://proxy.example.test/?region=us",
-    "https://proxy.example.test/#top",
-  ]) {
-    assert.equal(typesafeEndpoint(base), undefined, base);
-  }
+/** Jev's answer as Vercel's AI Gateway returns it: the AI SDK evaluation shape. */
+function gatewayResponse(finished = 0.995, handsOn = 0.99) {
+  const direct = apiResponse(finished, handsOn);
+  return {
+    model: "typesafe-ai/jev",
+    answers: {
+      done: {
+        type: "choice",
+        choice: direct.answers.done.choice,
+        probabilities: direct.answers.done.probabilities,
+      },
+      shape: {
+        type: "choice",
+        choice: direct.answers.shape.choice,
+        probabilities: direct.answers.shape.probabilities,
+      },
+    },
+    usage: { inputTokens: 2000, outputTokens: 60 },
+    warnings: [],
+  };
+}
+
+test("the gateway provider sends the same state and questions to Vercel's evaluation endpoint", async () => {
+  let seen: RequestInit | undefined;
   let url: unknown;
-  await judge(
-    {},
-    "x",
+  const transport = (async (input, init) => {
+    url = input;
+    seen = init;
+    return new Response(JSON.stringify(gatewayResponse()), { status: 200 });
+  }) as typeof fetch;
+  const state = { phase: "done" };
+  const result = await judge(
+    state,
+    "fake-gateway-key",
     new AbortController().signal,
-    (async (input) => {
-      url = input;
-      return new Response(JSON.stringify(apiResponse()), { status: 200 });
-    }) as typeof fetch,
+    transport,
     undefined,
     undefined,
-    "https://proxy.example.test/v1/systemone",
+    GATEWAY_ADAPTER,
   );
-  assert.equal(url, "https://proxy.example.test/v1/systemone");
+  assert.equal(url, GATEWAY_ENDPOINT);
+  assert.equal(url, "https://ai-gateway.vercel.sh/v4/ai/evaluation-model");
+  assert.equal(seen?.redirect, "error");
+  const headers = seen?.headers as Record<string, string>;
+  assert.equal(headers.Authorization, "Bearer fake-gateway-key");
+  assert.equal(headers["ai-model-id"], GATEWAY_MODEL);
+  assert.equal(headers["ai-model-id"], "typesafe-ai/jev");
+  assert.equal(headers["ai-evaluation-model-specification-version"], "4");
+  assert.equal(headers["ai-gateway-auth-method"], "api-key");
+  assert.equal(headers["Content-Type"], "application/json");
+  assert.ok(!String(seen?.body).includes("fake-gateway-key"));
+  const body = JSON.parse(String(seen?.body));
+  // The same state and question set as a direct request; only the model moves to a header.
+  const direct = JSON.parse(requestBody(state));
+  assert.deepEqual(Object.keys(body), ["state", "questions"]);
+  assert.deepEqual(body.state, direct.state);
+  assert.deepEqual(body.questions, direct.questions);
+  const expected = parseJudgment(apiResponse());
+  assert.deepEqual(result.done.probabilities, expected.done.probabilities);
+  assert.deepEqual(result.shape.probabilities, expected.shape.probabilities);
+  assert.equal(result.done.choice, expected.done.choice);
+  assert.equal(result.done.confidence, undefined);
+  assert.equal(result.model, "typesafe-ai/jev");
+  assert.equal(score(result), score(parseJudgment(apiResponse())));
+  assert.equal(result.inputTokens, 2000);
+  assert.equal(result.outputTokens, 60);
+  assert.throws(
+    () => requestBody({ text: "x".repeat(MAX_REQUEST_BYTES) }, undefined, GATEWAY_ADAPTER),
+    (error: unknown) => error instanceof JudgeError && error.kind === "input",
+  );
+});
+
+test("a gateway reply is validated as strictly as a direct one", () => {
+  const base = parseGatewayJudgment(gatewayResponse());
+  assert.equal(base.done.choice, "finished");
+  assert.equal(base.model, "typesafe-ai/jev");
+  // TypeSafe's confidence is kept when the gateway passes on the provider metadata.
+  const withMetadata = parseGatewayJudgment({
+    ...gatewayResponse(),
+    providerMetadata: { typesafe: { confidence: { done: 0.88, shape: 0.95 } } },
+  });
+  assert.equal(withMetadata.done.confidence, 0.88);
+  assert.equal(withMetadata.shape.confidence, 0.95);
+  // Confidence is advisory and never scored: an out-of-range one is dropped, not trusted.
+  assert.equal(
+    parseGatewayJudgment({
+      ...gatewayResponse(),
+      providerMetadata: { typesafe: { confidence: { done: 3 } } },
+    }).done.confidence,
+    undefined,
+  );
+  // Model and usage are optional in the gateway's shape.
+  const bare = gatewayResponse() as Partial<ReturnType<typeof gatewayResponse>>;
+  delete bare.model;
+  delete bare.usage;
+  const minimal = parseGatewayJudgment(bare);
+  assert.equal(minimal.model, GATEWAY_MODEL);
+  assert.equal(minimal.inputTokens, 0);
+  // A choice without a distribution cannot be scored, so it is refused, never guessed at.
+  const noDistribution = gatewayResponse() as { answers: { done: { probabilities?: unknown } } };
+  delete noDistribution.answers.done.probabilities;
+  const noChoice = gatewayResponse();
+  noChoice.answers.shape.choice = "coordinating";
+  const wrongOptions = gatewayResponse();
+  wrongOptions.answers.done.probabilities = { yes: 1 } as never;
+  for (const malformed of [
+    null,
+    {},
+    { answers: null },
+    { answers: { done: gatewayResponse().answers.done } },
+    noDistribution,
+    noChoice,
+    wrongOptions,
+    { ...gatewayResponse(), usage: { inputTokens: -1, outputTokens: 1 } },
+    { ...gatewayResponse(), model: 7 },
+  ]) {
+    assert.throws(
+      () => parseGatewayJudgment(malformed),
+      (error: unknown) => error instanceof JudgeError && error.kind === "response",
+      JSON.stringify(malformed),
+    );
+  }
+  // A direct TypeSafe reply still requires its confidence.
+  const noConfidence = apiResponse() as { answers: { done: { confidence?: number } } };
+  delete noConfidence.answers.done.confidence;
+  assert.throws(() => parseJudgment(noConfidence));
+});
+
+test("gateway failures resolve to a JudgeError naming the gateway, never to a judgment", async () => {
+  const ask = (transport: typeof fetch, signal = new AbortController().signal) =>
+    judge({}, "x", signal, transport, 50, undefined, GATEWAY_ADAPTER);
+  for (const [status, kind] of [
+    [401, "authentication"],
+    [403, "authentication"],
+    [429, "rate-limit"],
+    [402, "server"],
+    [500, "server"],
+  ] as const) {
+    await assert.rejects(
+      ask((async () => new Response("{}", { status })) as typeof fetch),
+      (error: unknown) =>
+        error instanceof JudgeError &&
+        error.kind === kind &&
+        error.message === judgeErrorMessage(kind, "vercel") &&
+        error.message.includes("Vercel's AI Gateway"),
+    );
+  }
+  for (const text of [
+    "not json",
+    "{}",
+    JSON.stringify(apiResponse()).replace(/"probabilities"/g, '"p"'),
+    "x".repeat(40000),
+  ]) {
+    await assert.rejects(
+      ask((async () => new Response(text)) as typeof fetch),
+      (error: unknown) => error instanceof JudgeError && error.kind === "response",
+    );
+  }
+  await assert.rejects(
+    ask((async () => {
+      throw new TypeError("fetch failed");
+    }) as typeof fetch),
+    (error: unknown) =>
+      error instanceof JudgeError &&
+      error.kind === "network" &&
+      error.message.includes("could not reach Vercel's AI Gateway"),
+  );
+  await assert.rejects(
+    ask(
+      (async (_url, init) =>
+        new Promise((_resolve, reject) =>
+          init?.signal?.addEventListener("abort", () => reject(init.signal?.reason)),
+        )) as typeof fetch,
+    ),
+    (error: unknown) => error instanceof JudgeError && error.kind === "timeout",
+  );
+  assert.match(judgeErrorMessage("authentication", "vercel"), /Check the AI Gateway key/);
+  assert.match(judgeErrorMessage("server", "vercel"), /asked Jev through Vercel's AI Gateway/);
+  assert.equal(judgeErrorMessage("server"), judgeErrorMessage("server", "typesafe"));
+});
+
+test("the judge provider comes from the launch environment, then settings, then TypeSafe", () => {
+  assert.deepEqual(resolveJudgeProvider(undefined), { provider: "typesafe", source: "default" });
+  assert.deepEqual(resolveJudgeProvider("  "), { provider: "typesafe", source: "default" });
+  assert.deepEqual(resolveJudgeProvider(undefined, "vercel"), {
+    provider: "vercel",
+    source: "saved",
+  });
+  assert.deepEqual(resolveJudgeProvider("typesafe", "vercel"), {
+    provider: "typesafe",
+    source: "env",
+  });
+  assert.deepEqual(resolveJudgeProvider(" vercel ", "typesafe"), {
+    provider: "vercel",
+    source: "env",
+  });
+  // A value naming no provider selects none, so no judge is asked; it never falls back.
+  assert.deepEqual(resolveJudgeProvider("openai", "vercel"), {
+    provider: undefined,
+    source: "env",
+  });
+  assert.equal(parseJudgeProvider(" vercel "), "vercel");
+  assert.throws(() => parseJudgeProvider("gateway"), /typesafe or vercel/);
+  assert.equal(
+    formatJudgeStatus(resolveJudge(undefined, "vercel")),
+    "Judge: Jev through Vercel's AI Gateway (checkpoint context goes to Vercel's AI Gateway on its way to Jev)",
+  );
+  assert.equal(
+    formatJudgeStatus(resolveJudge(undefined)),
+    "Judge: TypeSafe Jev (checkpoint context goes to TypeSafe)",
+  );
+  assert.equal(
+    formatJudgeStatus(resolveJudge("openai", "vercel")),
+    "Judge: none, COMPACT_ADVISER_JUDGE_PROVIDER names no provider (use typesafe or vercel); no advice is given",
+  );
+  assert.equal(resolveJudge("vercel").adapter, GATEWAY_ADAPTER);
+  assert.equal(resolveJudge(undefined).adapter?.endpoint, ENDPOINT);
+});
+
+test("the TypeSafe adapter takes its base as an argument and changes nothing else", async () => {
+  let url: unknown;
+  let seen: RequestInit | undefined;
+  const transport = (async (input, init) => {
+    url = input;
+    seen = init;
+    return new Response(JSON.stringify(apiResponse()), { status: 200 });
+  }) as typeof fetch;
+  assert.equal(TYPESAFE_API_BASE, "https://api.typesafe.ai");
+  assert.equal(typesafeAdapter().endpoint, ENDPOINT);
+  assert.equal(ENDPOINT, "https://api.typesafe.ai/v1/systemone");
+  const adapter = typesafeAdapter("https://proxy.example.test/typesafe");
+  assert.deepEqual(adapter.headers("k"), typesafeAdapter().headers("k"));
+  assert.equal(requestBody({ phase: "done" }, undefined, adapter), requestBody({ phase: "done" }));
+  const result = await judge(
+    { phase: "done" },
+    "fake-test-key",
+    new AbortController().signal,
+    transport,
+    undefined,
+    undefined,
+    adapter,
+  );
+  assert.equal(url, "https://proxy.example.test/typesafe/v1/systemone");
+  assert.equal(
+    (seen?.headers as Record<string, string> | undefined)?.Authorization,
+    "Bearer fake-test-key",
+  );
+  assert.equal(seen?.body, requestBody({ phase: "done" }));
+  assert.deepEqual(result, parseJudgment(apiResponse()));
+});
+
+test("each provider resolves only its own key: env, then saved, then cwd .env", (t) => {
+  const dir = temp(t);
+  writeFileSync(
+    join(dir, ".env"),
+    "TYPESAFE_API_KEY=typesafe-from-file\nAI_GATEWAY_API_KEY=gateway-from-file\n",
+  );
+  const env = { TYPESAFE_API_KEY: "typesafe-from-env", AI_GATEWAY_API_KEY: "gateway-from-env" };
+  assert.deepEqual(resolveJudgeApiKey("vercel", env, dir, "gateway-saved"), {
+    value: "gateway-from-env",
+    source: "env",
+  });
+  assert.deepEqual(resolveJudgeApiKey("vercel", { TYPESAFE_API_KEY: "t" }, dir, "gateway-saved"), {
+    value: "gateway-saved",
+    source: "saved",
+  });
+  assert.deepEqual(resolveJudgeApiKey("vercel", { TYPESAFE_API_KEY: "t" }, dir), {
+    value: "gateway-from-file",
+    source: ".env",
+  });
+  assert.deepEqual(resolveJudgeApiKey("typesafe", { AI_GATEWAY_API_KEY: "g" }, dir), {
+    value: "typesafe-from-file",
+    source: ".env",
+  });
+  assert.deepEqual(resolveJudgeApiKey("vercel", { TYPESAFE_API_KEY: "t" }, temp(t)), {
+    value: undefined,
+    source: "missing",
+  });
 });
 
 test("judgment-failure notices explain the skip and which kinds can be temporary", () => {

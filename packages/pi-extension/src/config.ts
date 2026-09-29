@@ -12,6 +12,7 @@ import {
 } from "node:fs";
 import { dirname, join } from "node:path";
 import { lockSync } from "proper-lockfile";
+import { JUDGE_PROVIDERS, type JudgeProvider } from "./judge.ts";
 import { parseProfile } from "./profile.ts";
 
 export type Mode = "hint" | "auto" | "off";
@@ -23,6 +24,8 @@ export interface Config {
   autoAcknowledged: boolean;
   logRequests: boolean;
   typesafeApiKey?: string;
+  judgeProvider?: JudgeProvider;
+  aiGatewayApiKey?: string;
   profile?: string;
 }
 export const DEFAULT_CONFIG: Readonly<Config> = Object.freeze({
@@ -40,11 +43,11 @@ export function parseMinimum(text: string): number {
   }
   return number;
 }
-export function parseSavedApiKey(text: string): string {
+export function parseSavedApiKey(text: string, label = "TypeSafe API key"): string {
   const value = text.trim();
-  if (!value) throw new Error("Enter a TypeSafe API key, or cancel to leave it unchanged.");
+  if (!value) throw new Error(`Enter a ${label}, or cancel to leave it unchanged.`);
   if (value.length > MAX_SAVED_API_KEY_LENGTH) {
-    throw new Error("That value is too long to save as a TypeSafe API key.");
+    throw new Error(`That value is too long to save as a ${label}.`);
   }
   for (let i = 0; i < value.length; i++) {
     const code = value.charCodeAt(i);
@@ -53,6 +56,14 @@ export function parseSavedApiKey(text: string): string {
     }
   }
   return value;
+}
+/** A saved key: blank means none; one longer than any key this product saves is refused. */
+function savedKey(value: unknown): string | undefined {
+  const key = typeof value === "string" && value.trim() !== "" ? value.trim() : undefined;
+  if (key !== undefined && key.length > MAX_SAVED_API_KEY_LENGTH) {
+    throw new Error("Invalid or unsupported settings. Restore a valid version-1 configuration.");
+  }
+  return key;
 }
 function validate(value: unknown): Config {
   if (!value || typeof value !== "object" || Array.isArray(value))
@@ -66,18 +77,16 @@ function validate(value: unknown): Config {
     c.minContextTokens <= 0 ||
     typeof c.autoAcknowledged !== "boolean" ||
     (c.logRequests !== undefined && typeof c.logRequests !== "boolean") ||
-    (c.typesafeApiKey !== undefined && typeof c.typesafeApiKey !== "string")
+    (c.typesafeApiKey !== undefined && typeof c.typesafeApiKey !== "string") ||
+    (c.judgeProvider !== undefined &&
+      !JUDGE_PROVIDERS.includes(c.judgeProvider as JudgeProvider)) ||
+    (c.aiGatewayApiKey !== undefined && typeof c.aiGatewayApiKey !== "string")
   ) {
     throw new Error("Invalid or unsupported settings. Restore a valid version-1 configuration.");
   }
   parseProfile(c.profile);
-  const typesafeApiKey =
-    typeof c.typesafeApiKey === "string" && c.typesafeApiKey.trim() !== ""
-      ? c.typesafeApiKey.trim()
-      : undefined;
-  if (typesafeApiKey !== undefined && typesafeApiKey.length > MAX_SAVED_API_KEY_LENGTH) {
-    throw new Error("Invalid or unsupported settings. Restore a valid version-1 configuration.");
-  }
+  const typesafeApiKey = savedKey(c.typesafeApiKey);
+  const aiGatewayApiKey = savedKey(c.aiGatewayApiKey);
   return {
     version: 1,
     mode: c.mode as Mode,
@@ -85,6 +94,8 @@ function validate(value: unknown): Config {
     autoAcknowledged: c.autoAcknowledged,
     logRequests: c.logRequests === true,
     ...(typesafeApiKey !== undefined ? { typesafeApiKey } : {}),
+    ...(c.judgeProvider !== undefined ? { judgeProvider: c.judgeProvider as JudgeProvider } : {}),
+    ...(aiGatewayApiKey !== undefined ? { aiGatewayApiKey } : {}),
     ...(c.profile !== undefined ? { profile: c.profile as string } : {}),
   };
 }

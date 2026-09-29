@@ -15,6 +15,7 @@ import {
   autoFocused,
   commandRun,
   elements,
+  gatewayAnswer,
   interactiveStart,
   jevAnswer,
   KEY,
@@ -868,11 +869,11 @@ describe("commands", () => {
     await $.session.start(interactiveStart);
     await $.command.run(commandRun("sharing on"));
     expect(w.journal.toasts.at(-1)).toBe(
-      "Use /compact-adviser, auto, hint, off, status, threshold <tokens|default>, snooze or dismiss.",
+      "Use /compact-adviser, auto, hint, off, status, threshold <tokens|default>, judge <typesafe|vercel>, snooze or dismiss.",
     );
     await $.command.run(commandRun("sharing off"));
     expect(w.journal.toasts.at(-1)).toBe(
-      "Use /compact-adviser, auto, hint, off, status, threshold <tokens|default>, snooze or dismiss.",
+      "Use /compact-adviser, auto, hint, off, status, threshold <tokens|default>, judge <typesafe|vercel>, snooze or dismiss.",
     );
     expect(w.journal.asks).toHaveLength(0);
   });
@@ -883,7 +884,7 @@ describe("commands", () => {
     await $.command.run(commandRun("status"));
     const line = w.journal.logs.at(-1) ?? "";
     expect(line).toBe(
-      "Mode: hint. Minimum: 40,000 tokens. Context: 60,000 (36% of the context limit; hint floor 0.77). Key: env. No cooldown; semantic checks still apply. Claude Code auto-compacts at 167,000 tokens. Request log: off. Settings: /config (compact-adviser rows) and /compact-adviser.",
+      "Mode: hint. Minimum: 40,000 tokens. Context: 60,000 (36% of the context limit; hint floor 0.77). Judge: TypeSafe Jev (checkpoint context goes to TypeSafe). Key: env. No cooldown; semantic checks still apply. Claude Code auto-compacts at 167,000 tokens. Request log: off. Settings: /config (compact-adviser rows) and /compact-adviser.",
     );
     expect(line.includes(KEY)).toBe(false);
   });
@@ -922,8 +923,157 @@ describe("commands", () => {
     await $.session.start(interactiveStart);
     await $.command.run(commandRun("threshold"));
     expect(w.journal.toasts.at(-1)).toBe(
-      "Use /compact-adviser, auto, hint, off, status, threshold <tokens|default>, snooze or dismiss.",
+      "Use /compact-adviser, auto, hint, off, status, threshold <tokens|default>, judge <typesafe|vercel>, snooze or dismiss.",
     );
+  });
+});
+
+describe("the Vercel AI Gateway judge", () => {
+  const GATEWAY_KEY = "vck-gateway-fixture-key";
+
+  test("asks Jev through the gateway with the gateway key and the same questions", async ($, on) => {
+    const w = world(on, { judgeProvider: "vercel", gatewayKey: GATEWAY_KEY });
+    w.respond = async () => ({ status: 200, text: JSON.stringify(gatewayAnswer()) });
+    await $.session.start(interactiveStart);
+    await turnEnd($, w);
+    expect(w.journal.requests).toHaveLength(1);
+    const request = w.journal.requests[0] ?? { url: "", headers: {}, body: "" };
+    expect(request.url).toBe("https://ai-gateway.vercel.sh/v4/ai/evaluation-model");
+    expect(request.headers.Authorization).toBe(`Bearer ${GATEWAY_KEY}`);
+    expect(request.headers["ai-model-id"]).toBe("typesafe-ai/jev");
+    const body = JSON.parse(request.body);
+    expect(Object.keys(body)).toEqual(["state", "questions"]);
+    expect(Object.keys(body.questions)).toEqual(["done", "shape"]);
+    expect(request.body.includes(GATEWAY_KEY)).toBe(false);
+    expect(request.body.includes(KEY)).toBe(false);
+    expect(JSON.stringify(request.headers).includes(KEY)).toBe(false);
+    expect(hinted(w)).toBe(true);
+  });
+
+  test("never sends the TypeSafe key to the gateway; without its own key it asks nobody", async ($, on) => {
+    const w = world(on, { judgeProvider: "vercel" });
+    await $.session.start(interactiveStart);
+    await turnEnd($, w);
+    expect(w.journal.requests).toHaveLength(0);
+    await $.command.run(commandRun("status"));
+    expect(w.journal.logs.at(-1)).toContain(
+      "Judge: Jev through Vercel's AI Gateway (checkpoint context goes to Vercel's AI Gateway on its way to Jev). Key: missing.",
+    );
+  });
+
+  test("the launch environment's judge wins over the saved row; an unknown one asks nobody", async ($, on) => {
+    const w = world(on, { judgeEnv: "vercel", savedGatewayKey: "vck-saved" });
+    w.respond = async () => ({ status: 200, text: JSON.stringify(gatewayAnswer()) });
+    await $.session.start(interactiveStart);
+    await turnEnd($, w);
+    expect(w.journal.requests).toHaveLength(1);
+    expect(w.journal.requests[0]?.headers.Authorization).toBe("Bearer vck-saved");
+  });
+
+  test("a judge setting naming no provider gives no advice and says so", async ($, on) => {
+    const w = world(on, { judgeEnv: "openai", gatewayKey: GATEWAY_KEY });
+    await $.session.start(interactiveStart);
+    await turnEnd($, w);
+    expect(w.journal.requests).toHaveLength(0);
+    await $.command.run(commandRun("status"));
+    expect(w.journal.logs.at(-1)).toContain(
+      "Judge: none, COMPACT_ADVISER_JUDGE_PROVIDER names no provider (use typesafe or vercel); no advice is given.",
+    );
+  });
+
+  test("the gateway key comes from cwd .env when neither env nor a saved key has one", async ($, on) => {
+    const w = world(on, {
+      judgeProvider: "vercel",
+      dotenv: "TYPESAFE_API_KEY=typesafe-dotenv\nAI_GATEWAY_API_KEY=gateway-dotenv\n",
+    });
+    w.respond = async () => ({ status: 200, text: JSON.stringify(gatewayAnswer()) });
+    await $.session.start(interactiveStart);
+    await turnEnd($, w);
+    expect(w.journal.requests[0]?.headers.Authorization).toBe("Bearer gateway-dotenv");
+  });
+
+  for (const [name, reply] of [
+    ["an authentication failure", { status: 401, text: "{}" }],
+    ["a server error", { status: 502, text: "{}" }],
+    ["a TypeSafe-shaped reply without distributions", { status: 200, text: '{"answers":{}}' }],
+    ["malformed JSON", { status: 200, text: "not json" }],
+  ] as const) {
+    test(`${name} from the gateway gives no advice and backs off`, async ($, on) => {
+      const w = world(on, { judgeProvider: "vercel", gatewayKey: GATEWAY_KEY });
+      w.respond = async () => reply;
+      await $.session.start(interactiveStart);
+      await turnEnd($, w);
+      expect(w.journal.requests).toHaveLength(1);
+      expect(hinted(w)).toBe(false);
+      expect(w.journal.compactions).toHaveLength(0);
+      expect(w.journal.toasts.at(-1)).toContain("asked Jev through Vercel's AI Gateway");
+      const stored = w.store.get(`session:${SESSION}`) as { failures?: number } | undefined;
+      expect(stored?.failures).toBe(1);
+    });
+  }
+
+  test("judge vercel saves the row and says where checkpoint context now goes", async ($, on) => {
+    const w = world(on);
+    await $.session.start(interactiveStart);
+    await $.command.run(commandRun("judge vercel"));
+    await drain(w);
+    expect(w.rows.get(`${PLUGIN}.judgeProvider`)).toBe("vercel");
+    expect(w.journal.toasts.join("\n")).toContain(
+      "Judge saved (all sessions): Jev through Vercel's AI Gateway (checkpoint context goes to Vercel's AI Gateway on its way to Jev).",
+    );
+    await $.command.run(commandRun("judge nope"));
+    expect(w.journal.toasts.at(-1)).toBe("Enter typesafe or vercel.");
+    expect(w.rows.get(`${PLUGIN}.judgeProvider`)).toBe("vercel");
+  });
+
+  test("the pane chooses the judge, and its key row then names the gateway key", async ($, on) => {
+    const w = world(on, { key: undefined });
+    await $.session.start(interactiveStart);
+    await $.command.run(commandRun(""));
+    await $.ui.render(pane);
+    await $.ui.press({ plugin: PLUGIN, key: "menu:judge" });
+    let tree = await $.ui.render(pane);
+    expect(rows(tree)).toEqual(["● TypeSafe (default)", "Vercel AI Gateway", "Back"]);
+    await $.ui.press({ plugin: PLUGIN, key: "judge:vercel" });
+    await drain(w);
+    expect(w.rows.get(`${PLUGIN}.judgeProvider`)).toBe("vercel");
+    tree = await $.ui.render(pane);
+    expect(rows(tree)[3]).toBe("Judge Vercel AI Gateway");
+    expect(rows(tree)[4]).toBe("AI Gateway API key missing");
+    await $.ui.press({ plugin: PLUGIN, key: "menu:aiGatewayApiKey" });
+    tree = await $.ui.render(pane);
+    expect(text(tree)).toContain("› AI Gateway API key");
+    expect(text(tree)).toContain(
+      "No key in effect. Save one here, or set AI_GATEWAY_API_KEY in the environment or a .env file.",
+    );
+    const field = elements(tree).find((e) => e.type === "Input");
+    expect(field?.props.key).toBe("aiGatewayApiKey");
+    expect(field?.props.placeholder).toBe("paste a key to save it");
+  });
+
+  test("a saved gateway key is listed and cleared apart from the TypeSafe key", async ($, on) => {
+    const secret = "vck-menu-fixture-not-for-display";
+    const w = world(on, {
+      judgeProvider: "vercel",
+      savedGatewayKey: secret,
+      savedKey: "tsk-saved-stays",
+    });
+    await $.session.start(interactiveStart);
+    await $.command.run(commandRun(""));
+    let tree = await $.ui.render(pane);
+    expect(rows(tree)[4]).toBe("AI Gateway API key saved");
+    expect(text(tree)).not.toContain(secret);
+    await $.ui.press({ plugin: PLUGIN, key: "menu:aiGatewayApiKey" });
+    tree = await $.ui.render(pane);
+    expect(text(tree)).toContain("In effect: the key saved here, for all sessions.");
+    await $.ui.press({ plugin: PLUGIN, key: "clearKey" });
+    await drain(w);
+    expect(w.rows.get(`${PLUGIN}.aiGatewayApiKey`)).toBe("");
+    expect(w.rows.get(`${PLUGIN}.typesafeApiKey`)).toBe("tsk-saved-stays");
+    expect(w.journal.toasts.at(-1)).toBe(
+      "Saved AI Gateway API key cleared (all sessions). Launch environment and .env still apply.",
+    );
+    expect(w.journal.toasts.every((line) => !line.includes(secret))).toBe(true);
   });
 });
 
@@ -938,6 +1088,7 @@ describe("settings pane", () => {
       "Mode Hints only (default)",
       "Minimum context 40,000 tokens",
       "Log TypeSafe requests Off",
+      "Judge TypeSafe (default)",
       "TypeSafe API key from the environment",
       "Reset minimum to 40,000",
       "Status",
@@ -996,7 +1147,7 @@ describe("settings pane", () => {
     await $.ui.press({ plugin: PLUGIN, key: "menu:mode" });
     await $.ui.render(pane);
     await $.ui.press({ plugin: PLUGIN, key: "back" });
-    expect(rows(await $.ui.render(pane))).toHaveLength(7);
+    expect(rows(await $.ui.render(pane))).toHaveLength(8);
 
     await $.ui.press({ plugin: PLUGIN, key: "menu:minimum" });
     tree = await $.ui.render(pane);
@@ -1011,7 +1162,7 @@ describe("settings pane", () => {
     await $.ui.press({ plugin: PLUGIN, key: "back" });
     await drain(w);
     tree = await $.ui.render(pane);
-    expect(rows(tree)).toHaveLength(7);
+    expect(rows(tree)).toHaveLength(8);
     expect(autoFocused(tree)).toBe("menu:minimum");
     expect(w.journal.closed).toEqual([]);
   });
@@ -1056,7 +1207,7 @@ describe("settings pane", () => {
     await $.ui.press({ plugin: PLUGIN, key: "menu:status" });
     await drain(w);
     expect(text(await $.ui.render(pane))).toContain(
-      "Mode: off. Minimum: 40,000 tokens. Context: 60,000 (36% of the context limit; hint floor 0.77). Key: env.",
+      "Mode: off. Minimum: 40,000 tokens. Context: 60,000 (36% of the context limit; hint floor 0.77). Judge: TypeSafe Jev (checkpoint context goes to TypeSafe). Key: env.",
     );
     expect(text(await $.ui.render(pane))).not.toContain("Sharing:");
     await $.ui.press({ plugin: PLUGIN, key: "menu:close" });
@@ -1072,7 +1223,7 @@ describe("settings pane", () => {
     });
     await $.session.start(interactiveStart);
     let tree = await $.ui.render(pane);
-    expect(rows(tree)[3]).toBe("TypeSafe API key saved");
+    expect(rows(tree)[4]).toBe("TypeSafe API key saved");
     expect(text(tree)).not.toContain(secret);
     await $.ui.press({ plugin: PLUGIN, key: "menu:typesafeApiKey" });
     tree = await $.ui.render(pane);
@@ -1097,7 +1248,7 @@ describe("settings pane", () => {
     expect(w.journal.toasts.every((line) => !line.includes(secret))).toBe(true);
     // Clearing removes only the saved key: the .env one now applies, and the list says so.
     tree = await $.ui.render(pane);
-    expect(rows(tree)[3]).toBe("TypeSafe API key from .env");
+    expect(rows(tree)[4]).toBe("TypeSafe API key from .env");
     expect(text(tree)).not.toContain(secret);
     expect(text(tree)).not.toContain("tsk-dotenv");
     await $.ui.press({ plugin: PLUGIN, key: "menu:typesafeApiKey" });
@@ -1118,7 +1269,7 @@ describe("settings pane", () => {
     const w = world(on, { savedKey: secret });
     await $.session.start(interactiveStart);
     let tree = await $.ui.render(pane);
-    expect(rows(tree)[3]).toBe("TypeSafe API key from the environment");
+    expect(rows(tree)[4]).toBe("TypeSafe API key from the environment");
     await $.ui.press({ plugin: PLUGIN, key: "menu:typesafeApiKey" });
     tree = await $.ui.render(pane);
     expect(text(tree)).toContain(
@@ -1130,7 +1281,7 @@ describe("settings pane", () => {
     await $.ui.press({ plugin: PLUGIN, key: "clearKey" });
     await drain(w);
     expect(w.rows.get(`${PLUGIN}.typesafeApiKey`)).toBe("");
-    expect(rows(await $.ui.render(pane))[3]).toBe("TypeSafe API key from the environment");
+    expect(rows(await $.ui.render(pane))[4]).toBe("TypeSafe API key from the environment");
   });
 
   test("a denied clear keeps the key view and the saved key", async ($, on) => {
@@ -1153,7 +1304,7 @@ describe("settings pane", () => {
   test("without any key the list says so and the view explains where one can come from", async ($, on) => {
     world(on, { key: undefined });
     await $.session.start(interactiveStart);
-    expect(rows(await $.ui.render(pane))[3]).toBe("TypeSafe API key missing");
+    expect(rows(await $.ui.render(pane))[4]).toBe("TypeSafe API key missing");
     await $.ui.press({ plugin: PLUGIN, key: "menu:typesafeApiKey" });
     const tree = await $.ui.render(pane);
     expect(text(tree)).toContain(

@@ -56,6 +56,21 @@ export function jevAnswer(v: Verdict = {}) {
   };
 }
 
+/** The same judgment as `jevAnswer`, in the shape Vercel's AI Gateway returns it. */
+export function gatewayAnswer(v: Verdict = {}) {
+  const direct = jevAnswer(v);
+  const answer = ({ type, choice, probabilities }: (typeof direct.answers)["done"]) => ({
+    type,
+    choice,
+    probabilities,
+  });
+  return {
+    model: "typesafe-ai/jev",
+    answers: { done: answer(direct.answers.done), shape: answer(direct.answers.shape) },
+    usage: { inputTokens: 2500, outputTokens: 0 },
+  };
+}
+
 export type World = {
   clock: MockClock;
   store: Map<string, unknown>;
@@ -96,6 +111,13 @@ export type WorldOptions = {
   store?: Record<string, unknown>;
   /** Text `$.fs.read(".env")` should return; omit to treat the file as missing. */
   dotenv?: string;
+  /** `AI_GATEWAY_API_KEY` in the launch environment; omit to leave it unset. */
+  gatewayKey?: string;
+  /** `COMPACT_ADVISER_JUDGE_PROVIDER` in the launch environment; omit to leave it unset. */
+  judgeEnv?: string;
+  /** The saved `judgeProvider` row; the host's default is `typesafe`. */
+  judgeProvider?: string;
+  savedGatewayKey?: string;
 };
 
 /** A transcript whose own text is well over the 20k-token useful-history floor. */
@@ -134,6 +156,8 @@ export function world(on: On, options: WorldOptions = {}): World {
     HOME: "/tmp/fixture-home",
     ...(functionHooks === undefined ? {} : { CLAUDE_CODE_ENABLE_FUNCTION_HOOKS: functionHooks }),
     ...(key === undefined ? {} : { TYPESAFE_API_KEY: key }),
+    ...(options.gatewayKey === undefined ? {} : { AI_GATEWAY_API_KEY: options.gatewayKey }),
+    ...(options.judgeEnv === undefined ? {} : { COMPACT_ADVISER_JUDGE_PROVIDER: options.judgeEnv }),
     ...(options.endpoint === undefined ? {} : { COMPACT_ADVISER_TEST_ENDPOINT: options.endpoint }),
     ...(options.disable === undefined ? {} : { COMPACT_ADVISER_DISABLE: options.disable }),
     ...(options.base === undefined ? {} : { TYPESAFE_BASE: options.base }),
@@ -180,6 +204,8 @@ export function world(on: On, options: WorldOptions = {}): World {
     [`${PLUGIN}.minContextTokens`, options.minimum ?? 40000],
     [`${PLUGIN}.logRequests`, options.logRequests ?? false],
     [`${PLUGIN}.typesafeApiKey`, options.savedKey ?? ""],
+    [`${PLUGIN}.judgeProvider`, options.judgeProvider ?? "typesafe"],
+    [`${PLUGIN}.aiGatewayApiKey`, options.savedGatewayKey ?? ""],
   ]);
   let configDenial: string | undefined;
   const w: World = {
