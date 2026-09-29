@@ -7,6 +7,7 @@ import { ConfigStore, DEFAULT_CONFIG, parseMinimum, parseSavedApiKey } from "../
 import { RECENT_TAIL_MESSAGES, snapshot } from "../src/context.ts";
 import { parseDotenvKey, resolveTypesafeApiKey } from "../src/env.ts";
 import {
+  DEFAULT_BASE,
   ENDPOINT,
   FLOOR_MAX,
   FLOOR_MIN,
@@ -20,6 +21,7 @@ import {
   qualifies,
   requestBody,
   score,
+  typesafeEndpoint,
   USAGE_LOOSE_AT,
   USAGE_STRICT_UNTIL,
 } from "../src/judge.ts";
@@ -422,6 +424,53 @@ test("HTTP contract, output bound, status classification, and cancellation", asy
   );
 });
 
+test("TYPESAFE_BASE keeps the default, swaps the base, and rejects what is not an http(s) base", async () => {
+  assert.equal(ENDPOINT, `${DEFAULT_BASE}/v1/systemone`);
+  assert.equal(DEFAULT_BASE, "https://api.typesafe.ai");
+  for (const base of [undefined, "", "   "]) assert.equal(typesafeEndpoint(base), ENDPOINT);
+  for (const [base, endpoint] of [
+    ["https://api.typesafe.ai", ENDPOINT],
+    ["https://api.typesafe.ai/", ENDPOINT],
+    [
+      "https://proxy.example.test/vendors/typesafe",
+      "https://proxy.example.test/vendors/typesafe/v1/systemone",
+    ],
+    [
+      " https://proxy.example.test/vendors/typesafe// ",
+      "https://proxy.example.test/vendors/typesafe/v1/systemone",
+    ],
+    ["http://127.0.0.1:8787", "http://127.0.0.1:8787/v1/systemone"],
+    ["HTTPS://Proxy.Example.Test", "https://proxy.example.test/v1/systemone"],
+  ] as const) {
+    assert.equal(typesafeEndpoint(base), endpoint, base);
+  }
+  for (const base of [
+    "api.typesafe.ai",
+    "not a url",
+    "ftp://proxy.example.test",
+    "file:///tmp/typesafe",
+    "https://user:secret@proxy.example.test",
+    "https://proxy.example.test/?region=us",
+    "https://proxy.example.test/#top",
+  ]) {
+    assert.equal(typesafeEndpoint(base), undefined, base);
+  }
+  let url: unknown;
+  await judge(
+    {},
+    "x",
+    new AbortController().signal,
+    (async (input) => {
+      url = input;
+      return new Response(JSON.stringify(apiResponse()), { status: 200 });
+    }) as typeof fetch,
+    undefined,
+    undefined,
+    "https://proxy.example.test/v1/systemone",
+  );
+  assert.equal(url, "https://proxy.example.test/v1/systemone");
+});
+
 test("judgment-failure notices explain the skip and which kinds can be temporary", () => {
   for (const kind of ["timeout", "network", "rate-limit", "server", "response"] as const) {
     const message = judgeErrorMessage(kind);
@@ -432,7 +481,7 @@ test("judgment-failure notices explain the skip and which kinds can be temporary
     assert.match(message, /try again later/);
     assert.match(message, /unless it keeps repeating/);
   }
-  for (const kind of ["authentication", "input"] as const) {
+  for (const kind of ["authentication", "input", "configuration"] as const) {
     const message = judgeErrorMessage(kind);
     assert.match(message, /asked TypeSafe \(Jev\)/);
     assert.match(message, /left unchanged on purpose/);
@@ -442,6 +491,7 @@ test("judgment-failure notices explain the skip and which kinds can be temporary
   }
   assert.match(judgeErrorMessage("authentication"), /TypeSafe key configuration/);
   assert.match(judgeErrorMessage("input"), /size limit/);
+  assert.match(judgeErrorMessage("configuration"), /Fix or unset TYPESAFE_BASE/);
   assert.match(JUDGE_UNAVAILABLE_MESSAGE, /can be temporary/);
 });
 

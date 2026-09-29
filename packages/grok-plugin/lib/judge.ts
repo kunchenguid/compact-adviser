@@ -8,7 +8,34 @@
 
 import type { JudgeProfile } from "./profile.ts";
 
-export const ENDPOINT = "https://api.typesafe.ai/v1/systemone";
+export const DEFAULT_BASE = "https://api.typesafe.ai";
+export const ENDPOINT = `${DEFAULT_BASE}/v1/systemone`;
+
+/**
+ * The judge endpoint under a `TYPESAFE_BASE` override: unset or blank keeps TypeSafe's own
+ * base, trailing slashes are dropped, and `/v1/systemone` is appended as with the default.
+ * Anything but a plain http(s) base (no credentials, query or fragment) is undefined, which
+ * callers treat as invalid configuration: no request and no advice, never an affirmative one.
+ */
+export function typesafeEndpoint(base: string | undefined): string | undefined {
+  const value = base?.trim() ?? "";
+  if (value === "") return ENDPOINT;
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    return undefined;
+  }
+  if (
+    (url.protocol !== "https:" && url.protocol !== "http:") ||
+    url.username !== "" ||
+    url.password !== "" ||
+    value.includes("?") ||
+    value.includes("#")
+  )
+    return undefined;
+  return `${url.origin}${url.pathname.replace(/\/+$/, "")}/v1/systemone`;
+}
 export const MAX_REQUEST_BYTES = 32000;
 export const MAX_RESPONSE_BYTES = 32768;
 export const TIMEOUT_MS = 2000;
@@ -74,7 +101,8 @@ export type JudgeErrorKind =
   | "rate-limit"
   | "server"
   | "response"
-  | "input";
+  | "input"
+  | "configuration";
 
 const TRANSIENT_JUDGE_KINDS: ReadonlySet<JudgeErrorKind> = new Set([
   "timeout",
@@ -92,6 +120,7 @@ const JUDGE_KIND_CAUSE: Record<JudgeErrorKind, string> = {
   server: "TypeSafe returned a server error",
   response: "TypeSafe's reply was not a usable judgment",
   input: "this checkpoint is too large to send",
+  configuration: "TYPESAFE_BASE is not a valid http or https URL",
 };
 
 export function judgeErrorMessage(kind: JudgeErrorKind): string {
@@ -100,6 +129,9 @@ export function judgeErrorMessage(kind: JudgeErrorKind): string {
     "Context was left unchanged on purpose so a compact or hint cannot come from a bad answer.";
   if (kind === "authentication") {
     return `${core} Check the TypeSafe key configuration; this is not a temporary glitch.`;
+  }
+  if (kind === "configuration") {
+    return `${core} Fix or unset TYPESAFE_BASE; this is not a temporary glitch.`;
   }
   if (kind === "input") {
     return `${core} This is a size limit, not a temporary glitch.`;

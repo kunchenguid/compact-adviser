@@ -2,8 +2,10 @@ import assert from "node:assert/strict";
 import { existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import test, { type TestContext } from "node:test";
 import {
+  ENDPOINT,
   JUDGE_UNAVAILABLE_MESSAGE,
   JudgeError,
+  judgeErrorMessage,
   parseJudgment,
   requestBody,
   score,
@@ -518,6 +520,52 @@ test("a judgment failure logs the error kind without the key", async (t) => {
   assert.deepEqual(lines[1].error, { kind: "unavailable" });
   const logged = readFileSync(requestLogPath(h.dir), "utf8");
   assert.ok(!logged.includes(secret));
+});
+
+test("TYPESAFE_BASE redirects the product's judge and an invalid base asks nobody", async (t) => {
+  const previous = { base: process.env.TYPESAFE_BASE, fetch: globalThis.fetch };
+  const urls: string[] = [];
+  globalThis.fetch = (async (input: string | URL | Request) => {
+    urls.push(String(input));
+    return new Response(JSON.stringify(apiResponse()), { status: 200 });
+  }) as typeof fetch;
+  t.after(() => {
+    globalThis.fetch = previous.fetch;
+    if (previous.base === undefined) delete process.env.TYPESAFE_BASE;
+    else process.env.TYPESAFE_BASE = previous.base;
+  });
+  for (const [base, expected] of [
+    [undefined, ENDPOINT],
+    [
+      "https://proxy.example.test/vendors/typesafe/",
+      "https://proxy.example.test/vendors/typesafe/v1/systemone",
+    ],
+  ] as const) {
+    if (base === undefined) delete process.env.TYPESAFE_BASE;
+    else process.env.TYPESAFE_BASE = base;
+    const h = harness(t);
+    h.install("0.82.0", "test-key", true);
+    h.enable();
+    urls.length = 0;
+    await h.fire("agent_settled");
+    assert.deepEqual(urls, [expected]);
+    assert.ok(showedHint(h));
+  }
+  process.env.TYPESAFE_BASE = "api.example.test";
+  const h = harness(t);
+  h.install("0.82.0", "test-key", true);
+  h.enable();
+  h.store.update({ logRequests: true });
+  urls.length = 0;
+  await h.fire("agent_settled");
+  assert.deepEqual(urls, []);
+  assert.ok(!showedHint(h));
+  assert.ok(h.notifications.includes(judgeErrorMessage("configuration")));
+  const lines = readFileSync(requestLogPath(h.dir), "utf8")
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line));
+  assert.deepEqual(lines.at(-1).error, { kind: "configuration" });
 });
 
 test("a JudgeError logs its kind and not its message", async (t) => {

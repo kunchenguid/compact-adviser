@@ -18,10 +18,12 @@ import { formatKeyStatus, type ResolvedTypesafeApiKey, resolveTypesafeApiKey } f
 import {
   floorFor,
   JUDGE_UNAVAILABLE_MESSAGE,
+  JudgeError,
   type Judgment,
   judge,
   qualifies,
   requestBody,
+  typesafeEndpoint,
 } from "./judge.ts";
 import { promptSecret } from "./key-input.ts";
 import { appendErrorLog, appendRequestLog, appendResponseLog, requestLogPath } from "./log.ts";
@@ -77,7 +79,11 @@ export function installAdviser(pi: ExtensionAPI, options: Options): void {
   const now = options.now ?? Date.now;
   const evaluate =
     options.evaluate ??
-    ((state, key, signal, profile) => judge(state, key, signal, undefined, undefined, profile));
+    ((state, key, signal, profile) => {
+      const endpoint = typesafeEndpoint(process.env.TYPESAFE_BASE);
+      if (endpoint === undefined) return Promise.reject(new JudgeError("configuration"));
+      return judge(state, key, signal, undefined, undefined, profile, endpoint);
+    });
   const [major, minor] = options.version.split(".").map(Number);
   const supported = Number.isFinite(major) && (major > 0 || minor >= 82);
   let generation = 0;

@@ -613,6 +613,35 @@ describe("turn-end gates", () => {
   });
 });
 
+describe("the TYPESAFE_BASE override", () => {
+  for (const [base, url] of [
+    ["", "https://api.typesafe.ai/v1/systemone"],
+    [
+      "https://proxy.example.test/vendors/typesafe/",
+      "https://proxy.example.test/vendors/typesafe/v1/systemone",
+    ],
+  ] as const) {
+    test(`TYPESAFE_BASE=${JSON.stringify(base)} sends the judgment to ${url}`, async ($, on) => {
+      const w = world(on, { base });
+      await $.session.start(interactiveStart);
+      await turnEnd($, w);
+      expect(w.journal.requests.map((request) => request.url)).toEqual([url]);
+      expect(hinted(w)).toBe(true);
+    });
+  }
+
+  test("an invalid TYPESAFE_BASE asks nobody, gives no advice, and says why", async ($, on) => {
+    const w = world(on, { base: "api.example.test", logRequests: true });
+    await $.session.start(interactiveStart);
+    await turnEnd($, w);
+    expect(w.journal.requests).toHaveLength(0);
+    expect(hinted(w)).toBe(false);
+    expect(w.journal.compactions).toHaveLength(0);
+    expect(w.journal.toasts).toContain(judgeErrorMessage("configuration"));
+    expect(lastJsonl(w.journal.fsWrites.at(-1)).error).toEqual({ kind: "configuration" });
+  });
+});
+
 describe("compaction cooldown", () => {
   test("any external compaction resets counters; judging waits for 20k fresh tokens and 3 exchanges", async ($, on) => {
     const w = world(on);

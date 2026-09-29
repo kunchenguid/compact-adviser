@@ -86,6 +86,8 @@ export type WorldOptions = {
   disable?: string;
   key?: string | undefined;
   endpoint?: string;
+  /** The `TYPESAFE_BASE` override; omit to leave the variable unset. */
+  base?: string;
   consent?: { autoAcknowledged: boolean } | "absent" | unknown;
   mode?: string;
   minimum?: number;
@@ -134,6 +136,7 @@ export function world(on: On, options: WorldOptions = {}): World {
     ...(key === undefined ? {} : { TYPESAFE_API_KEY: key }),
     ...(options.endpoint === undefined ? {} : { COMPACT_ADVISER_TEST_ENDPOINT: options.endpoint }),
     ...(options.disable === undefined ? {} : { COMPACT_ADVISER_DISABLE: options.disable }),
+    ...(options.base === undefined ? {} : { TYPESAFE_BASE: options.base }),
   });
   const consent = "consent" in options ? options.consent : "absent";
   // The plugin store, in memory and visible to the test.

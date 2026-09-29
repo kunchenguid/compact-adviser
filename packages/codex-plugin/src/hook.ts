@@ -17,7 +17,7 @@ import { join } from "node:path";
 import { ConfigStore } from "./config.ts";
 import { DISABLE_ENV, disabledByEnv } from "./disable.ts";
 import { parseDotenvKey, type ResolvedTypesafeApiKey, resolveTypesafeApiKey } from "./env.ts";
-import { judge, qualifies, requestBody } from "./judge.ts";
+import { JudgeError, judge, qualifies, requestBody, typesafeEndpoint } from "./judge.ts";
 import {
   appendRequestLogLine,
   errorLogLine,
@@ -65,6 +65,13 @@ export function isInteractive(rollout: Pick<Rollout, "originator">): boolean {
 function testEndpoint(env: NodeJS.ProcessEnv): string | undefined {
   const value = env.COMPACT_ADVISER_TEST_ENDPOINT;
   return value !== undefined && LOOPBACK_ENDPOINT.test(value) ? value : undefined;
+}
+
+/** The live regression's fixture, else TypeSafe under `TYPESAFE_BASE` from the launch environment. */
+function judgeEndpoint(env: NodeJS.ProcessEnv): string {
+  const endpoint = testEndpoint(env) ?? typesafeEndpoint(env.TYPESAFE_BASE);
+  if (endpoint === undefined) throw new JudgeError("configuration");
+  return endpoint;
 }
 
 /** Launch environment, then the key saved in settings, then `TYPESAFE_API_KEY` in `cwd/.env`. */
@@ -186,7 +193,6 @@ async function onStop(payload: HookPayload, environment: Environment): Promise<H
     }
   }
 
-  const endpoint = testEndpoint(environment.env);
   let result: Awaited<ReturnType<typeof judge>>;
   try {
     result = await judge(
@@ -194,7 +200,7 @@ async function onStop(payload: HookPayload, environment: Environment): Promise<H
       key.value,
       {
         ...cancellableJudgeTransport(environment.fetch),
-        ...(endpoint ? { endpoint } : {}),
+        endpoint: judgeEndpoint(environment.env),
       },
       profile,
     );

@@ -38,7 +38,7 @@ Judgment is two one-sentence Jev questions in one request (is the unit finished;
 
 Prerequisites: Node 22+ (22.18+ for Codex and Grok), and one of [Pi](https://pi.dev) 0.82.0 or newer (verified on **0.85.1**), Claude Code 2.1.274 or newer (verified on **2.1.275**), Codex CLI 0.153.0 or newer (verified on **0.153.4**), or [Grok Build](https://docs.x.ai/build/overview) 1.0.34 or newer (verified on **1.0.34**), plus a [TypeSafe API key](https://console.typesafe.ai/settings/keys). Supply it as `TYPESAFE_API_KEY` in the launch environment or put it in the session cwd's `./.env`; Pi and Claude Code can also save it through their settings, while Codex and Grok provide an external compact-adviser CLI. Jev is TypeSafe's structured decision model; this package asks it two one-sentence classification questions and never asks it to write a summary.
 
-Installing the package is consent to send eligible checkpoint context to TypeSafe when a key is available and the other product gates pass.
+Installing the package is consent to send eligible checkpoint context to TypeSafe when a key is available and the other product gates pass. With `TYPESAFE_BASE` set, that context and the key go to that base instead.
 
 ### Pi
 
@@ -125,6 +125,7 @@ On Grok, save the TypeSafe key as `TYPESAFE_API_KEY` or a cwd `.env`, or with th
 | Variable | Effect |
 | --- | --- |
 | `TYPESAFE_API_KEY` | The Jev key; a saved key or the session cwd's `./.env` is used when this is unset |
+| `TYPESAFE_BASE` | Replaces the TypeSafe API base URL, `https://api.typesafe.ai` by default; the request goes to `<base>/v1/systemone` with a trailing slash dropped. Read from the launch environment only, never a saved setting or `./.env`. A value that is not an `http` or `https` URL, or that carries credentials, a query or a fragment, is a configuration error: no request and no advice |
 | `COMPACT_ADVISER_DISABLE` | `1`, `true`, `yes` or `on` (any case) makes the session inert: no TypeSafe request, no hint, no automatic compaction, no command. It wins over a saved `hint` or `auto` mode |
 | `CLAUDE_CODE_ENABLE_FUNCTION_HOOKS` | Claude Code only; must be exactly `1` for the mod to load |
 | `COMPACT_ADVISER_NODE` | Codex only; absolute path to a Node 22.18 or newer executable when the hook cannot find one on its rebuilt PATH |
@@ -138,7 +139,7 @@ Export `COMPACT_ADVISER_DISABLE=1` for unattended agent sessions, where advice h
 | Bounded user constraints, up to the last 64 visible replies and tool results (clipped), short tool-result excerpts, an existing summary, saved-artifact names, omission markers | System prompts, hidden reasoning, images, environment variables, the API key in the model context and request body, complete transcripts |
 | Best-effort redaction of known key patterns and obvious sensitive-file results | A guarantee. Uninstall or set mode Off for material that must not leave the machine |
 
-Requests go to `https://api.typesafe.ai/v1/systemone`, are capped at 32,000 serialized UTF-8 bytes, and never treat an error as an affirmative judgment.
+Requests go to `https://api.typesafe.ai/v1/systemone`, or `<TYPESAFE_BASE>/v1/systemone` when that is set, are capped at 32,000 serialized UTF-8 bytes, and never treat an error as an affirmative judgment.
 The TypeSafe API key never enters the model context or the request body; it is sent as the Authorization header to authenticate the call.
 Details: [SECURITY.md](SECURITY.md).
 

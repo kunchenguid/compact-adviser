@@ -180,6 +180,7 @@ export function runShell(
     env: {
       ...process.env,
       TYPESAFE_API_KEY: undefined,
+      TYPESAFE_BASE: undefined,
       ...(lab ? { GROK_HOME: lab.home, GROK_SESSION_ID: lab.sessionId } : {}),
       NO_COLOR: "1",
       ...env,

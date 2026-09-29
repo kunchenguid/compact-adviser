@@ -293,6 +293,36 @@ test("a refused judgment backs off, reports its kind, and never hints", async (t
   assert.match(status.stdout, /TypeSafe backoff/);
 });
 
+test("TYPESAFE_BASE sends the judgment to that base's /v1/systemone", async (t) => {
+  const { l, fixture } = await judgeTurn(t);
+  await runCli(["hook", "stop"], {
+    lab: l,
+    stdin: stopPayload(l),
+    env: {
+      TYPESAFE_API_KEY: "tsk-test-key",
+      TYPESAFE_BASE: `${fixture.url.replace(/\/v1\/systemone$/, "")}/`,
+    },
+  });
+  assert.equal(fixture.bodies.length, 1);
+  const row = await runCli(["status-line"], { lab: l, stdin: statusPayload(l) });
+  assert.ok(row.stdout.includes(HINT));
+});
+
+test("an invalid TYPESAFE_BASE asks nobody, never hints, and reports why", async (t) => {
+  const { l, fixture } = await judgeTurn(t);
+  await runCli(["hook", "stop"], {
+    lab: l,
+    stdin: stopPayload(l),
+    env: { TYPESAFE_API_KEY: "tsk-test-key", TYPESAFE_BASE: "api.example.test" },
+  });
+  assert.equal(fixture.bodies.length, 0);
+  const row = await runCli(["status-line"], { lab: l, stdin: statusPayload(l) });
+  assert.ok(!row.stdout.includes(HINT));
+  const status = await runCli(["status"], { lab: l });
+  assert.match(status.stdout, /Last TypeSafe outcome: configuration/);
+  assert.match(status.stdout, /TypeSafe backoff/);
+});
+
 test("request logging writes the request and the outcome, and never the key", async (t) => {
   const { l, fixture } = await judgeTurn(t);
   await runCli(["log", "on"], { lab: l });

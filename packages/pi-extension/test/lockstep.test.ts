@@ -69,6 +69,31 @@ test("the question set and the floor schedule match", () => {
   assert.equal(pi.FLOOR_MIN, 0.5);
 });
 
+test("every package resolves a TYPESAFE_BASE override to the same endpoint", () => {
+  const bases = [
+    undefined,
+    "",
+    "  ",
+    "https://api.typesafe.ai",
+    "https://proxy.example.test/vendors/typesafe/",
+    "http://127.0.0.1:8080//",
+    "not a url",
+    "ftp://proxy.example.test",
+    "https://user:pass@proxy.example.test",
+    "https://proxy.example.test/?region=us",
+    "https://proxy.example.test/#top",
+  ];
+  for (const base of bases) {
+    for (const other of [claude, codex, grok]) {
+      assert.equal(other.typesafeEndpoint(base), pi.typesafeEndpoint(base), String(base));
+    }
+  }
+  for (const other of [claude, codex, grok]) {
+    assert.equal(other.DEFAULT_BASE, pi.DEFAULT_BASE);
+    assert.equal(other.judgeErrorMessage("configuration"), pi.judgeErrorMessage("configuration"));
+  }
+});
+
 test("every package scores and gates the same judgments the same way", () => {
   const grid = [0, 0.3, 0.5, 0.79, 0.8, 0.9, 0.95, 1];
   for (const finished of grid) {

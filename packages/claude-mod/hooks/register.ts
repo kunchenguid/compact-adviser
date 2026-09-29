@@ -49,6 +49,7 @@ import {
   judge,
   qualifies,
   requestBody,
+  typesafeEndpoint,
 } from "../lib/judge.ts";
 import {
   errorLogLine,
@@ -148,6 +149,13 @@ async function apiKey($: EngineInterface): Promise<string> {
 async function testEndpoint($: EngineInterface): Promise<string | undefined> {
   const value = await $.env.get("COMPACT_ADVISER_TEST_ENDPOINT");
   return value !== undefined && LOOPBACK_ENDPOINT.test(value) ? value : undefined;
+}
+
+/** The live regression's fixture, else TypeSafe under `TYPESAFE_BASE` from the launch environment. */
+async function judgeEndpoint($: EngineInterface): Promise<string> {
+  const endpoint = (await testEndpoint($)) ?? typesafeEndpoint(await $.env.get("TYPESAFE_BASE"));
+  if (endpoint === undefined) throw new JudgeError("configuration");
+  return endpoint;
 }
 
 async function loadConfig($: EngineInterface): Promise<Config> {
@@ -282,16 +290,16 @@ async function judgeCheckpoint($: EngineInterface, epoch: number): Promise<void>
         // Request logging must not replace or delay the judgment.
       }
     }
-    const endpoint = await testEndpoint($);
     let result: Awaited<ReturnType<typeof judge>>;
     try {
+      const endpoint = await judgeEndpoint($);
       result = await judge(
         view.state,
         await apiKey($),
         {
           fetch: (url, init) => $.http.fetch(url, init),
           sleep: (ms) => $.clock.sleep(ms),
-          ...(endpoint ? { endpoint } : {}),
+          endpoint,
         },
         profile,
       );

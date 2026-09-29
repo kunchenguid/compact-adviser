@@ -15,6 +15,7 @@ import {
   readSettings,
   SettingsError,
 } from "../lib/config.ts";
+import { ENDPOINT, typesafeEndpoint } from "../lib/judge.ts";
 import { snapshot } from "../lib/snapshot.ts";
 import { HINT, itemsLine, parsePayload, statusLine } from "../lib/statusline.ts";
 import { type Verdict, verdictApplies } from "../lib/store.ts";
@@ -396,5 +397,22 @@ test("settings default only when the file is missing", () => {
     assert.throws(() => readSettings(blocked), /Cannot read the compact-adviser settings file/);
   } finally {
     rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("TYPESAFE_BASE keeps TypeSafe by default, swaps the base, and rejects a non-http(s) base", () => {
+  assert.equal(ENDPOINT, "https://api.typesafe.ai/v1/systemone");
+  assert.equal(typesafeEndpoint(undefined), ENDPOINT);
+  assert.equal(typesafeEndpoint(""), ENDPOINT);
+  assert.equal(
+    typesafeEndpoint("https://proxy.example.test/vendors/typesafe/"),
+    "https://proxy.example.test/vendors/typesafe/v1/systemone",
+  );
+  for (const base of [
+    "api.example.test",
+    "ftp://proxy.example.test",
+    "https://u:p@proxy.example.test",
+  ]) {
+    assert.equal(typesafeEndpoint(base), undefined, base);
   }
 });

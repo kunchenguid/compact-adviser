@@ -50,11 +50,13 @@ import { DISABLE_ENV, disabledByEnv } from "../lib/disable.ts";
 import { formatKeyStatus, parseDotenvKey, resolveTypesafeApiKey } from "../lib/env.ts";
 import {
   floorFor,
+  JudgeError,
   judge,
   MAX_RESPONSE_BYTES,
   qualifies,
   requestBody,
   score,
+  typesafeEndpoint,
 } from "../lib/judge.ts";
 import {
   errorLogLine,
@@ -159,6 +161,13 @@ function resolveKey(settings: Settings, cwd: string) {
 function testEndpoint(): string | undefined {
   const value = process.env.COMPACT_ADVISER_TEST_ENDPOINT;
   return value !== undefined && LOOPBACK_ENDPOINT.test(value) ? value : undefined;
+}
+
+/** The live regression's fixture, else TypeSafe under `TYPESAFE_BASE` from the hook environment. */
+function judgeEndpoint(): string {
+  const endpoint = testEndpoint() ?? typesafeEndpoint(process.env.TYPESAFE_BASE);
+  if (endpoint === undefined) throw new JudgeError("configuration");
+  return endpoint;
 }
 
 async function readBoundedText(response: Response): Promise<string> {
@@ -354,7 +363,6 @@ async function runStop(payload: HookPayload): Promise<void> {
       // A body too large to send is reported by `judge` below; logging does not decide.
     }
   }
-  const endpoint = testEndpoint();
   let judgment: Awaited<ReturnType<typeof judge>>;
   try {
     judgment = await judge(
@@ -362,7 +370,7 @@ async function runStop(payload: HookPayload): Promise<void> {
       activeKey,
       {
         ...cancellableJudgeTransport(),
-        ...(endpoint ? { endpoint } : {}),
+        endpoint: judgeEndpoint(),
       },
       profile,
     );

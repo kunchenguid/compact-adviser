@@ -4,6 +4,7 @@
 
 The Pi extension, Claude Code mod, Codex plugin, and Grok Build plugin send selected conversation text to TypeSafe when the package is installed, a key is available from the launch environment, saved settings, or `TYPESAFE_API_KEY` in a `.env` file in the working directory, and the other product gates pass (mode, minimum context, idle session).
 Installing the package is that consent; there is no separate sharing toggle.
+With `TYPESAFE_BASE` set in the launch environment, the same request and key go to `<TYPESAFE_BASE>/v1/systemone` instead. It is never read from saved settings or a working-directory `.env`, so a checked-out project cannot redirect the key, and a value that is not a plain `http` or `https` URL means no request and no advice.
 Pi and Claude Code can save a key from their settings UI. Codex uses an external settings CLI. Grok can save one only through the shell CLI outside Grok, because Grok appends slash-command arguments to the model. A saved key lives with mode and threshold in the implementation's settings store, with file permissions as restrictive as the host allows.
 It is never shown after save, and never written to logs, status lines, error messages, or TypeSafe request bodies, including when the agent reads the settings file.
 
@@ -33,12 +34,12 @@ No implementation loads another's runtime or reads another's storage.
 Verified on 2026-09-17 against the actual **Pi 0.85.1**, **Claude Code 2.1.275**, **Codex CLI 0.153.4**, and **Grok Build 1.0.34** host runtimes.
 The Pi extension API floor remains 0.82.0; the Claude Code mods API is early access and default-off; the Codex plugin requires Node 22.18 or newer and Codex CLI 0.153.0 or newer, and is supported on macOS and Linux. The Grok adapter requires Node 22.18 or newer.
 The Claude Code module is a complete no-op unless `CLAUDE_CODE_ENABLE_FUNCTION_HOOKS` is exactly `1`.
-Requests from the mod go through Claude Code's host fetch (`$.http.fetch`), which does not expose redirect control to plugins; the fixed endpoint is `https://api.typesafe.ai/v1/systemone`.
+Requests from the mod go through Claude Code's host fetch (`$.http.fetch`), which does not expose redirect control to plugins; the endpoint is `https://api.typesafe.ai/v1/systemone` unless `TYPESAFE_BASE` replaces its base.
 Codex requests use Node's `fetch` from the hook process.
-The only endpoint override, `COMPACT_ADVISER_TEST_ENDPOINT`, exists for the live regressions and is ignored unless it is an `http://127.0.0.1:<port>/` URL.
+Besides `TYPESAFE_BASE`, the only endpoint override, `COMPACT_ADVISER_TEST_ENDPOINT`, exists for the live regressions and is ignored unless it is an `http://127.0.0.1:<port>/` URL.
 The automatic-mode acknowledgement is kept in the plugin's own store, not in `/config`, so experimental auto cannot be granted without the disclosure dialog. A legacy `sharingConsent` field in that store is ignored.
 
-The Pi client rejects redirects on the same fixed HTTPS endpoint. The Grok plugin uses Node's built-in fetch against that endpoint.
+The Pi client rejects redirects from the TypeSafe endpoint. The Grok plugin uses Node's built-in fetch against that endpoint.
 The user's Pi, Claude Code, Codex, or Grok installation is independently managed.
 
 ## Development SDK

@@ -384,6 +384,57 @@ test("a failed judgment is logged as a sanitized error kind only", async () => {
   });
 });
 
+for (const [base, url] of [
+  ["", "https://api.typesafe.ai/v1/systemone"],
+  [
+    "https://proxy.example.test/vendors/typesafe/",
+    "https://proxy.example.test/vendors/typesafe/v1/systemone",
+  ],
+] as const) {
+  test(`TYPESAFE_BASE=${JSON.stringify(base)} sends the judgment to ${url}`, async () => {
+    await withLab(async (lab) => {
+      writeRollout(lab.transcript, settledRollout());
+      const typesafe = fakeTypesafe();
+      const environment_ = environment(lab, { fetch: typesafe.fetch });
+
+      const output = await handle(stop(lab), {
+        ...environment_,
+        env: { ...environment_.env, TYPESAFE_BASE: base },
+      });
+
+      assert.deepEqual(output, { systemMessage: HINT });
+      assert.deepEqual(
+        typesafe.requests.map((request) => request.url),
+        [url],
+      );
+    });
+  });
+}
+
+test("an invalid TYPESAFE_BASE asks nobody, gives no advice, and backs off", async () => {
+  await withLab(async (lab) => {
+    writeRollout(lab.transcript, settledRollout());
+    const root = adviserRoot({ CODEX_HOME: lab.home });
+    new ConfigStore(root).update({ logRequests: true });
+    const typesafe = fakeTypesafe();
+    const base = environment(lab, { fetch: typesafe.fetch });
+
+    const output = await handle(stop(lab), {
+      ...base,
+      env: { ...base.env, TYPESAFE_BASE: "api.example.test" },
+    });
+
+    assert.deepEqual(output, {});
+    assert.equal(typesafe.requests.length, 0);
+    assert.ok(new SessionStore(root).read("s1", 1_000_000).state.retryAfter > 1_000_000);
+    const lines = readFileSync(requestLogPath(root, "s1"), "utf8")
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
+    assert.deepEqual(lines.at(-1).error, { kind: "configuration" });
+  });
+});
+
 test("compaction resets the session, and the next checkpoint waits for the new baseline", async () => {
   await withLab(async (lab) => {
     writeRollout(lab.transcript, settledRollout());
