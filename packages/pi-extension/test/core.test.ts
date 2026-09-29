@@ -424,7 +424,7 @@ test("HTTP contract, output bound, status classification, and cancellation", asy
   );
 });
 
-test("TYPESAFE_BASE keeps the default, swaps the base, and rejects what is not an http(s) base", async () => {
+test("TYPESAFE_BASE keeps the default, swaps the base, and takes http only on a loopback host", async () => {
   assert.equal(ENDPOINT, `${DEFAULT_BASE}/v1/systemone`);
   assert.equal(DEFAULT_BASE, "https://api.typesafe.ai");
   for (const base of [undefined, "", "   "]) assert.equal(typesafeEndpoint(base), ENDPOINT);
@@ -440,6 +440,10 @@ test("TYPESAFE_BASE keeps the default, swaps the base, and rejects what is not a
       "https://proxy.example.test/vendors/typesafe/v1/systemone",
     ],
     ["http://127.0.0.1:8787", "http://127.0.0.1:8787/v1/systemone"],
+    ["http://[::1]:8787/", "http://[::1]:8787/v1/systemone"],
+    ["http://localhost:8787/typesafe", "http://localhost:8787/typesafe/v1/systemone"],
+    ["HTTP://LOCALHOST", "http://localhost/v1/systemone"],
+    ["https://127.0.0.1:8787", "https://127.0.0.1:8787/v1/systemone"],
     ["HTTPS://Proxy.Example.Test", "https://proxy.example.test/v1/systemone"],
   ] as const) {
     assert.equal(typesafeEndpoint(base), endpoint, base);
@@ -449,6 +453,11 @@ test("TYPESAFE_BASE keeps the default, swaps the base, and rejects what is not a
     "not a url",
     "ftp://proxy.example.test",
     "file:///tmp/typesafe",
+    "http://proxy.example.test",
+    "http://api.typesafe.ai",
+    "http://10.0.0.5:8787",
+    "http://127.0.0.2:8787",
+    "http://localhost.example.test",
     "https://user:secret@proxy.example.test",
     "https://proxy.example.test/?region=us",
     "https://proxy.example.test/#top",

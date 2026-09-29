@@ -9,8 +9,9 @@ export const ENDPOINT = `${DEFAULT_BASE}/v1/systemone`;
 /**
  * The judge endpoint under a `TYPESAFE_BASE` override: unset or blank keeps TypeSafe's own
  * base, trailing slashes are dropped, and `/v1/systemone` is appended as with the default.
- * Anything but a plain http(s) base (no credentials, query or fragment) is undefined, which
- * callers treat as invalid configuration: no request and no advice, never an affirmative one.
+ * Anything but a plain https base, or an http base on a loopback host (127.0.0.1, [::1],
+ * localhost), with no credentials, query or fragment, is undefined, which callers treat as
+ * invalid configuration: no request and no advice, never an affirmative one.
  */
 export function typesafeEndpoint(base: string | undefined): string | undefined {
   const value = base?.trim() ?? "";
@@ -22,7 +23,10 @@ export function typesafeEndpoint(base: string | undefined): string | undefined {
     return undefined;
   }
   if (
-    (url.protocol !== "https:" && url.protocol !== "http:") ||
+    !(
+      url.protocol === "https:" ||
+      (url.protocol === "http:" && ["127.0.0.1", "[::1]", "localhost"].includes(url.hostname))
+    ) ||
     url.username !== "" ||
     url.password !== "" ||
     value.includes("?") ||
@@ -115,7 +119,7 @@ const JUDGE_KIND_CAUSE: Record<JudgeErrorKind, string> = {
   server: "TypeSafe returned a server error",
   response: "TypeSafe's reply was not a usable judgment",
   input: "this checkpoint is too large to send",
-  configuration: "TYPESAFE_BASE is not a valid http or https URL",
+  configuration: "TYPESAFE_BASE is not a valid https URL or loopback http URL",
 };
 
 export function judgeErrorMessage(kind: JudgeErrorKind): string {

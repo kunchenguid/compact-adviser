@@ -400,7 +400,7 @@ test("settings default only when the file is missing", () => {
   }
 });
 
-test("TYPESAFE_BASE keeps TypeSafe by default, swaps the base, and rejects a non-http(s) base", () => {
+test("TYPESAFE_BASE keeps TypeSafe by default, swaps the base, and takes http only on a loopback host", () => {
   assert.equal(ENDPOINT, "https://api.typesafe.ai/v1/systemone");
   assert.equal(typesafeEndpoint(undefined), ENDPOINT);
   assert.equal(typesafeEndpoint(""), ENDPOINT);
@@ -408,9 +408,11 @@ test("TYPESAFE_BASE keeps TypeSafe by default, swaps the base, and rejects a non
     typesafeEndpoint("https://proxy.example.test/vendors/typesafe/"),
     "https://proxy.example.test/vendors/typesafe/v1/systemone",
   );
+  assert.equal(typesafeEndpoint("http://localhost:8787"), "http://localhost:8787/v1/systemone");
   for (const base of [
     "api.example.test",
     "ftp://proxy.example.test",
+    "http://proxy.example.test",
     "https://u:p@proxy.example.test",
   ]) {
     assert.equal(typesafeEndpoint(base), undefined, base);

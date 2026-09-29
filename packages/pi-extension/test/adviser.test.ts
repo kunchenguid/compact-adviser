@@ -551,7 +551,7 @@ test("TYPESAFE_BASE redirects the product's judge and an invalid base asks nobod
     assert.deepEqual(urls, [expected]);
     assert.ok(showedHint(h));
   }
-  process.env.TYPESAFE_BASE = "api.example.test";
+  process.env.TYPESAFE_BASE = "http://proxy.example.test";
   const h = harness(t);
   h.install("0.82.0", "test-key", true);
   h.enable();
