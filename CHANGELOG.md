@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.10](https://github.com/kunchenguid/compact-adviser/compare/compact-adviser-v0.1.9...compact-adviser-v0.1.10) (2026-09-29)
+
+
+### Features
+
+* allow a TYPESAFE_BASE override for the TypeSafe endpoint on every host ([#59](https://github.com/kunchenguid/compact-adviser/issues/59)) ([0b355ff](https://github.com/kunchenguid/compact-adviser/commit/0b355ff650bd7fc4179c9af8fdf9cdeeea5a0139))
+
 ## [0.1.9](https://github.com/kunchenguid/compact-adviser/compare/compact-adviser-v0.1.8...compact-adviser-v0.1.9) (2026-09-25)
 
 
