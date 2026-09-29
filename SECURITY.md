@@ -6,7 +6,7 @@ The Pi extension, Claude Code mod, Codex plugin, and Grok Build plugin send sele
 Installing the package is that consent; there is no separate sharing toggle.
 A person may instead choose Vercel's AI Gateway as the judge (`COMPACT_ADVISER_JUDGE_PROVIDER=vercel` in the launch environment, or the saved `judge vercel` setting). Then the same bounded context goes to Vercel's AI Gateway on its way to Jev, at a provider the gateway lists for it, with an `AI_GATEWAY_API_KEY` resolved the same way; a TypeSafe key is never sent to the gateway, nor a gateway key to TypeSafe. A working directory's `.env` can supply a key but never chooses the judge.
 Pi and Claude Code can save a key from their settings UI. Codex uses an external settings CLI. Grok can save one only through the shell CLI outside Grok, because Grok appends slash-command arguments to the model. A saved key lives with mode and threshold in the implementation's settings store, with file permissions as restrictive as the host allows.
-It is never shown after save, and never written to logs, status lines, error messages, or TypeSafe request bodies, including when the agent reads the settings file.
+It is never shown after save, and never written to logs, status lines, error messages, or judge request bodies, including when the agent reads the settings file.
 
 | Sent to `https://api.typesafe.ai/v1/systemone` (or, with the `vercel` judge, `https://ai-gateway.vercel.sh/v4/ai/evaluation-model`) | Not sent |
 | --- | --- |
