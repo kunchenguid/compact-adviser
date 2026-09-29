@@ -8,7 +8,34 @@
 
 import type { JudgeProfile } from "./profile.ts";
 
-export const ENDPOINT = "https://api.typesafe.ai/v1/systemone";
+export const DEFAULT_BASE = "https://api.typesafe.ai";
+export const ENDPOINT = `${DEFAULT_BASE}/v1/systemone`;
+
+/**
+ * The judge endpoint under a `TYPESAFE_BASE` override: unset or blank keeps TypeSafe's own
+ * base, trailing slashes are dropped, and `/v1/systemone` is appended as with the default.
+ * Anything but a plain http(s) base (no credentials, query or fragment) is undefined, which
+ * callers treat as invalid configuration: no request and no advice, never an affirmative one.
+ */
+export function typesafeEndpoint(base: string | undefined): string | undefined {
+  const value = base?.trim() ?? "";
+  if (value === "") return ENDPOINT;
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    return undefined;
+  }
+  if (
+    (url.protocol !== "https:" && url.protocol !== "http:") ||
+    url.username !== "" ||
+    url.password !== "" ||
+    value.includes("?") ||
+    value.includes("#")
+  )
+    return undefined;
+  return `${url.origin}${url.pathname.replace(/\/+$/, "")}/v1/systemone`;
+}
 export const MAX_REQUEST_BYTES = 32000;
 /**
  * Who carries the checkpoint to Jev: TypeSafe's own API (the default), or Vercel's AI
@@ -114,6 +141,7 @@ const GATEWAY_KIND_CAUSE: Record<JudgeErrorKind, string> = {
   server: "Vercel's AI Gateway returned a server error",
   response: "the reply through Vercel's AI Gateway was not a usable judgment",
   input: "this checkpoint is too large to send",
+  configuration: "TYPESAFE_BASE is not a valid http or https URL",
 };
 
 function askedJudge(provider: JudgeProvider): string {
@@ -376,6 +404,14 @@ export const GATEWAY_ADAPTER: JudgeAdapter = {
   body: (state, questions) => ({ state, questions }),
   parse: parseGatewayJudgment,
 };
+/**
+ * Where the adapter sends under a `TYPESAFE_BASE` override: only the TypeSafe adapter moves,
+ * the gateway endpoint never does. Undefined is the same invalid configuration as in
+ * `typesafeEndpoint`.
+ */
+export function judgeEndpoint(adapter: JudgeAdapter, base: string | undefined): string | undefined {
+  return adapter.provider === "typesafe" ? typesafeEndpoint(base) : adapter.endpoint;
+}
 export function requestBody(
   state: unknown,
   profile?: JudgeProfile,

@@ -63,13 +63,14 @@ import {
 } from "../lib/env.ts";
 import {
   floorFor,
+  type JudgeAdapter,
   JudgeError,
   judge,
+  judgeEndpoint,
   MAX_RESPONSE_BYTES,
   qualifies,
   requestBody,
   score,
-  typesafeEndpoint,
 } from "../lib/judge.ts";
 import {
   errorLogLine,
@@ -192,10 +193,11 @@ function testEndpoint(): string | undefined {
   return value !== undefined && LOOPBACK_ENDPOINT.test(value) ? value : undefined;
 }
 
-/** The live regression's fixture, else TypeSafe under `TYPESAFE_BASE` from the hook environment. */
-function judgeEndpoint(): string {
-  const endpoint = testEndpoint() ?? typesafeEndpoint(process.env.TYPESAFE_BASE);
-  if (endpoint === undefined) throw new JudgeError("configuration");
+/** The live regression's fixture, else the adapter's endpoint under `TYPESAFE_BASE` from the
+ * hook environment. */
+function endpointFor(adapter: JudgeAdapter): string {
+  const endpoint = testEndpoint() ?? judgeEndpoint(adapter, process.env.TYPESAFE_BASE);
+  if (endpoint === undefined) throw new JudgeError("configuration", { provider: adapter.provider });
   return endpoint;
 }
 
@@ -404,7 +406,7 @@ async function runStop(payload: HookPayload): Promise<void> {
       activeKey,
       {
         ...cancellableJudgeTransport(),
-        endpoint: judgeEndpoint(),
+        endpoint: endpointFor(adapter),
       },
       profile,
       adapter,

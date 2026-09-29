@@ -27,7 +27,14 @@ import {
   resolveTypesafeApiKey,
   SAVED_KEY_FIELDS,
 } from "./env.ts";
-import { judge, qualifies, requestBody } from "./judge.ts";
+import {
+  type JudgeAdapter,
+  JudgeError,
+  judge,
+  judgeEndpoint,
+  qualifies,
+  requestBody,
+} from "./judge.ts";
 import {
   appendRequestLogLine,
   errorLogLine,
@@ -75,6 +82,14 @@ export function isInteractive(rollout: Pick<Rollout, "originator">): boolean {
 function testEndpoint(env: NodeJS.ProcessEnv): string | undefined {
   const value = env.COMPACT_ADVISER_TEST_ENDPOINT;
   return value !== undefined && LOOPBACK_ENDPOINT.test(value) ? value : undefined;
+}
+
+/** The live regression's fixture, else the adapter's endpoint under `TYPESAFE_BASE` from the
+ * launch environment. */
+function endpointFor(env: NodeJS.ProcessEnv, adapter: JudgeAdapter): string {
+  const endpoint = testEndpoint(env) ?? judgeEndpoint(adapter, env.TYPESAFE_BASE);
+  if (endpoint === undefined) throw new JudgeError("configuration", { provider: adapter.provider });
+  return endpoint;
 }
 
 /** The judge in effect: `COMPACT_ADVISER_JUDGE_PROVIDER` from the launch environment, then
@@ -231,7 +246,7 @@ async function onStop(payload: HookPayload, environment: Environment): Promise<H
       key.value,
       {
         ...cancellableJudgeTransport(environment.fetch),
-        endpoint: judgeEndpoint(environment.env),
+        endpoint: endpointFor(environment.env, adapter),
       },
       profile,
       adapter,

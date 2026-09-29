@@ -4,6 +4,7 @@ import { join } from "node:path";
 import test, { type TestContext } from "node:test";
 import {
   ENDPOINT,
+  GATEWAY_ENDPOINT,
   JUDGE_UNAVAILABLE_MESSAGE,
   JudgeError,
   judgeErrorMessage,
@@ -720,6 +721,19 @@ test("TYPESAFE_BASE redirects the product's judge and an invalid base asks nobod
     .split("\n")
     .map((line) => JSON.parse(line));
   assert.deepEqual(lines.at(-1).error, { kind: "configuration" });
+
+  // TYPESAFE_BASE moves only the TypeSafe judge: the gateway judge keeps its own endpoint,
+  // even when the base is invalid.
+  for (const base of ["https://proxy.example.test", "api.example.test"]) {
+    process.env.TYPESAFE_BASE = base;
+    const gateway = harness(t);
+    gateway.install("0.82.0", "test-key", true);
+    gateway.enable();
+    gateway.store.update({ judgeProvider: "vercel" });
+    urls.length = 0;
+    await gateway.fire("agent_settled");
+    assert.deepEqual(urls, [GATEWAY_ENDPOINT], base);
+  }
 });
 
 test("a JudgeError logs its kind and not its message", async (t) => {

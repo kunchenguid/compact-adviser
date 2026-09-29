@@ -447,7 +447,7 @@ test("an invalid TYPESAFE_BASE asks nobody, never hints, and reports why", async
   assert.ok(!row.stdout.includes(HINT));
   const status = await runCli(["status"], { lab: l });
   assert.match(status.stdout, /Last TypeSafe outcome: configuration/);
-  assert.match(status.stdout, /TypeSafe backoff/);
+  assert.match(status.stdout, /Jev backoff/);
 });
 
 test("request logging writes the request and the outcome, and never the key", async (t) => {

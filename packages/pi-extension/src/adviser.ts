@@ -33,13 +33,14 @@ import {
 import {
   floorFor,
   type JudgeAdapter,
+  JudgeError,
   type JudgeProvider,
   type Judgment,
   judge,
+  judgeEndpoint,
   judgeUnavailableMessage,
   qualifies,
   requestBody,
-  typesafeEndpoint,
 } from "./judge.ts";
 import { promptSecret } from "./key-input.ts";
 import { appendErrorLog, appendRequestLog, appendResponseLog, requestLogPath } from "./log.ts";
@@ -67,8 +68,8 @@ interface Options {
     state: unknown,
     key: string,
     signal: AbortSignal,
-    profile?: JudgeProfile,
-    adapter?: JudgeAdapter,
+    profile: JudgeProfile | undefined,
+    adapter: JudgeAdapter,
   ) => Promise<Judgment>;
 }
 function savedConfig(store: ConfigStore): Config | undefined {
@@ -117,8 +118,12 @@ export function installAdviser(pi: ExtensionAPI, options: Options): void {
   const now = options.now ?? Date.now;
   const evaluate =
     options.evaluate ??
-    ((state, key, signal, profile, adapter) =>
-      judge(state, key, signal, undefined, undefined, profile, adapter));
+    ((state, key, signal, profile, adapter) => {
+      const endpoint = judgeEndpoint(adapter, process.env.TYPESAFE_BASE);
+      if (endpoint === undefined)
+        return Promise.reject(new JudgeError("configuration", { provider: adapter.provider }));
+      return judge(state, key, signal, undefined, undefined, profile, { ...adapter, endpoint });
+    });
   const [major, minor] = options.version.split(".").map(Number);
   const supported = Number.isFinite(major) && (major > 0 || minor >= 82);
   let generation = 0;

@@ -12,7 +12,7 @@ import {
 import { installAdviser } from "../src/adviser.ts";
 import { ConfigStore } from "../src/config.ts";
 import { RECENT_TAIL_MESSAGES } from "../src/context.ts";
-import { type Judgment, parseJudgment } from "../src/judge.ts";
+import { type JudgeAdapter, type Judgment, parseJudgment } from "../src/judge.ts";
 
 export function temp(t: TestContext): string {
   const root = join(process.cwd(), ".test-tmp");
@@ -207,7 +207,12 @@ export function harness(
   const keys: string[] = [];
   const providers: (string | undefined)[] = [];
   const endpoints: (string | undefined)[] = [];
-  const install = (version = "0.82.0", credential: string | undefined | false = "test-key") => {
+  /** `hostJudge` keeps the product's own judge, so a test stubs `fetch` instead. */
+  const install = (
+    version = "0.82.0",
+    credential: string | undefined | false = "test-key",
+    hostJudge = false,
+  ) => {
     handlers.clear();
     command = undefined;
     installAdviser(api, {
@@ -215,15 +220,25 @@ export function harness(
       version,
       ...(credential === false ? {} : { key: () => credential }),
       now: () => clock,
-      evaluate: async (state, key, signal, _profile, adapter) => {
-        calls++;
-        payloads.push(state);
-        signals.push(signal);
-        keys.push(key);
-        providers.push(adapter?.provider);
-        endpoints.push(adapter?.endpoint);
-        return evaluate(state, key, signal);
-      },
+      ...(hostJudge
+        ? {}
+        : {
+            evaluate: async (
+              state: unknown,
+              key: string,
+              signal: AbortSignal,
+              _profile: unknown,
+              adapter: JudgeAdapter,
+            ) => {
+              calls++;
+              payloads.push(state);
+              signals.push(signal);
+              keys.push(key);
+              providers.push(adapter.provider);
+              endpoints.push(adapter.endpoint);
+              return evaluate(state, key, signal);
+            },
+          }),
     });
   };
   install();

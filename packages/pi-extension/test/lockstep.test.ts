@@ -146,6 +146,12 @@ test("every package resolves a TYPESAFE_BASE override to the same endpoint", () 
   for (const base of bases) {
     for (const other of [claude, codex, grok]) {
       assert.equal(other.typesafeEndpoint(base), pi.typesafeEndpoint(base), String(base));
+      assert.equal(
+        other.judgeEndpoint(other.TYPESAFE_ADAPTER, base),
+        pi.judgeEndpoint(pi.TYPESAFE_ADAPTER, base),
+        String(base),
+      );
+      assert.equal(other.judgeEndpoint(other.GATEWAY_ADAPTER, base), pi.GATEWAY_ENDPOINT);
     }
   }
   for (const other of [claude, codex, grok]) {
