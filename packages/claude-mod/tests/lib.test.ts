@@ -55,7 +55,7 @@ const rows = (mode: unknown, minimum: unknown) => [
 ];
 
 describe("settings", () => {
-  test("a budget is a whole number of tokens, and off or default clears it", () => {
+  test("a budget is a whole number of tokens, and off clears it", () => {
     expect(parseBudget(" 450000 ")).toBe(450000);
     expect(parseBudget("off")).toBe(0);
     expect(() => parseBudget("default")).toThrow("whole number");
