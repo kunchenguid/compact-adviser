@@ -58,7 +58,7 @@ describe("settings", () => {
   test("a budget is a whole number of tokens, and off or default clears it", () => {
     expect(parseBudget(" 450000 ")).toBe(450000);
     expect(parseBudget("off")).toBe(0);
-    expect(parseBudget("default")).toBe(0);
+    expect(() => parseBudget("default")).toThrow("whole number");
     for (const bad of ["", "-1", "1.5", "450k", "4e5", "9007199254740992"]) {
       expect(() => parseBudget(bad)).toThrow("whole number");
     }

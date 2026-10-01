@@ -370,7 +370,7 @@ test("unknown usage takes the strictest floor rather than a guess", () => {
   assert.equal(usageFraction({ tokens: 50000, source: "signals" }, 100000), 0.5);
   assert.equal(parseBudget(" 450000 "), 450000);
   assert.equal(parseBudget("off"), 0);
-  for (const bad of ["", "-1", "1.5", "450k"]) assert.throws(() => parseBudget(bad), bad);
+  for (const bad of ["", "-1", "1.5", "450k", "default"]) assert.throws(() => parseBudget(bad), bad);
   assert.throws(() => parseSettings({ version: 1, contextBudgetTokens: -1 }), /context budget/);
   assert.equal(readSignalsUsage(undefined).source, "unknown");
   assert.deepEqual(readPayloadUsage({ context_window: { context_tokens: 7 } }), {

@@ -106,7 +106,7 @@ test("minimum parsing rejects ambiguous, nonpositive or unsafe values", () => {
 test("budget parsing takes a whole token count, and off or default clears it", (t) => {
   assert.equal(parseBudget(" 450000 "), 450000);
   assert.equal(parseBudget("off"), 0);
-  assert.equal(parseBudget("default"), 0);
+  assert.throws(() => parseBudget("default"), /whole number/);
   for (const value of ["", "-1", "1.5", "450k", "4e5", "NaN", "9007199254740992"])
     assert.throws(() => parseBudget(value), value);
   const store = new ConfigStore(temp(t));

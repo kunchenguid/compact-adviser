@@ -52,10 +52,10 @@ export function parseMinimum(text: string): number {
   return number;
 }
 
-/** A context budget in tokens, or 0 for "off" and "default" (Claude Code's own limit). */
+/** A context budget in tokens, or 0 for "off" (Claude Code's own limit). */
 export function parseBudget(text: string): number {
   const value = text.trim();
-  if (value === "off" || value === "default") return 0;
+  if (value === "off") return 0;
   const number = Number(value);
   if (!/^\d+$/.test(value) || !Number.isSafeInteger(number)) {
     throw new Error("Enter a whole number of tokens, for example 450000, or off.");
