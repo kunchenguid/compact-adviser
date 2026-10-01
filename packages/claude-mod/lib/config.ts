@@ -1,6 +1,6 @@
 // Persistent preferences, with the same semantics as the Pi extension's configuration.
 //
-// `mode`, `minContextTokens`, and `logRequests` are the plugin's manifest `userConfig` rows: the host
+// `mode`, `minContextTokens`, `contextBudgetTokens`, and `logRequests` are the plugin's manifest `userConfig` rows: the host
 // validates them, stores them in the user's settings.json, and shows them in /config.
 // `typesafeApiKey` is also a userConfig row so it lives in that same settings path, but this
 // module hides it from `/config` so the secret is never drawn there. Set, clear, and presence
@@ -15,6 +15,7 @@ export const MODES: readonly Mode[] = ["hint", "auto", "off"];
 export const PLUGIN = "compact-adviser";
 export const MODE_KEY = `${PLUGIN}.mode`;
 export const MINIMUM_KEY = `${PLUGIN}.minContextTokens`;
+export const BUDGET_KEY = `${PLUGIN}.contextBudgetTokens`;
 export const LOG_KEY = `${PLUGIN}.logRequests`;
 export const PROFILE_KEY = `${PLUGIN}.profile`;
 export const API_KEY_KEY = `${PLUGIN}.typesafeApiKey`;
@@ -25,6 +26,8 @@ export const MAX_SAVED_API_KEY_LENGTH = 1024;
 export interface Config {
   mode: Mode;
   minContextTokens: number;
+  /** Tokens at which the hint floor is fully relaxed; 0 uses Claude Code's own limit. */
+  contextBudgetTokens: number;
   autoAcknowledged: boolean;
   logRequests: boolean;
   profile?: string;
@@ -45,6 +48,17 @@ export function parseMinimum(text: string): number {
   const number = Number(value);
   if (!/^\d+$/.test(value) || !Number.isSafeInteger(number) || number <= 0) {
     throw new Error("Enter a positive whole number of tokens, for example 40000.");
+  }
+  return number;
+}
+
+/** A context budget in tokens, or 0 for "off" and "default" (Claude Code's own limit). */
+export function parseBudget(text: string): number {
+  const value = text.trim();
+  if (value === "off" || value === "default") return 0;
+  const number = Number(value);
+  if (!/^\d+$/.test(value) || !Number.isSafeInteger(number)) {
+    throw new Error("Enter a whole number of tokens, for example 450000, or off.");
   }
   return number;
 }
@@ -112,6 +126,7 @@ export function readConfig(
     rows.find((candidate) => candidate.key === key)?.value ?? loaded[field];
   const mode = row(MODE_KEY, "mode");
   const minimum = row(MINIMUM_KEY, "minContextTokens");
+  const budget = row(BUDGET_KEY, "contextBudgetTokens") ?? 0;
   const logRequests = row(LOG_KEY, "logRequests");
   if (typeof mode !== "string" || !MODES.includes(mode as Mode)) {
     throw new SettingsError("Cannot read the compact-adviser mode setting; no action is taken.");
@@ -119,6 +134,11 @@ export function readConfig(
   if (typeof minimum !== "number" || !Number.isSafeInteger(minimum) || minimum <= 0) {
     throw new SettingsError(
       "Cannot read the compact-adviser minimum context setting; no action is taken.",
+    );
+  }
+  if (typeof budget !== "number" || !Number.isSafeInteger(budget) || budget < 0) {
+    throw new SettingsError(
+      "Cannot read the compact-adviser context budget setting; no action is taken.",
     );
   }
   if (logRequests !== undefined && typeof logRequests !== "boolean") {
@@ -132,6 +152,7 @@ export function readConfig(
   return {
     mode: mode as Mode,
     minContextTokens: minimum,
+    contextBudgetTokens: budget,
     autoAcknowledged: consent.autoAcknowledged,
     logRequests: logRequests === true,
     ...(profile !== undefined ? { profile: profile as string } : {}),

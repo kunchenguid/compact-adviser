@@ -248,6 +248,26 @@ export function score(j: Judgment, profile?: JudgeProfile): number {
 }
 
 /**
+ * The person's context budget when the hint floor should measure against it, otherwise 0.
+ * A budget only ever relaxes the floor, so it applies when it is below the host's limit or that
+ * limit is unknown; a budget at or above the limit is ignored.
+ */
+export function effectiveBudget(limit: number, budget: number): number {
+  return budget > 0 && !(limit > 0 && limit <= budget) ? budget : 0;
+}
+
+/**
+ * The usage fraction the hint floor reads: tokens over the effective budget when there is one,
+ * otherwise over the host's limit. NaN when neither is known, which gets the strictest floor.
+ */
+export function contextPressure(tokens: number, limit: number, budget: number): number {
+  const denominator = effectiveBudget(limit, budget) || limit;
+  if (!Number.isFinite(tokens) || !Number.isFinite(denominator) || denominator <= 0)
+    return Number.NaN;
+  return tokens / denominator;
+}
+
+/**
  * The hint floor for a context usage fraction (tokens over the model's window).
  * A wrong hint costs most while there is room left and least when compaction
  * is imminent, so the floor is strict at low usage and relaxes as the window

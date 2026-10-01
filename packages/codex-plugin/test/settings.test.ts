@@ -62,6 +62,7 @@ test("settings round-trip and merge field by field", async () => {
       version: 1,
       mode: "hint",
       minContextTokens: 60000,
+      contextBudgetTokens: 0,
       logRequests: true,
     });
   });
@@ -154,6 +155,12 @@ test("the CLI saves each setting and reports the mode change", async () => {
     assert.equal(store.read().minContextTokens, 60000);
     assert.match(await run(["threshold", "default"], cli(lab)), /40,000 tokens/);
     assert.equal(store.read().minContextTokens, 40000);
+    assert.match(await run(["budget", "450000"], cli(lab)), /450,000 tokens/);
+    assert.equal(store.read().contextBudgetTokens, 450000);
+    assert.match(await run(["status"], cli(lab)), /Budget: 450,000 tokens\./);
+    await assert.rejects(run(["budget", "450k"], cli(lab)), /whole number/);
+    assert.match(await run(["budget", "off"], cli(lab)), /budget off/);
+    assert.equal(store.read().contextBudgetTokens, 0);
     assert.match(await run(["log", "on"], cli(lab)), /logging on/);
     assert.equal(store.read().logRequests, true);
     assert.match(await run(["log", "off"], cli(lab)), /logging off/);

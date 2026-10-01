@@ -222,6 +222,20 @@ test("settings menu saves and clears a TypeSafe key without printing it", async 
   assert.ok(!h.notifications.at(-1)?.includes(secret));
 });
 
+test("budget persists, shows in status, and off clears it", async (t) => {
+  const h = harness(t);
+  await h.command("budget 450000");
+  assert.equal(h.store.read().contextBudgetTokens, 450000);
+  await h.command("status");
+  assert.ok(h.notifications.at(-1)?.includes("Budget: 450,000 tokens."));
+  await h.command("budget 450k");
+  assert.equal(h.store.read().contextBudgetTokens, 450000);
+  await h.command("budget off");
+  assert.equal(h.store.read().contextBudgetTokens, 0);
+  await h.command("status");
+  assert.ok(h.notifications.at(-1)?.includes("Budget: off."));
+});
+
 test("auto requires explicit confirmation, persist, and never compact on selection", async (t) => {
   const h = harness(t);
   h.confirms.push(false);
@@ -236,7 +250,7 @@ test("auto requires explicit confirmation, persist, and never compact on selecti
     h.notifications
       .at(-1)
       ?.includes(
-        "Use /compact-adviser, auto, hint, off, status, threshold <tokens|default>, snooze or dismiss.",
+        "Use /compact-adviser, auto, hint, off, status, threshold <tokens|default>, budget <tokens|off>, snooze or dismiss.",
       ),
   );
   await h.command("hint");

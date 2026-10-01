@@ -15,6 +15,7 @@ import {
   DEFAULT_MINIMUM,
   formatTokens,
   type Mode,
+  parseBudget,
   parseMinimum,
   parseMode,
   parseSavedApiKey,
@@ -22,7 +23,7 @@ import {
 import { DISABLE_ENV, disabledByEnv } from "./disable.ts";
 import { formatKeyStatus } from "./env.ts";
 import { resolveKey } from "./hook.ts";
-import { floorFor } from "./judge.ts";
+import { effectiveBudget, floorFor } from "./judge.ts";
 import { requestLogPath } from "./log.ts";
 import { adviserRoot } from "./paths.ts";
 import { parseProfile } from "./profile.ts";
@@ -38,6 +39,7 @@ Usage: compact-adviser <command> [value]
   hint                      Advise with a hint at eligible checkpoints (default)
   off                       Stop advising; Codex's own compaction is unaffected
   threshold <tokens>        Save an absolute token minimum, or "default" for ${DEFAULT_MINIMUM}
+  budget <tokens|off>       Relax the hint floor toward this context size, or the window if smaller
   log <on|off>              Log each TypeSafe request and its outcome to a local jsonl file
   key <set|clear|status>    Save, clear, or report the TypeSafe API key (never printed)
 
@@ -65,13 +67,15 @@ function statusText(environment: CliEnvironment): string {
       ? "No session recorded yet."
       : (cooldownReason(latest.state, latest.tokens ?? 0, now) ??
         "No cooldown; semantic checks still apply.");
-  const usage = latest === undefined ? Number.NaN : usageFraction(latest);
+  const budget = config.contextBudgetTokens;
+  const usage = latest === undefined ? Number.NaN : usageFraction(latest, budget);
   const window = Number.isFinite(usage)
-    ? ` Context: ${formatTokens(latest?.tokens ?? 0)} tokens, ${Math.round(usage * 100)}% of the window; hint floor ${floorFor(usage, parseProfile(config.profile)).toFixed(2)}.`
+    ? ` Context: ${formatTokens(latest?.tokens ?? 0)} tokens, ${Math.round(usage * 100)}% of the ${effectiveBudget(latest?.window ?? Number.NaN, budget) > 0 ? "budget" : "window"}; hint floor ${floorFor(usage, parseProfile(config.profile)).toFixed(2)}.`
     : "";
   return [
     `Mode: ${config.mode}.`,
     `Minimum: ${formatTokens(config.minContextTokens)} tokens.`,
+    `Budget: ${budget > 0 ? `${formatTokens(budget)} tokens` : "off"}.`,
     `${formatKeyStatus(key.source)}.`,
     `${cooldown}${window}`,
     `Request log: ${config.logRequests ? requestLogPath(root, latest?.id ?? "<session>") : "off"}.`,
@@ -90,6 +94,14 @@ function saveThreshold(environment: CliEnvironment, value: string): string {
   const count = value === "default" ? DEFAULT_MINIMUM : parseMinimum(value);
   new ConfigStore(adviserRoot(environment.env)).update({ minContextTokens: count });
   return `Minimum context saved: ${formatTokens(count)} tokens (all sessions).`;
+}
+
+function saveBudget(environment: CliEnvironment, value: string): string {
+  const count = parseBudget(value);
+  new ConfigStore(adviserRoot(environment.env)).update({ contextBudgetTokens: count });
+  return count > 0
+    ? `Context budget saved: ${formatTokens(count)} tokens (all sessions).`
+    : "Context budget off (all sessions): the hint floor follows the model's window.";
 }
 
 function saveLog(environment: CliEnvironment, value: string): string {
@@ -134,6 +146,9 @@ export async function run(argv: readonly string[], environment: CliEnvironment):
     case "threshold":
       if (!value) throw new Error("Enter a token count, or default.");
       return saveThreshold(environment, value);
+    case "budget":
+      if (!value) throw new Error("Enter a token count, or off.");
+      return saveBudget(environment, value);
     case "log":
       return saveLog(environment, value);
     case "key":

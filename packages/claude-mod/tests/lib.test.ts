@@ -3,6 +3,7 @@
 import { describe, expect, test } from "claude-code/testing";
 import {
   DEFAULT_MINIMUM,
+  parseBudget,
   parseConsent,
   parseMinimum,
   parseSavedApiKey,
@@ -54,6 +55,15 @@ const rows = (mode: unknown, minimum: unknown) => [
 ];
 
 describe("settings", () => {
+  test("a budget is a whole number of tokens, and off or default clears it", () => {
+    expect(parseBudget(" 450000 ")).toBe(450000);
+    expect(parseBudget("off")).toBe(0);
+    expect(parseBudget("default")).toBe(0);
+    for (const bad of ["", "-1", "1.5", "450k", "4e5", "9007199254740992"]) {
+      expect(() => parseBudget(bad)).toThrow("whole number");
+    }
+  });
+
   test("the minimum is a positive safe whole decimal number of tokens", () => {
     expect(parseMinimum(" 40000 ")).toBe(40000);
     expect(parseMinimum("60000")).toBe(60000);
@@ -87,6 +97,7 @@ describe("settings", () => {
     expect(readConfig(rows("hint", 40000), undefined)).toEqual({
       mode: "hint",
       minContextTokens: 40000,
+      contextBudgetTokens: 0,
       autoAcknowledged: false,
       logRequests: false,
     });
@@ -99,6 +110,7 @@ describe("settings", () => {
     ).toEqual({
       mode: "auto",
       minContextTokens: 60000,
+      contextBudgetTokens: 0,
       autoAcknowledged: true,
       logRequests: false,
     });
@@ -109,6 +121,14 @@ describe("settings", () => {
     expect(() => readConfig(rows("hint", 0), undefined)).toThrow("minimum");
     expect(() => readConfig(rows("hint", 1.5), undefined)).toThrow("minimum");
     expect(() => readConfig([], undefined)).toThrow("mode");
+    const budget = (value: unknown) => [
+      ...rows("hint", 40000),
+      { key: "compact-adviser.contextBudgetTokens", value },
+    ];
+    expect(readConfig(budget(450000), undefined).contextBudgetTokens).toBe(450000);
+    for (const bad of [-1, 1.5, "450000"]) {
+      expect(() => readConfig(budget(bad), undefined)).toThrow("context budget");
+    }
     expect(readConfig([], undefined, { mode: "off", minContextTokens: 50000 }).mode).toBe("off");
     expect(
       readConfig(rows("auto", 70000), undefined, { mode: "off", minContextTokens: 50000 })

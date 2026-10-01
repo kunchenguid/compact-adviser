@@ -24,6 +24,8 @@ export interface Settings {
   version: 1;
   mode: Mode;
   minContextTokens: number;
+  /** Tokens at which the hint floor is fully relaxed; 0 uses the model's window. */
+  contextBudgetTokens: number;
   logRequests: boolean;
   /** Saved TypeSafe key; a non-empty `TYPESAFE_API_KEY` in the environment still wins. */
   typesafeApiKey: string;
@@ -34,6 +36,7 @@ export const DEFAULT_SETTINGS: Readonly<Settings> = Object.freeze({
   version: 1,
   mode: "hint",
   minContextTokens: DEFAULT_MINIMUM,
+  contextBudgetTokens: 0,
   logRequests: false,
   typesafeApiKey: "",
 });
@@ -50,6 +53,17 @@ export function parseMinimum(text: string): number {
   const number = Number(value);
   if (!/^\d+$/.test(value) || !Number.isSafeInteger(number) || number <= 0) {
     throw new SettingsError("Enter a positive whole number of tokens, for example 40000.");
+  }
+  return number;
+}
+
+/** A context budget in tokens, or 0 for "off" and "default" (the model's window). */
+export function parseBudget(text: string): number {
+  const value = text.trim();
+  if (value === "off" || value === "default") return 0;
+  const number = Number(value);
+  if (!/^\d+$/.test(value) || !Number.isSafeInteger(number)) {
+    throw new SettingsError("Enter a whole number of tokens, for example 450000, or off.");
   }
   return number;
 }
@@ -100,6 +114,12 @@ export function parseSettings(value: unknown): Settings {
       "Cannot read the compact-adviser minimum context setting; no action is taken.",
     );
   }
+  const budget = s.contextBudgetTokens ?? 0;
+  if (typeof budget !== "number" || !Number.isSafeInteger(budget) || budget < 0) {
+    throw new SettingsError(
+      "Cannot read the compact-adviser context budget setting; no action is taken.",
+    );
+  }
   const logRequests = s.logRequests ?? false;
   if (typeof logRequests !== "boolean") {
     throw new SettingsError(
@@ -118,6 +138,7 @@ export function parseSettings(value: unknown): Settings {
     mode: mode as Mode,
     ...(s.profile !== undefined ? { profile: s.profile } : {}),
     minContextTokens: minimum,
+    contextBudgetTokens: budget,
     logRequests,
     typesafeApiKey: key,
   };

@@ -17,7 +17,14 @@ import { join } from "node:path";
 import { ConfigStore } from "./config.ts";
 import { DISABLE_ENV, disabledByEnv } from "./disable.ts";
 import { parseDotenvKey, type ResolvedTypesafeApiKey, resolveTypesafeApiKey } from "./env.ts";
-import { JudgeError, judge, qualifies, requestBody, typesafeEndpoint } from "./judge.ts";
+import {
+  effectiveBudget,
+  JudgeError,
+  judge,
+  qualifies,
+  requestBody,
+  typesafeEndpoint,
+} from "./judge.ts";
 import {
   appendRequestLogLine,
   errorLogLine,
@@ -223,7 +230,7 @@ async function onStop(payload: HookPayload, environment: Environment): Promise<H
     return {};
   }
 
-  const fraction = usageFraction(rollout);
+  const fraction = usageFraction(rollout, config.contextBudgetTokens);
   if (config.logRequests) {
     try {
       appendRequestLogLine(
@@ -235,6 +242,7 @@ async function onStop(payload: HookPayload, environment: Environment): Promise<H
           fraction,
           undefined,
           profile,
+          effectiveBudget(rollout.window ?? Number.NaN, config.contextBudgetTokens),
         ),
       );
     } catch {
@@ -251,6 +259,7 @@ async function onStop(payload: HookPayload, environment: Environment): Promise<H
     tokens < latestConfig.minContextTokens ||
     cooldownReason(current, tokens, nowAfter) !== undefined ||
     latestConfig.profile !== config.profile ||
+    latestConfig.contextBudgetTokens !== config.contextBudgetTokens ||
     !qualifies(result, fraction, profile)
   ) {
     sessions.write(sessionId, settled, usage);

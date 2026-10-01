@@ -499,6 +499,26 @@ describe("turn-end gates", () => {
     expect(hinted(w)).toBe(true);
   });
 
+  test("a context budget lets the same judgment hint on a large window", async ($, on) => {
+    // finished but coordinating scores 0.5: 300k of a 1M window is 30 % (floor 0.80, no hint);
+    // against a 330k budget it is 91 % (floor 0.50, hint).
+    const w = world(on);
+    w.usage = { tokens: 300000, window: 1000000 };
+    w.respond = async () => ({
+      status: 200,
+      text: JSON.stringify(jevAnswer({ completed: 1, handsOn: 0 })),
+    });
+    await $.session.start(interactiveStart);
+    await turnEnd($, w);
+    expect(w.journal.requests).toHaveLength(1);
+    expect(hinted(w)).toBe(false);
+    await $.command.run(commandRun("budget 330000"));
+    w.messages = longConversation("same size, now with a budget");
+    await turnEnd($, w);
+    expect(w.journal.requests).toHaveLength(2);
+    expect(hinted(w)).toBe(true);
+  });
+
   test("usage follows an enabled auto-compact threshold and otherwise uses the window", async ($, on) => {
     const w = world(on);
     w.usage = { tokens: 100000, window: 1000000, autoCompactThreshold: 200000 };
@@ -868,11 +888,11 @@ describe("commands", () => {
     await $.session.start(interactiveStart);
     await $.command.run(commandRun("sharing on"));
     expect(w.journal.toasts.at(-1)).toBe(
-      "Use /compact-adviser, auto, hint, off, status, threshold <tokens|default>, snooze or dismiss.",
+      "Use /compact-adviser, auto, hint, off, status, threshold <tokens|default>, budget <tokens|off>, snooze or dismiss.",
     );
     await $.command.run(commandRun("sharing off"));
     expect(w.journal.toasts.at(-1)).toBe(
-      "Use /compact-adviser, auto, hint, off, status, threshold <tokens|default>, snooze or dismiss.",
+      "Use /compact-adviser, auto, hint, off, status, threshold <tokens|default>, budget <tokens|off>, snooze or dismiss.",
     );
     expect(w.journal.asks).toHaveLength(0);
   });
@@ -883,9 +903,28 @@ describe("commands", () => {
     await $.command.run(commandRun("status"));
     const line = w.journal.logs.at(-1) ?? "";
     expect(line).toBe(
-      "Mode: hint. Minimum: 40,000 tokens. Context: 60,000 (36% of the context limit; hint floor 0.77). Key: env. No cooldown; semantic checks still apply. Claude Code auto-compacts at 167,000 tokens. Request log: off. Settings: /config (compact-adviser rows) and /compact-adviser.",
+      "Mode: hint. Minimum: 40,000 tokens. Budget: off. Context: 60,000 (36% of the context limit; hint floor 0.77). Key: env. No cooldown; semantic checks still apply. Claude Code auto-compacts at 167,000 tokens. Request log: off. Settings: /config (compact-adviser rows) and /compact-adviser.",
     );
     expect(line.includes(KEY)).toBe(false);
+  });
+
+  test("a budget below the compaction point relaxes the floor; one above it is ignored", async ($, on) => {
+    const w = world(on);
+    await $.session.start(interactiveStart);
+    await $.command.run(commandRun("budget 100000"));
+    expect(w.rows.get(`${PLUGIN}.contextBudgetTokens`)).toBe(100000);
+    expect(w.journal.toasts.at(-1)).toBe("Context budget saved: 100,000 tokens (all sessions).");
+    await $.command.run(commandRun("status"));
+    expect(w.journal.logs.at(-1)).toContain(
+      "Budget: 100,000 tokens. Context: 60,000 (60% of the budget; hint floor 0.65).",
+    );
+    await $.command.run(commandRun("budget 200000"));
+    await $.command.run(commandRun("status"));
+    expect(w.journal.logs.at(-1)).toContain("(36% of the context limit; hint floor 0.77)");
+    await $.command.run(commandRun("budget 100k"));
+    expect(w.rows.get(`${PLUGIN}.contextBudgetTokens`)).toBe(200000);
+    await $.command.run(commandRun("budget off"));
+    expect(w.rows.get(`${PLUGIN}.contextBudgetTokens`)).toBe(0);
   });
 
   test("status names this session's request log when logging is on", async ($, on) => {
@@ -922,7 +961,7 @@ describe("commands", () => {
     await $.session.start(interactiveStart);
     await $.command.run(commandRun("threshold"));
     expect(w.journal.toasts.at(-1)).toBe(
-      "Use /compact-adviser, auto, hint, off, status, threshold <tokens|default>, snooze or dismiss.",
+      "Use /compact-adviser, auto, hint, off, status, threshold <tokens|default>, budget <tokens|off>, snooze or dismiss.",
     );
   });
 });
@@ -1056,7 +1095,7 @@ describe("settings pane", () => {
     await $.ui.press({ plugin: PLUGIN, key: "menu:status" });
     await drain(w);
     expect(text(await $.ui.render(pane))).toContain(
-      "Mode: off. Minimum: 40,000 tokens. Context: 60,000 (36% of the context limit; hint floor 0.77). Key: env.",
+      "Mode: off. Minimum: 40,000 tokens. Budget: off. Context: 60,000 (36% of the context limit; hint floor 0.77). Key: env.",
     );
     expect(text(await $.ui.render(pane))).not.toContain("Sharing:");
     await $.ui.press({ plugin: PLUGIN, key: "menu:close" });

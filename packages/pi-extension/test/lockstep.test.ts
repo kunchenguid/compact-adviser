@@ -60,10 +60,31 @@ test("the question set and the floor schedule match", () => {
     assert.equal(other.USAGE_LOOSE_AT, pi.USAGE_LOOSE_AT);
     for (let u = -0.1; u <= 1.1; u += 0.01) assert.equal(other.floorFor(u), pi.floorFor(u));
     assert.equal(other.floorFor(Number.NaN), pi.floorFor(Number.NaN));
+    for (const [tokens, limit, budget] of [
+      [300000, 1000000, 0],
+      [300000, 1000000, 450000],
+      [300000, 400000, 450000],
+      [300000, 450000, 450000],
+      [300000, Number.NaN, 450000],
+      [300000, Number.NaN, 0],
+      [Number.NaN, 1000000, 450000],
+    ] as const) {
+      assert.equal(other.effectiveBudget(limit, budget), pi.effectiveBudget(limit, budget));
+      assert.deepEqual(
+        other.contextPressure(tokens, limit, budget),
+        pi.contextPressure(tokens, limit, budget),
+      );
+    }
     assert.equal(other.ENDPOINT, pi.ENDPOINT);
     assert.equal(other.MAX_REQUEST_BYTES, pi.MAX_REQUEST_BYTES);
   }
   assert.deepEqual(Object.keys(pi.QUESTIONS), ["done", "shape"]);
+  // A budget only relaxes the floor: below the limit it is the denominator, at or above it is ignored.
+  assert.equal(pi.contextPressure(300000, 1000000, 450000), 300000 / 450000);
+  assert.equal(pi.contextPressure(300000, 400000, 450000), 300000 / 400000);
+  assert.equal(pi.effectiveBudget(450000, 450000), 0);
+  assert.equal(pi.contextPressure(300000, Number.NaN, 450000), 300000 / 450000);
+  assert.ok(Number.isNaN(pi.contextPressure(300000, Number.NaN, 0)));
   assert.equal(pi.USAGE_STRICT_UNTIL, 0.1);
   assert.equal(pi.USAGE_LOOSE_AT, 0.9);
   assert.equal(pi.FLOOR_MIN, 0.5);

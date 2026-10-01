@@ -19,6 +19,7 @@
 import type { EngineInterface, PluginOptions, Register, RenderChildren } from "claude-code";
 import {
   API_KEY_KEY,
+  BUDGET_KEY,
   CONSENT_STORE_KEY,
   type Config,
   type Consent,
@@ -28,6 +29,7 @@ import {
   MINIMUM_KEY,
   MODE_KEY,
   type Mode,
+  parseBudget,
   parseConsent,
   parseMinimum,
   parseSavedApiKey,
@@ -42,6 +44,8 @@ import {
   type TypesafeKeySource,
 } from "../lib/env.ts";
 import {
+  contextPressure,
+  effectiveBudget,
   floorFor,
   JUDGE_DISABLED_NETWORK_MESSAGE,
   JUDGE_UNAVAILABLE_MESSAGE,
@@ -79,7 +83,7 @@ const COMPACT_INSTRUCTIONS =
 const PENDING_NOTICE_KEY = "pendingNotice";
 const LOOPBACK_ENDPOINT = /^http:\/\/127\.0\.0\.1:\d{1,5}\/[\x21-\x7e]*$/;
 const USAGE =
-  "Use /compact-adviser, auto, hint, off, status, threshold <tokens|default>, snooze or dismiss.";
+  "Use /compact-adviser, auto, hint, off, status, threshold <tokens|default>, budget <tokens|off>, snooze or dismiss.";
 
 // Per module environment (a hot reload starts fresh; see the header).
 let activation: Promise<boolean> | undefined;
@@ -222,28 +226,27 @@ async function invalidate($: EngineInterface): Promise<void> {
   }
 }
 
-/** Context tokens over the active limit, or NaN when the engine does not know it (strictest floor). */
-function usageFraction(context: {
+interface ContextUsage {
   tokens?: number;
   window: number;
   breakdown?: { isAutoCompactEnabled: boolean; autoCompactThreshold?: number };
-}): number {
+}
+
+/** Claude Code's auto-compact threshold when it reports one as enabled, otherwise the window. */
+function contextLimit(context: ContextUsage): number {
   const threshold = context.breakdown?.autoCompactThreshold;
-  const denominator =
-    context.breakdown?.isAutoCompactEnabled &&
+  return context.breakdown?.isAutoCompactEnabled &&
     typeof threshold === "number" &&
     Number.isFinite(threshold) &&
     threshold > 0
-      ? threshold
-      : context.window;
-  if (
-    typeof context.tokens !== "number" ||
-    !Number.isFinite(context.tokens) ||
-    !Number.isFinite(denominator) ||
-    denominator <= 0
-  )
-    return Number.NaN;
-  return context.tokens / denominator;
+    ? threshold
+    : context.window;
+}
+
+/** Context tokens over the budget or the active limit; NaN when unknown (strictest floor). */
+function usageFraction(context: ContextUsage, budget: number): number {
+  if (typeof context.tokens !== "number") return Number.NaN;
+  return contextPressure(context.tokens, contextLimit(context), budget);
 }
 
 async function eligible(
@@ -329,9 +332,10 @@ async function judgeCheckpoint($: EngineInterface, epoch: number): Promise<void>
           responseLogLine(
             loggedBody ?? requestBody(view.state, profile),
             result,
-            usageFraction(context),
+            usageFraction(context, latest.contextBudgetTokens),
             undefined,
             profile,
+            effectiveBudget(contextLimit(context), latest.contextBudgetTokens),
           ),
         );
       } catch {
@@ -345,7 +349,10 @@ async function judgeCheckpoint($: EngineInterface, epoch: number): Promise<void>
       return;
     let state: SessionState = { ...current, failures: 0, retryAfter: 0, updatedAt: now };
     const auto = latest.mode === "auto";
-    if (!qualifies(result, usageFraction(context), profile) || (auto && !latest.autoAcknowledged)) {
+    if (
+      !qualifies(result, usageFraction(context, latest.contextBudgetTokens), profile) ||
+      (auto && !latest.autoAcknowledged)
+    ) {
       await $.store.set(key, state);
       return;
     }
@@ -612,6 +619,19 @@ async function changeMode($: EngineInterface, mode: Mode, fromPane = false): Pro
   );
 }
 
+/** Validates and saves a context budget; throws the validation message for the caller to show. */
+async function changeBudget($: EngineInterface, text: string): Promise<boolean> {
+  const count = parseBudget(text);
+  return saveRow(
+    $,
+    BUDGET_KEY,
+    count,
+    count > 0
+      ? `Context budget saved: ${formatTokens(count)} tokens (all sessions).`
+      : "Context budget off (all sessions): the hint floor follows Claude Code's own limit.",
+  );
+}
+
 /** Validates and saves a minimum; throws the validation message for the caller to show. */
 async function changeMinimum($: EngineInterface, text: string): Promise<boolean> {
   const count = text === "default" ? DEFAULT_MINIMUM : parseMinimum(text);
@@ -674,7 +694,9 @@ async function statusText($: EngineInterface): Promise<string> {
       ? (cooldownReason(state, tokens, await $.clock.now()) ??
         "No cooldown; semantic checks still apply.")
       : "Waiting for fresh model usage.";
-  return `Mode: ${config.mode}${config.mode === "auto" && !config.autoAcknowledged ? " (not confirmed)" : ""}. Minimum: ${formatTokens(config.minContextTokens)} tokens. Context: ${typeof tokens === "number" ? formatTokens(tokens) : "unknown"}${Number.isFinite(usageFraction(usage.context)) ? ` (${Math.round(usageFraction(usage.context) * 100)}% of the context limit; hint floor ${floorFor(usageFraction(usage.context), parseProfile(config.profile)).toFixed(2)})` : ""}. ${formatKeyStatus((await resolvedKey($)).source)}. ${cooldown}${engine} Request log: ${config.logRequests ? await sessionLogPath($) : "off"}. Settings: /config (compact-adviser rows) and /compact-adviser.`;
+  const budget = config.contextBudgetTokens;
+  const fraction = usageFraction(usage.context, budget);
+  return `Mode: ${config.mode}${config.mode === "auto" && !config.autoAcknowledged ? " (not confirmed)" : ""}. Minimum: ${formatTokens(config.minContextTokens)} tokens. Budget: ${budget > 0 ? `${formatTokens(budget)} tokens` : "off"}. Context: ${typeof tokens === "number" ? formatTokens(tokens) : "unknown"}${Number.isFinite(fraction) ? ` (${Math.round(fraction * 100)}% of the ${effectiveBudget(contextLimit(usage.context), budget) > 0 ? "budget" : "context limit"}; hint floor ${floorFor(fraction, parseProfile(config.profile)).toFixed(2)})` : ""}. ${formatKeyStatus((await resolvedKey($)).source)}. ${cooldown}${engine} Request log: ${config.logRequests ? await sessionLogPath($) : "off"}. Settings: /config (compact-adviser rows) and /compact-adviser.`;
 }
 
 async function snoozeOrDismiss($: EngineInterface, command: "snooze" | "dismiss") {
@@ -776,6 +798,8 @@ export const register: Register = (on, options) => {
         await placeRing($, 40);
       } else if (["auto", "hint", "off"].includes(command) && !value) {
         await changeMode($, command as Mode);
+      } else if (command === "budget" && value) {
+        await changeBudget($, value);
       } else if (command === "threshold" && value) {
         await changeMinimum($, value);
       } else if (command === "status" && !value) {

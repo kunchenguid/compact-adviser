@@ -285,10 +285,13 @@ test("usage comes from the last token_count record and degrades to NaN", () => {
   const rollout = mapRecords([tokenCount(10), tokenCount(95941, 258400)]);
   assert.equal(rollout.tokens, 95941);
   assert.equal(rollout.window, 258400);
-  assert.equal(usageFraction(rollout), 95941 / 258400);
-  assert.ok(Number.isNaN(usageFraction({ tokens: 5, window: 0 })));
-  assert.ok(Number.isNaN(usageFraction({ tokens: undefined, window: 1000 })));
-  assert.ok(Number.isNaN(usageFraction(mapRecords([]))));
+  assert.equal(usageFraction(rollout, 0), 95941 / 258400);
+  assert.equal(usageFraction(rollout, 100000), 95941 / 100000);
+  assert.equal(usageFraction(rollout, 300000), 95941 / 258400);
+  assert.equal(usageFraction({ tokens: 5, window: 0 }, 10), 0.5);
+  assert.ok(Number.isNaN(usageFraction({ tokens: 5, window: 0 }, 0)));
+  assert.ok(Number.isNaN(usageFraction({ tokens: undefined, window: 1000 }, 500)));
+  assert.ok(Number.isNaN(usageFraction(mapRecords([]), 0)));
 });
 
 test("unknown, malformed, and unparsable records are skipped, not fatal", () => {
