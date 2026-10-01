@@ -180,7 +180,7 @@ hint can never be fed back to the model.
 | `/compact-adviser-hint` / `/compact-adviser-off` (Grok) | Save hint-only mode, or disable the adviser |
 | `/compact-adviser-snooze` / `/compact-adviser-dismiss` (Grok) | Suppress the next three exchanges, or clear the current hint |
 | `/compact-adviser-install` (Grok) | Register the hooks and print the status-line block to paste into the named `config.toml` |
-| `${GROK_HOME:-$HOME/.grok}/compact-adviser/adviser.sh threshold 60000` (Grok shell) | Save an absolute token minimum; `budget <tokens|off>` saves a context budget; `help` lists the other shell-only settings |
+| `${GROK_HOME:-$HOME/.grok}/compact-adviser/adviser.sh threshold 60000` (Grok shell) | Save an absolute token minimum; `budget <tokens\|off>` saves a context budget; `help` lists the other shell-only settings |
 
 On Codex the same commands are arguments to the plugin's `src/cli.ts` (`status`, `hint`, `off`,
 `threshold`, `budget <tokens|off>`, `log on|off`, `key set|clear|status`) rather than a slash
