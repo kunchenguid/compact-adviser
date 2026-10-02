@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.12](https://github.com/kunchenguid/compact-adviser/compare/compact-adviser-v0.1.11...compact-adviser-v0.1.12) (2026-10-02)
+
+
+### Features
+
+* add an optional context budget for the hint floor ([#65](https://github.com/kunchenguid/compact-adviser/issues/65)) ([2e90535](https://github.com/kunchenguid/compact-adviser/commit/2e9053503cf5906f819ae8b6ca519fc94819db89))
+
 ## [0.1.11](https://github.com/kunchenguid/compact-adviser/compare/compact-adviser-v0.1.10...compact-adviser-v0.1.11) (2026-09-29)
 
 
