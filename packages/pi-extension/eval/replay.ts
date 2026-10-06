@@ -123,7 +123,11 @@ export function replayAt(s: LoadedSession, entry: SessionEntry, ordinal: number)
   };
 }
 
-/** The production size/dedup gates that must pass before a TypeSafe request is made. */
+/**
+ * Size/dedup gates that must pass before a TypeSafe request is made. The
+ * conversation floor keeps the historical 20k constant so corpus eligibility
+ * stays stable; production Pi now gates at 1.5x keepRecentTokens (src/adviser.ts).
+ */
 export const MIN_CONTEXT_TOKENS = 40000;
 export function passesSizeGates(c: Checkpoint): boolean {
   return c.contextTokens >= MIN_CONTEXT_TOKENS && c.conversationTokens > 20000;
