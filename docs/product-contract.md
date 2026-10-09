@@ -38,7 +38,13 @@ Invalid values and cancellation preserve existing settings; failed saves are rep
 
 Pi uses its own agent-directory `compact-adviser.json` and Pi session custom entries.
 The Grok plugin uses its own `${GROK_HOME:-~/.grok}/compact-adviser/settings.json`, plus one file per session for cooldowns and one for the verdict the status line reads; its two halves are separate processes, so nothing is held in memory between them.
-The Claude Code mod uses its own `userConfig` options (`mode`, `minContextTokens`, `contextBudgetTokens`, `logRequests`, `typesafeApiKey`) in Claude Code's settings, and its own plugin store for the automatic-mode acknowledgement and per-session cooldowns.
+The Claude Code mod uses its own `userConfig` options (`mode`, `minContextTokens`, `contextBudgetTokens`, `logRequests`, `profile`, `beforeCompactPrompt`, `typesafeApiKey`) in Claude Code's settings, and its own plugin store for the automatic-mode acknowledgement and per-session cooldowns.
+`beforeCompactPrompt` is Claude Code only and empty by default, so the other hosts are unchanged.
+A non-empty value, and only in confirmed auto mode, runs as one turn before compaction; compaction follows only if that turn ends in a settled answer.
+A leading `/` is a slash command, because a plugin prompt does not expand slash commands or `@file` mentions.
+An intervening prompt or command, an interruption, an error, or a 5-minute timeout leaves context alone.
+Pi does not share this setting: host parity is the judge questions, the score, and the floor, not each host's configuration.
+Codex and Grok stay hint-only.
 `typesafeApiKey` is hidden from `/config` so the host menu never draws the secret.
 The Codex plugin owns `<CODEX_HOME>/compact-adviser/`: one `settings.json`, one cooldown record
 per session, and the request logs. It does not touch `config.toml`, whose unknown keys are an

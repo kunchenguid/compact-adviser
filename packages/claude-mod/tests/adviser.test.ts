@@ -726,6 +726,8 @@ describe("automatic mode", () => {
           "The session reached a natural boundary; keep the current work, pending tasks, referenced files, and the next step exact.",
       },
     ]);
+    expect(w.journal.prompts).toHaveLength(0);
+    expect(w.journal.ranCommands).toHaveLength(0);
     expect(w.journal.statuses).toContain("compacting at a checkpoint (experimental auto)…");
     expect(w.journal.toasts).toContain("compaction completed: 60,000 to 3,300 tokens.");
     expect(w.journal.logs).toEqual(["automatic compaction completed: 60,000 to 3,300 tokens."]);
@@ -783,6 +785,411 @@ describe("automatic mode", () => {
     await turnEnd($, w);
     expect(w.journal.compactions).toHaveLength(2);
     expect(stored(w).retryAfter).toBe(START + 120000);
+  });
+});
+
+describe("before-compact prompt", () => {
+  const acknowledged = { autoAcknowledged: true };
+
+  function autoWorld(on: Parameters<typeof world>[0], prompt = "") {
+    const w = world(on, { mode: "auto", consent: acknowledged });
+    if (prompt) w.rows.set(`${PLUGIN}.beforeCompactPrompt`, prompt);
+    return w;
+  }
+
+  async function finishSubmittedTurn(
+    $: Parameters<typeof turnEnd>[0],
+    w: World,
+    answer = "Notes saved.",
+  ) {
+    await $.turn.start({ turnId: "before-1", text: answer } as never);
+    await $.turn.complete({
+      answer,
+      durationMs: 1000,
+      isAborted: false,
+      turnId: "before-1",
+      reason: "answer",
+    });
+    await drain(w);
+  }
+
+  test("submits the prompt, then compacts when that turn ends cleanly", async ($, on) => {
+    const w = autoWorld(on, "Save the notes from this session.");
+    await $.session.start(interactiveStart);
+    await turnEnd($, w);
+    expect(w.journal.prompts).toEqual(["Save the notes from this session."]);
+    expect(w.journal.ranCommands).toHaveLength(0);
+    expect(w.journal.compactions).toHaveLength(0);
+    expect(w.journal.statuses).toContain("running the before-compact prompt…");
+    await finishSubmittedTurn($, w);
+    expect(w.journal.compactions).toHaveLength(1);
+    expect(w.journal.statuses.at(-1)).toBeUndefined();
+    expect(stored(w).compacted).toBe(true);
+  });
+
+  test("runs a leading slash as a command, not as model text", async ($, on) => {
+    const w = autoWorld(on, "/stow");
+    await $.session.start(interactiveStart);
+    await turnEnd($, w);
+    expect(w.journal.prompts).toHaveLength(0);
+    expect(w.journal.ranCommands).toEqual([{ command: "stow" }]);
+    expect(w.journal.compactions).toHaveLength(0);
+    await finishSubmittedTurn($, w);
+    expect(w.journal.compactions).toHaveLength(1);
+  });
+
+  async function retryCheckpoint($: Parameters<typeof turnEnd>[0], w: World) {
+    await w.clock.advance(60_000);
+    w.messages = [...w.messages, { role: "user", text: "more", toolUses: [] }];
+    await turnEnd($, w);
+  }
+
+  test("a before-compact command that fails before a turn does not block the next checkpoint", async ($, on) => {
+    const w = autoWorld(on, "/stow");
+    w.failCommand = "stow";
+    await $.session.start(interactiveStart);
+    await turnEnd($, w);
+    expect(w.journal.ranCommands).toEqual([{ command: "stow" }]);
+    expect(w.journal.compactions).toHaveLength(0);
+    expect(w.journal.toasts.some((toast) => toast.includes("did not run"))).toBe(true);
+    expect(stored(w).retryAfter).toBe(START + 60_000);
+    w.failCommand = undefined;
+    await retryCheckpoint($, w);
+    expect(w.journal.ranCommands).toEqual([{ command: "stow" }, { command: "stow" }]);
+    expect(w.journal.compactions).toHaveLength(0);
+    await finishSubmittedTurn($, w);
+    expect(w.journal.compactions).toHaveLength(1);
+  });
+
+  test("a before-compact prompt that fails before a turn does not block the next checkpoint", async ($, on) => {
+    const w = autoWorld(on, "Save the notes from this session.");
+    w.failPrompt = true;
+    await $.session.start(interactiveStart);
+    await turnEnd($, w);
+    expect(w.journal.prompts).toEqual(["Save the notes from this session."]);
+    expect(w.journal.compactions).toHaveLength(0);
+    expect(w.journal.toasts.some((toast) => toast.includes("did not run"))).toBe(true);
+    w.failPrompt = false;
+    await retryCheckpoint($, w);
+    expect(w.journal.prompts).toEqual([
+      "Save the notes from this session.",
+      "Save the notes from this session.",
+    ]);
+    await finishSubmittedTurn($, w);
+    expect(w.journal.compactions).toHaveLength(1);
+  });
+
+  test("a person slash command in between is not compacted as the before-compact turn", async ($, on) => {
+    const w = autoWorld(on, "/stow");
+    await $.session.start(interactiveStart);
+    await turnEnd($, w);
+    expect(w.journal.ranCommands).toEqual([{ command: "stow" }]);
+    await $.command
+      .run({
+        command: "commit",
+        args: "",
+        origin: { kind: "composer" },
+        presentation: { layout: "main", isFullscreen: false, columns: 100 },
+      } as never)
+      .catch(() => undefined);
+    await $.turn.start({ turnId: "person-1", text: "committing" } as never);
+    await $.turn.complete({
+      answer: "Committed.",
+      durationMs: 500,
+      isAborted: false,
+      turnId: "person-1",
+      reason: "answer",
+    });
+    await drain(w);
+    expect(w.journal.compactions).toHaveLength(0);
+    expect(w.journal.statuses.at(-1)).toBeUndefined();
+    await finishSubmittedTurn($, w);
+    expect(w.journal.compactions).toHaveLength(0);
+    await retryCheckpoint($, w);
+    expect(w.journal.ranCommands).toEqual([{ command: "stow" }, { command: "stow" }]);
+  });
+
+  test("a person prompt in between abandons the checkpoint and does not compact", async ($, on) => {
+    const w = autoWorld(on, "Save the notes from this session.");
+    await $.session.start(interactiveStart);
+    await turnEnd($, w);
+    expect(w.journal.prompts).toEqual(["Save the notes from this session."]);
+    await $.prompt.submit({
+      text: "wait, one more thing",
+      origin: { kind: "composer" },
+      wait: false,
+    } as never);
+    await drain(w);
+    expect(w.journal.compactions).toHaveLength(0);
+    expect(w.journal.statuses.at(-1)).toBeUndefined();
+    await finishSubmittedTurn($, w);
+    expect(w.journal.compactions).toHaveLength(0);
+  });
+
+  test("another plugin's prompt in between abandons the checkpoint", async ($, on) => {
+    const w = autoWorld(on, "/stow");
+    await $.session.start(interactiveStart);
+    await turnEnd($, w);
+    await $.prompt.submit({
+      text: "background task finished",
+      origin: { kind: "plugin", name: "another-plugin" },
+      wait: false,
+    } as never);
+    await finishSubmittedTurn($, w);
+    expect(w.journal.compactions).toHaveLength(0);
+    expect(stored(w).retryAfter).toBe(START + 60_000);
+  });
+
+  test("a person's turn after an abandoned handoff is judged as its own checkpoint", async ($, on) => {
+    const w = autoWorld(on, "/stow");
+    await $.session.start(interactiveStart);
+    await turnEnd($, w);
+    expect(w.journal.requests).toHaveLength(1);
+    await $.command
+      .run({
+        command: "help",
+        args: "",
+        origin: { kind: "composer" },
+        presentation: { layout: "main", isFullscreen: false, columns: 100 },
+      } as never)
+      .catch(() => undefined);
+    await w.clock.advance(60_000);
+    w.messages = [...w.messages, { role: "user", text: "more", toolUses: [] }];
+    await $.prompt.submit({
+      text: "one more thing",
+      origin: { kind: "composer" },
+      wait: false,
+    } as never);
+    await $.turn.start({ turnId: "person-2", text: "one more thing" } as never);
+    await turnEnd($, w, { ...answered(), turnId: "person-2" });
+    expect(w.journal.requests).toHaveLength(2);
+    expect(w.journal.ranCommands).toEqual([{ command: "stow" }, { command: "stow" }]);
+    expect(w.journal.compactions).toHaveLength(0);
+  });
+
+  test("a person prompt queued during the turn keeps the checkpoint from arming", async ($, on) => {
+    const w = autoWorld(on, "/stow");
+    await $.session.start(interactiveStart);
+    await $.turn.start({ turnId: "turn-1", text: "hello" } as never);
+    await $.prompt.submit({
+      text: "and then this",
+      origin: { kind: "composer" },
+      turnId: "turn-1",
+      wait: false,
+    } as never);
+    await turnEnd($, w);
+    expect(w.journal.ranCommands).toHaveLength(0);
+    await $.turn.start({ turnId: "person-q", text: "and then this" } as never);
+    await $.turn.complete({
+      answer: "Done.",
+      durationMs: 500,
+      isAborted: false,
+      turnId: "person-q",
+      reason: "answer",
+    });
+    await drain(w);
+    expect(w.journal.compactions).toHaveLength(0);
+  });
+
+  test("another turn starting after the before-compact turn abandons it", async ($, on) => {
+    const w = autoWorld(on, "/stow");
+    await $.session.start(interactiveStart);
+    await turnEnd($, w);
+    await $.turn.start({ turnId: "before-1", text: "stow" } as never);
+    await $.turn.start({ turnId: "other-1", text: "" } as never);
+    await $.turn.complete({
+      answer: "Notes saved.",
+      durationMs: 1000,
+      isAborted: false,
+      turnId: "before-1",
+      reason: "answer",
+    });
+    await drain(w);
+    expect(w.journal.compactions).toHaveLength(0);
+    expect(w.journal.statuses.at(-1)).toBeUndefined();
+  });
+
+  const interleavings: [string, ($: Engine) => Promise<unknown>][] = [
+    ["a turn starts", ($) => $.turn.start({ turnId: "person-3", text: "next" } as never)],
+    [
+      "a manual compaction runs",
+      ($) => $.session.compact({ trigger: "manual", messages: MESSAGES }),
+    ],
+    [
+      "a person runs a command",
+      ($) =>
+        $.command
+          .run({
+            command: "help",
+            args: "",
+            origin: { kind: "composer" },
+            presentation: { layout: "main", isFullscreen: false, columns: 100 },
+          } as never)
+          .catch(() => undefined),
+    ],
+  ];
+  for (const [name, interleave] of interleavings) {
+    test(`does not compact when ${name} before the scheduled compaction`, async ($, on) => {
+      const w = autoWorld(on, "/stow");
+      await $.session.start(interactiveStart);
+      await turnEnd($, w);
+      await $.turn.start({ turnId: "before-1", text: "stow" } as never);
+      await $.turn.complete({
+        answer: "Notes saved.",
+        durationMs: 1000,
+        isAborted: false,
+        turnId: "before-1",
+        reason: "answer",
+      });
+      await interleave($);
+      await drain(w);
+      expect(w.journal.compactions).toHaveLength(0);
+      expect(w.journal.statuses.at(-1)).toBeUndefined();
+    });
+  }
+
+  test("an interrupted before-compact turn does not compact", async ($, on) => {
+    const w = autoWorld(on, "Save the notes from this session.");
+    await $.session.start(interactiveStart);
+    await turnEnd($, w);
+    await $.turn.start({ turnId: "before-1", text: "Save the notes from this session." } as never);
+    await $.turn.complete({
+      answer: "",
+      durationMs: 1000,
+      isAborted: true,
+      turnId: "before-1",
+      reason: "aborted",
+    });
+    await drain(w);
+    expect(w.journal.compactions).toHaveLength(0);
+    expect(w.journal.statuses.at(-1)).toBeUndefined();
+  });
+
+  test("an empty setting still compacts immediately", async ($, on) => {
+    const w = autoWorld(on, "   ");
+    await $.session.start(interactiveStart);
+    await turnEnd($, w);
+    expect(w.journal.prompts).toHaveLength(0);
+    expect(w.journal.ranCommands).toHaveLength(0);
+    expect(w.journal.compactions).toHaveLength(1);
+  });
+
+  test("hint mode ignores the setting", async ($, on) => {
+    const w = world(on);
+    w.rows.set(`${PLUGIN}.beforeCompactPrompt`, "/stow");
+    await $.session.start(interactiveStart);
+    await turnEnd($, w);
+    expect(hinted(w)).toBe(true);
+    expect(w.journal.compactions).toHaveLength(0);
+    expect(w.journal.prompts).toHaveLength(0);
+    expect(w.journal.ranCommands).toHaveLength(0);
+  });
+
+  test("a timed-out before-compact prompt does not compact", async ($, on) => {
+    const w = autoWorld(on, "Save the notes from this session.");
+    await $.session.start(interactiveStart);
+    await turnEnd($, w);
+    expect(w.journal.prompts).toHaveLength(1);
+    await w.clock.advance(299_999);
+    await drain(w);
+    expect(w.journal.compactions).toHaveLength(0);
+    expect(w.journal.toasts.some((toast) => toast.includes("timed out"))).toBe(false);
+    await w.clock.advance(1);
+    await drain(w);
+    expect(w.journal.toasts.some((toast) => toast.includes("timed out"))).toBe(true);
+    expect(w.journal.compactions).toHaveLength(0);
+    expect(w.journal.requests).toHaveLength(1);
+    await w.clock.advance(90_000);
+    w.messages = [...w.messages, { role: "user", text: "more", toolUses: [] }];
+    await finishSubmittedTurn($, w);
+    expect(w.journal.compactions).toHaveLength(0);
+    expect(w.journal.requests).toHaveLength(1);
+  });
+
+  test("a plugin turn that starts after dispatch was abandoned is not judged", async ($, on) => {
+    const w = autoWorld(on, "/stow");
+    await $.session.start(interactiveStart);
+    await turnEnd($, w);
+    expect(w.journal.requests).toHaveLength(1);
+    await $.command
+      .run({
+        command: "help",
+        args: "",
+        origin: { kind: "composer" },
+        presentation: { layout: "main", isFullscreen: false, columns: 100 },
+      } as never)
+      .catch(() => undefined);
+    await $.turn.start({ turnId: "stow-late", text: "/stow" } as never);
+    await w.clock.advance(90_000);
+    w.messages = [...w.messages, { role: "user", text: "more", toolUses: [] }];
+    await $.turn.complete({
+      answer: "Notes saved.",
+      durationMs: 1000,
+      isAborted: false,
+      turnId: "stow-late",
+      reason: "answer",
+    });
+    await drain(w);
+    expect(w.journal.requests).toHaveLength(1);
+    expect(w.journal.compactions).toHaveLength(0);
+  });
+
+  test("a prompt during that late turn does not make its completion a checkpoint", async ($, on) => {
+    const w = autoWorld(on, "/stow");
+    await $.session.start(interactiveStart);
+    await turnEnd($, w);
+    expect(w.journal.requests).toHaveLength(1);
+    await $.command
+      .run({
+        command: "help",
+        args: "",
+        origin: { kind: "composer" },
+        presentation: { layout: "main", isFullscreen: false, columns: 100 },
+      } as never)
+      .catch(() => undefined);
+    await $.turn.start({ turnId: "stow-late", text: "/stow" } as never);
+    await $.prompt.submit({
+      text: "wait, one more thing",
+      origin: { kind: "composer" },
+      wait: false,
+    } as never);
+    await w.clock.advance(90_000);
+    w.messages = [...w.messages, { role: "user", text: "more", toolUses: [] }];
+    await $.turn.complete({
+      answer: "Notes saved.",
+      durationMs: 1000,
+      isAborted: false,
+      turnId: "stow-late",
+      reason: "answer",
+    });
+    await drain(w);
+    expect(w.journal.requests).toHaveLength(1);
+    expect(w.journal.compactions).toHaveLength(0);
+  });
+
+  test("a before-compact turn still running at the timeout is not judged when it ends", async ($, on) => {
+    const w = autoWorld(on, "/stow");
+    await $.session.start(interactiveStart);
+    await turnEnd($, w);
+    expect(w.journal.requests).toHaveLength(1);
+    await $.turn.start({ turnId: "before-1", text: "stow" } as never);
+    await w.clock.advance(300_000);
+    await drain(w);
+    expect(w.journal.toasts.some((toast) => toast.includes("timed out"))).toBe(true);
+    await w.clock.advance(90_000);
+    w.messages = [...w.messages, { role: "user", text: "more", toolUses: [] }];
+    await $.turn.complete({
+      answer: "Notes saved.",
+      durationMs: 390_000,
+      isAborted: false,
+      turnId: "before-1",
+      reason: "answer",
+    });
+    await drain(w);
+    expect(w.journal.requests).toHaveLength(1);
+    expect(w.journal.ranCommands).toEqual([{ command: "stow" }]);
+    expect(w.journal.compactions).toHaveLength(0);
+    expect(stored(w).retryAfter).toBe(START + 450_000);
   });
 });
 

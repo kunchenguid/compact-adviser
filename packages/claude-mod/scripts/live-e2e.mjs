@@ -48,10 +48,26 @@ const project = join(lab, "project");
 mkdirSync(config, { recursive: true });
 mkdirSync(project, { recursive: true });
 writeFileSync(join(project, ".env"), `TYPESAFE_API_KEY=${TYPESAFE_KEY}\n`);
+const MARKER = join(project, "before-compact-marker.txt");
+const MARKER_BODY = "MARKER_SKILL_E2E write before-compact-marker.txt";
+mkdirSync(join(project, ".claude", "skills", "marker"), { recursive: true });
+mkdirSync(join(project, ".claude", "commands"), { recursive: true });
+const markerSkill = `---
+name: marker
+description: e2e slash command that records a marker before compaction
+user-invocable: true
+---
+
+${MARKER_BODY}
+Reply with exactly: marker written
+`;
+writeFileSync(join(project, ".claude", "skills", "marker", "SKILL.md"), markerSkill);
+writeFileSync(join(project, ".claude", "commands", "marker.md"), markerSkill);
 
 // --- Local servers -----------------------------------------------------------------
 const jevRequests = [];
 const summaries = [];
+const liveEvents = [];
 const verdict = { completed: 0.99, handsOn: 0.99 };
 
 function jevAnswer() {
@@ -83,10 +99,16 @@ function reply(body) {
   const text = lastUserText(body);
   if (/detailed summary|summar(y|ize) of the conversation/i.test(text)) {
     summaries.push(Date.now());
+    liveEvents.push("summary");
     return {
       text: "<summary>1. Primary Request and Intent: e2e fixture work, all committed. 8. Current Work: none pending.</summary>",
       input: 70000,
     };
+  }
+  if (text.includes(MARKER_BODY) || /(?:^|\n)\/marker\b/.test(text)) {
+    writeFileSync(MARKER, "ran\n");
+    liveEvents.push("marker");
+    return { text: "marker written", input: 70000 };
   }
   const prompt = /E2E-PROMPT-(\d+)/.exec(text);
   if (!prompt) return { text: "ok", input: 1000 };
@@ -159,19 +181,27 @@ const server = createServer((req, res) => {
     } catch {
       body = {};
     }
-    if (req.url.startsWith("/v1/systemone")) {
-      jevRequests.push({ authorization: req.headers.authorization, body });
-      res.writeHead(200, { "content-type": "application/json" });
-      res.end(JSON.stringify(jevAnswer()));
-    } else if (req.url.startsWith("/v1/messages/count_tokens")) {
-      res.writeHead(200, { "content-type": "application/json" });
-      res.end(JSON.stringify({ input_tokens: 1000 }));
-    } else if (req.url.startsWith("/v1/messages")) {
-      send(res, body);
-    } else {
-      res.writeHead(404, { "content-type": "application/json" });
-      res.end("{}");
+    const deliver = () => {
+      if (req.url.startsWith("/v1/systemone")) {
+        jevRequests.push({ authorization: req.headers.authorization, body });
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify(jevAnswer()));
+      } else if (req.url.startsWith("/v1/messages/count_tokens")) {
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify({ input_tokens: 1000 }));
+      } else if (req.url.startsWith("/v1/messages")) {
+        send(res, body);
+      } else {
+        res.writeHead(404, { "content-type": "application/json" });
+        res.end("{}");
+      }
+    };
+    const userText = req.url.startsWith("/v1/messages") ? lastUserText(body) : "";
+    if (userText.includes("MARKER_SKILL_E2E hold")) {
+      setTimeout(deliver, 12000);
+      return;
     }
+    deliver();
   });
 });
 await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -245,6 +275,9 @@ function launch(flag) {
     COMPACT_ADVISER_TEST_ENDPOINT: `http://127.0.0.1:${port}/v1/systemone`,
   });
   if (!flag) delete env.CLAUDE_CODE_ENABLE_FUNCTION_HOOKS;
+  // This process may be launched with the product kill switch set. The live harness
+  // has to observe the plugin, so it must not inherit that.
+  delete env.COMPACT_ADVISER_DISABLE;
   const exports = Object.entries(env)
     .filter(([name]) => /^[A-Za-z_][A-Za-z0-9_]*$/.test(name))
     .map(([name, value]) => `${name}=${JSON.stringify(value).replace(/\$/g, "\\$")}`)
@@ -531,6 +564,83 @@ try {
     throw new Error(`[${step}] post-compaction exchange bypassed the retained wait gate`);
   if (summaries.length !== 1) throw new Error(`[${step}] a second compaction ran`);
   pass("the first post-compaction exchange remains gated and does not judge or compact again");
+
+  // Before-compact: a skill-backed slash command runs, then compaction, and a typed
+  // prompt while that turn is pending leaves the conversation uncompacted.
+  function setBeforePrompt(value) {
+    const settingsPath = join(config, "settings.json");
+    const settings = JSON.parse(readFileSync(settingsPath, "utf8"));
+    const name = Object.keys(settings.pluginConfigs ?? {}).find((n) =>
+      n.startsWith("compact-adviser"),
+    );
+    if (!name) throw new Error("compact-adviser plugin config is missing");
+    settings.pluginConfigs[name].options.beforeCompactPrompt = value;
+    settings.pluginConfigs[name].options.mode = "auto";
+    writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
+  }
+
+  step = "before-compact skill";
+  try {
+    tmux("kill-server");
+  } catch {}
+  rmSync(MARKER, { force: true });
+  const summariesBefore = summaries.length;
+  const eventsBefore = liveEvents.length;
+  setBeforePrompt("/marker");
+  launch(true);
+  await ready();
+  if (pluginOptions().beforeCompactPrompt !== "/marker") {
+    throw new Error(
+      `[${step}] beforeCompactPrompt was not loaded: ${JSON.stringify(pluginOptions())}`,
+    );
+  }
+  await command("E2E-PROMPT-1 record the marker");
+  await waitFor(
+    () => {
+      try {
+        return readFileSync(MARKER, "utf8").includes("ran");
+      } catch {
+        return false;
+      }
+    },
+    "the marker skill to write its file",
+    90000,
+  );
+  const freshEvents = liveEvents.slice(eventsBefore);
+  const markerAt = freshEvents.indexOf("marker");
+  const summaryAt = freshEvents.indexOf("summary");
+  if (markerAt === -1 || (summaryAt !== -1 && summaryAt < markerAt)) {
+    throw new Error(
+      `[${step}] marker skill did not run before compaction: ${freshEvents.join(",")}`,
+    );
+  }
+  await waitText("compact-adviser: automatic compaction completed:", 90000);
+  if (summaries.length !== summariesBefore + 1) {
+    throw new Error(`[${step}] expected one compaction after the marker skill`);
+  }
+  pass("automatic mode runs the marker skill, then compacts once that turn ends");
+
+  step = "before-compact interrupted";
+  try {
+    tmux("kill-server");
+  } catch {}
+  const summariesAtInterrupt = summaries.length;
+  setBeforePrompt("Save the notes from this session. MARKER_SKILL_E2E hold");
+  launch(true);
+  await ready();
+  await command("E2E-PROMPT-1 one more change");
+  await waitText("running the before-compact prompt", 90000);
+  await command("wait, one more thing");
+  await sleep(16000);
+  if (summaries.length !== summariesAtInterrupt) {
+    throw new Error(
+      `[${step}] a typed prompt while the before-compact turn was pending still compacted`,
+    );
+  }
+  if (screen().includes("automatic compaction completed")) {
+    throw new Error(`[${step}] compaction notice appeared after the interrupting prompt`);
+  }
+  pass("a prompt typed while the before-compact turn is pending does not compact");
   console.log(`\n${results.length} live checks passed on Claude Code ${version}.`);
 } catch (error) {
   console.error(error instanceof Error ? error.message : error);

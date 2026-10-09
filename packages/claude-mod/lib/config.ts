@@ -1,6 +1,7 @@
 // Persistent preferences, with the same semantics as the Pi extension's configuration.
 //
-// `mode`, `minContextTokens`, `contextBudgetTokens`, and `logRequests` are the plugin's manifest `userConfig` rows: the host
+// `mode`, `minContextTokens`, `contextBudgetTokens`, `logRequests`, `profile`, and
+// `beforeCompactPrompt` are the plugin's manifest `userConfig` rows: the host
 // validates them, stores them in the user's settings.json, and shows them in /config.
 // `typesafeApiKey` is also a userConfig row so it lives in that same settings path, but this
 // module hides it from `/config` so the secret is never drawn there. Set, clear, and presence
@@ -18,6 +19,7 @@ export const MINIMUM_KEY = `${PLUGIN}.minContextTokens`;
 export const BUDGET_KEY = `${PLUGIN}.contextBudgetTokens`;
 export const LOG_KEY = `${PLUGIN}.logRequests`;
 export const PROFILE_KEY = `${PLUGIN}.profile`;
+export const BEFORE_COMPACT_PROMPT_KEY = `${PLUGIN}.beforeCompactPrompt`;
 export const API_KEY_KEY = `${PLUGIN}.typesafeApiKey`;
 export const CONSENT_STORE_KEY = "preferences";
 export const DEFAULT_MINIMUM = 40000;
@@ -30,6 +32,8 @@ export interface Config {
   contextBudgetTokens: number;
   autoAcknowledged: boolean;
   logRequests: boolean;
+  /** Trimmed text run before automatic compaction; empty keeps compaction immediate. */
+  beforeCompactPrompt: string;
   profile?: string;
 }
 
@@ -128,6 +132,7 @@ export function readConfig(
   const minimum = row(MINIMUM_KEY, "minContextTokens");
   const budget = row(BUDGET_KEY, "contextBudgetTokens") ?? 0;
   const logRequests = row(LOG_KEY, "logRequests");
+  const beforeCompactPrompt = row(BEFORE_COMPACT_PROMPT_KEY, "beforeCompactPrompt") ?? "";
   if (typeof mode !== "string" || !MODES.includes(mode as Mode)) {
     throw new SettingsError("Cannot read the compact-adviser mode setting; no action is taken.");
   }
@@ -146,6 +151,11 @@ export function readConfig(
       "Cannot read the compact-adviser request-log setting; no action is taken.",
     );
   }
+  if (typeof beforeCompactPrompt !== "string") {
+    throw new SettingsError(
+      "Cannot read the compact-adviser before-compact prompt; no action is taken.",
+    );
+  }
   const profile = row(PROFILE_KEY, "profile");
   parseProfile(profile);
   const consent = parseConsent(consentValue);
@@ -155,6 +165,7 @@ export function readConfig(
     contextBudgetTokens: budget,
     autoAcknowledged: consent.autoAcknowledged,
     logRequests: logRequests === true,
+    beforeCompactPrompt: beforeCompactPrompt.trim(),
     ...(profile !== undefined ? { profile: profile as string } : {}),
   };
 }

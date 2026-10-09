@@ -100,6 +100,7 @@ describe("settings", () => {
       contextBudgetTokens: 0,
       autoAcknowledged: false,
       logRequests: false,
+      beforeCompactPrompt: "",
     });
     expect(
       readConfig(rows("auto", 60000), {
@@ -113,7 +114,15 @@ describe("settings", () => {
       contextBudgetTokens: 0,
       autoAcknowledged: true,
       logRequests: false,
+      beforeCompactPrompt: "",
     });
+    const prompt = (value: unknown) => [
+      ...rows("hint", 40000),
+      { key: "compact-adviser.beforeCompactPrompt", value },
+    ];
+    expect(readConfig(prompt("  /stow  "), undefined).beforeCompactPrompt).toBe("/stow");
+    expect(readConfig(prompt(""), undefined).beforeCompactPrompt).toBe("");
+    expect(() => readConfig(prompt(12), undefined)).toThrow("before-compact prompt");
   });
 
   test("unreadable rows or consent records are reported, never replaced by permissive values", () => {

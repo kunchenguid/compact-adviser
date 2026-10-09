@@ -166,6 +166,15 @@ processes: a `Stop` hook judges and records a verdict, and the `[ui.status_line]
 that verdict and paints the hint. The Grok hook always allows the stop and prints nothing, so a
 hint can never be fed back to the model.
 
+On Claude Code, an optional `beforeCompactPrompt` setting (empty by default; set it in `/config`)
+runs one turn before that automatic compaction, and only after auto mode is confirmed. Set it to
+`/stow` to run the `stow` command first. Claude Code does not expand slash commands or `@file`
+mentions in a prompt a plugin submits, and it rejects a plugin prompt that starts with `/`, so a
+value that starts with `/` is run as a command instead of being sent to the model as text. If you
+send your own prompt or run a command in between, or that turn is interrupted, errors, or does not
+finish within 5 minutes, nothing is compacted. Hint mode, off, and an empty setting are unchanged. Pi, Codex, and
+Grok do not have this setting.
+
 ## Usage
 
 | Command | Effect |
@@ -176,6 +185,7 @@ hint can never be fed back to the model.
 | `/compact-adviser threshold 60000` (Pi and Claude Code) | Save an absolute token minimum |
 | `/compact-adviser budget 450000` / `budget off` (Pi and Claude Code) | Save a context budget: the hint floor is fully relaxed at this many tokens, or at the host's own compaction point if that is smaller (off by default) |
 | `/compact-adviser snooze` / `dismiss` (Pi and Claude Code) | Suppress the next three exchanges, or clear the current hint |
+| `beforeCompactPrompt` in `/config` (Claude Code) | Optional text run before automatic compaction. Empty by default. `/stow` runs that command |
 | `/compact-adviser` (Grok) | Show status; do not add arguments because Grok sends them to the model |
 | `/compact-adviser-hint` / `/compact-adviser-off` (Grok) | Save hint-only mode, or disable the adviser |
 | `/compact-adviser-snooze` / `/compact-adviser-dismiss` (Grok) | Suppress the next three exchanges, or clear the current hint |
