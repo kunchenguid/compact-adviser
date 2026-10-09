@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.13](https://github.com/kunchenguid/compact-adviser/compare/compact-adviser-v0.1.12...compact-adviser-v0.1.13) (2026-10-09)
+
+
+### Features
+
+* **claude-mod:** run optional prompt before automatic compaction ([#69](https://github.com/kunchenguid/compact-adviser/issues/69)) ([28be11c](https://github.com/kunchenguid/compact-adviser/commit/28be11c0e565b89f7f29ea1873f5cccfdcebb0fe))
+
 ## [0.1.12](https://github.com/kunchenguid/compact-adviser/compare/compact-adviser-v0.1.11...compact-adviser-v0.1.12) (2026-10-02)
 
 
