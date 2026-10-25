@@ -9,7 +9,8 @@ export default function fixture(pi: ExtensionAPI) {
   globalThis.fetch=async(input,init)=>{
     if(String(input)!=="https://api.typesafe.ai/v1/systemone")throw new Error("Unexpected network request in isolated smoke test");
     log({event:"jev",body:JSON.parse(String(init?.body))});
-    if(process.env.COMPACT_TEST_JEV_FAILURE==="1")return new Response("",{status:500});
+    const status=Number(process.env.COMPACT_TEST_JEV_STATUS??200);
+    if(status!==200)return new Response("",{status});
     return new Response(JSON.stringify({model:"jev-fixture",usage:{input_tokens:2000,output_tokens:60},answers:{
       done:coordinating
         ? {type:"choice",choice:"finished",probabilities:{finished:1,not_finished:0,unclear:0},confidence:1}

@@ -97,6 +97,7 @@ export type JudgeErrorKind =
   | "timeout"
   | "network"
   | "authentication"
+  | "billing"
   | "rate-limit"
   | "server"
   | "response"
@@ -115,6 +116,7 @@ const JUDGE_KIND_CAUSE: Record<JudgeErrorKind, string> = {
   timeout: "the request timed out",
   network: "the request could not reach TypeSafe",
   authentication: "TypeSafe rejected the API key",
+  billing: "TypeSafe requires payment (HTTP 402)",
   "rate-limit": "TypeSafe rate-limited the request",
   server: "TypeSafe returned a server error",
   response: "TypeSafe's reply was not a usable judgment",
@@ -128,6 +130,9 @@ export function judgeErrorMessage(kind: JudgeErrorKind): string {
     "Context was left unchanged on purpose so a compact or hint cannot come from a bad answer.";
   if (kind === "authentication") {
     return `${core} Check the TypeSafe key configuration; this is not a temporary glitch.`;
+  }
+  if (kind === "billing") {
+    return `${core} Check TypeSafe billing and credits; this is not a temporary glitch.`;
   }
   if (kind === "configuration") {
     return `${core} Fix or unset TYPESAFE_BASE; this is not a temporary glitch.`;
@@ -357,9 +362,11 @@ export async function judge(
     throw new JudgeError(
       response.status === 401 || response.status === 403
         ? "authentication"
-        : response.status === 429
-          ? "rate-limit"
-          : "server",
+        : response.status === 402
+          ? "billing"
+          : response.status === 429
+            ? "rate-limit"
+            : "server",
     );
   }
   if (typeof response.text !== "string" || byteLength(response.text) > MAX_RESPONSE_BYTES) {

@@ -43,6 +43,35 @@ const state = {
   compaction: { native: 0 },
 };
 
+test("every host classifies HTTP 402 as billing without exposing the response body", async () => {
+  const body = "private billing details must not appear in a warning";
+  const requests = [
+    pi.judge(
+      state,
+      "fixture-key",
+      new AbortController().signal,
+      (async () => new Response(body, { status: 402 })) as typeof fetch,
+    ),
+    ...[claude, codex, grok].map((host) =>
+      host.judge(state, "fixture-key", {
+        fetch: async () => ({ status: 402, ok: false, text: body }),
+        sleep: () => new Promise(() => {}),
+      }),
+    ),
+  ];
+  const results = await Promise.allSettled(requests);
+  for (const result of results) {
+    assert.equal(result.status, "rejected");
+    if (result.status !== "rejected") continue;
+    assert.equal(result.reason.kind, "billing");
+    assert.match(result.reason.message, /Check TypeSafe billing and credits/);
+    assert.match(result.reason.message, /left unchanged on purpose/);
+    assert.doesNotMatch(result.reason.message, /try again later|can be temporary/);
+    assert.ok(!result.reason.message.includes(body));
+    assert.ok(!result.reason.message.includes("fixture-key"));
+  }
+});
+
 test("every package sends byte-identical request bodies", () => {
   for (const s of [state, { ...state, recent: [] }, {}, null]) {
     assert.equal(claude.requestBody(s), pi.requestBody(s));

@@ -41,7 +41,7 @@ function run(
     inputTokens?: number;
     coordinating?: boolean;
     logRequests?: boolean;
-    jevFailure?: boolean;
+    jevStatus?: number;
   } = {},
 ) {
   const dir = temp(t),
@@ -112,7 +112,7 @@ function run(
       COMPACT_TEST_LOG: log,
       COMPACT_TEST_INPUT_TOKENS: String(fixture.inputTokens ?? 45000),
       COMPACT_TEST_COORDINATING: fixture.coordinating ? "1" : "0",
-      COMPACT_TEST_JEV_FAILURE: fixture.jevFailure ? "1" : "0",
+      COMPACT_TEST_JEV_STATUS: String(fixture.jevStatus ?? 200),
     },
     actions,
     output: join(dir, "terminal.log"),
@@ -238,9 +238,23 @@ test("signed Pi: minimum tokens and TypeSafe error backoff still suppress judgme
       { send: "Try again immediately.\r", wait: "This phase is complete" },
     ],
     false,
-    { jevFailure: true },
+    { jevStatus: 500 },
   );
   assert.equal(backedOff.events.filter((e) => e.event === "jev").length, 1);
+});
+
+test("signed Pi: payment-required warns about billing without hinting or compacting", (t) => {
+  const r = run(
+    t,
+    "auto",
+    [{ send: "Finish the fixture report.\r", wait: "billing and credits" }],
+    false,
+    { jevStatus: 402, logRequests: true },
+  );
+  assert.equal(r.events.filter((e) => e.event === "jev").length, 1);
+  assert.equal(r.events.filter((e) => e.event === "compacted").length, 0);
+  assert.doesNotMatch(r.result.tail, /try again later|Run \/compact to save tokens/);
+  assert.deepEqual(r.logLines.at(-1).error, { kind: "billing" });
 });
 
 test("signed Pi: knee floor withholds a coordinating hint until 90% usage", (t) => {

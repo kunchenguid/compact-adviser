@@ -400,6 +400,7 @@ test("HTTP contract, output bound, status classification, and cancellation", asy
   assert.deepEqual(Object.keys(body.questions), ["done", "shape"]);
   for (const [status, kind] of [
     [401, "authentication"],
+    [402, "billing"],
     [429, "rate-limit"],
     [529, "server"],
   ] as const) {
@@ -508,7 +509,7 @@ test("judgment-failure notices explain the skip and which kinds can be temporary
     assert.match(message, /try again later/);
     assert.match(message, /unless it keeps repeating/);
   }
-  for (const kind of ["authentication", "input", "configuration"] as const) {
+  for (const kind of ["authentication", "billing", "input", "configuration"] as const) {
     const message = judgeErrorMessage(kind);
     assert.match(message, /asked TypeSafe \(Jev\)/);
     assert.match(message, /left unchanged on purpose/);
