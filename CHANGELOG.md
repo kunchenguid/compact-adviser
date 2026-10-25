@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.14](https://github.com/kunchenguid/compact-adviser/compare/compact-adviser-v0.1.13...compact-adviser-v0.1.14) (2026-10-25)
+
+
+### Bug Fixes
+
+* report TypeSafe payment requirements as billing errors ([#72](https://github.com/kunchenguid/compact-adviser/issues/72)) ([85c647d](https://github.com/kunchenguid/compact-adviser/commit/85c647d716b9af0c6f37f022bb26101726c204d1))
+
 ## [0.1.13](https://github.com/kunchenguid/compact-adviser/compare/compact-adviser-v0.1.12...compact-adviser-v0.1.13) (2026-10-09)
 
 
