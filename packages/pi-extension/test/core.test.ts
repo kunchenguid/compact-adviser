@@ -10,7 +10,7 @@ import {
   parseMinimum,
   parseSavedApiKey,
 } from "../src/config.ts";
-import { RECENT_TAIL_MESSAGES, snapshot } from "../src/context.ts";
+import { RECENT_TAIL_MESSAGES, redact, snapshot } from "../src/context.ts";
 import { parseDotenvKey, resolveTypesafeApiKey } from "../src/env.ts";
 import {
   DEFAULT_BASE,
@@ -148,6 +148,72 @@ test("bounded snapshot excludes system prompt, thinking, images and known secret
   assert.ok(!body.includes("INTERNALSECRET"));
   assert.equal(result.state.coverage.hasImages, true);
   assert.equal(result.autoCoverage, false);
+});
+
+// Fixture tokens are assembled from parts so repository secret scanners do not flag them.
+const fakeJwt = ["eyJhbGciOiJIUzI1NiJ9", "eyJzdWIiOiJmaXh0dXJlIn0", "c2lnbmF0dXJlZml4dHVyZQ"].join(
+  ".",
+);
+const fakeSlack = ["xoxb", "000000000000", "fixturefixture"].join("-");
+
+test("redact covers any-case config keys, JWT/AWS/Slack tokens, Basic auth, CLI flags and URL credentials", () => {
+  const cases: [string, string][] = [
+    ["api_key: fixtureValue123", "api_key: [REDACTED]"],
+    ['{"password": "fixtureValue123"}', '{"password": "[REDACTED]"}'],
+    ["db.secret=fixtureValue123", "db.secret=[REDACTED]"],
+    ["secret_key: fixtureValue123", "secret_key: [REDACTED]"],
+    ["SECRET_KEY = 'fixture-insecure-abcdefgh'", "SECRET_KEY = '[REDACTED]'"],
+    ["accessKey: fixtureValue123", "accessKey: [REDACTED]"],
+    ["Cookie: session=fixtureValue123", "Cookie: [REDACTED]"],
+    [`id ${fakeJwt} end`, "id [REDACTED] end"],
+    ["aws AKIAIOSFODNN7EXAMPLE end", "aws [REDACTED] end"],
+    [`slack ${fakeSlack} end`, "slack [REDACTED] end"],
+    ["Authorization: Basic dXNlcjpwYXNzd29yZA==", "Authorization: Basic [REDACTED]"],
+    ["tool login --token fixtureValue123 --verbose", "tool login --token [REDACTED] --verbose"],
+    ["tool login --password=fixtureValue123", "tool login --password=[REDACTED]"],
+    ["tool --client-secret fixtureValue123", "tool --client-secret [REDACTED]"],
+    ["tool --access-token fixtureValue123 --json", "tool --access-token [REDACTED] --json"],
+    [
+      "clone https://user:fixturePass1@git.example.test/r.git",
+      "clone https://user:[REDACTED]@git.example.test/r.git",
+    ],
+    [
+      "redis://:fixturePass1@cache.example.test:6379",
+      "redis://:[REDACTED]@cache.example.test:6379",
+    ],
+    ["amqp://:fixturePass1@mq.example.test/vh", "amqp://:[REDACTED]@mq.example.test/vh"],
+  ];
+  for (const [input, expected] of cases) {
+    assert.deepEqual(redact(input), { text: expected, redacted: true }, input);
+  }
+});
+
+test("redact leaves limits, counters, short values and prose alone", () => {
+  for (const input of [
+    "max_tokens: 4000",
+    '"max_completion_tokens": 128000',
+    "prompt_tokens: 1234, completion_tokens: 56",
+    "token: 12345678",
+    "password: short",
+    "Basic password handling is documented below.",
+    "tool --password-file creds.txt",
+    "tool --max-tokens 4000",
+    "tool --max-token 40000000",
+    "tool --password --verbose-flag",
+    "http://example.test:8080/path@v2",
+    "http://example.test:8080?next=a@b",
+    "http://example.test:8080#frag=a@b",
+    "eyJ is a common JSON-in-base64 prefix",
+  ]) {
+    assert.deepEqual(redact(input), { text: input, redacted: false }, input);
+  }
+});
+
+test("redact keeps the existing uppercase rule for short and numeric values", () => {
+  assert.equal(redact("TOKEN=abc").text, "TOKEN=[REDACTED]");
+  assert.equal(redact("DB_PASSWORD: 12345678").text, "DB_PASSWORD=[REDACTED]");
+  assert.equal(redact("MAX_TOKEN=4000").text, "MAX_TOKEN=[REDACTED]");
+  assert.equal(redact("Bearer fixtureSecretToken").text, "[REDACTED]");
 });
 
 test("a compact-adviser.json read keeps mode diagnostics and drops the saved key from the body", (t) => {

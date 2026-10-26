@@ -371,8 +371,25 @@ test("every package scrubs owned settings fields and known key values the same w
     typesafeApiKey: secret,
     "compact-adviser.typesafeApiKey": secret,
   });
+  const generic = [
+    "api_key: fixtureValue123",
+    '{"password": "fixtureValue123"}',
+    "SECRET_KEY = 'fixture-insecure-abcdefgh'",
+    "max_tokens: 4000 prompt_tokens: 1234",
+    ["eyJhbGciOiJIUzI1NiJ9", "eyJzdWIiOiJmaXh0dXJlIn0", "c2lnbmF0dXJlZml4dHVyZQ"].join("."),
+    "AKIAIOSFODNN7EXAMPLE",
+    ["xoxb", "000000000000", "fixturefixture"].join("-"),
+    "Authorization: Basic dXNlcjpwYXNzd29yZA==",
+    "tool --token fixtureValue123",
+    "tool --client-secret fixtureValue123",
+    "tool --password --verbose-flag",
+    "https://user:fixturePass1@git.example.test/r.git",
+    "redis://:fixturePass1@cache.example.test:6379",
+    "http://example.test:8080?next=a@b",
+  ].join("\n");
   for (const other of [claudeSnapshot, codexSnapshot, grokSnapshot]) {
     assert.deepEqual(other.redact(dump), piContext.redact(dump));
+    assert.deepEqual(other.redact(generic), piContext.redact(generic));
     assert.deepEqual(other.redactOwnedSettings(dump), piContext.redactOwnedSettings(dump));
     assert.deepEqual(
       other.scrubKnownSecrets(`keep ${secret} nearby`, [secret]),

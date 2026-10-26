@@ -514,6 +514,27 @@ export function redact(text: string): { text: string; redacted: boolean } {
     .replace(
       /\b([A-Z_]*(?:API_KEY|TOKEN|SECRET|PASSWORD))\s*[=:]\s*["']?[^\s"',}]+/g,
       "$1=[REDACTED]",
+    )
+    .replace(
+      /\b(?:eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{5,}|AKIA[0-9A-Z]{16}|xox[baprs]-[A-Za-z0-9-]{10,})/g,
+      "[REDACTED]",
+    )
+    .replace(
+      /\b(Authorization["']?\s*[=:]\s*["']?Basic)\s+[A-Za-z0-9+/]{4,}={0,2}/gi,
+      "$1 [REDACTED]",
+    )
+    .replace(
+      /(?<![\w-])(--?(?:(?!max)[a-z0-9]+-)*(?:token|password|passwd|api-?key|secret|access-?key))([= ])(?!-)\S{8,}/gi,
+      "$1$2[REDACTED]",
+    )
+    .replace(/(:\/\/[^/\s:@]*):[^/\s?#@]+@/g, "$1:[REDACTED]@")
+    // Any-case keys, but `max_tokens: 4000`-style limits and counters are not secrets.
+    .replace(
+      /\b([A-Za-z_]*(?:api[_-]?key|access[_-]?key|secret(?:[_-]?key)?|token|passw(?:or)?d|cookie|authorization|private[_-]?key)["']?\s*[=:]\s*["']?)([^\s"',}]+)/gi,
+      (match, head: string, value: string) =>
+        /max/i.test(head) || value.length < 8 || !/[a-z]/i.test(value)
+          ? match
+          : `${head}[REDACTED]`,
     );
   return { text: clean, redacted: fields.redacted || clean !== fields.text };
 }
