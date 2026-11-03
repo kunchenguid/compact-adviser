@@ -21,6 +21,16 @@ Automatic compaction on Pi and Claude Code is experimental and lossy; Codex and 
 A high model probability is not proof of preservation or continuation quality.
 Hint mode is the default; the host's own compaction path and other extensions' hooks remain authoritative.
 
+## Experimental Decisions provider
+
+Explicit launch selection `COMPACT_ADVISER_PROVIDER=openai-decisions` sends the same bounded checkpoint to `https://api.openai.com/v1/decisions` with `gpt-6-luna`, instead of TypeSafe. Authentication uses only launch `OPENAI_API_KEY`, not saved keys, cwd `.env`, or host subscription credentials. `TYPESAFE_BASE` is ignored for this provider. An OpenAI key alone never opts in; unknown provider selections make no request and give no advice. Existing key editors continue to save TypeSafe keys only.
+
+The selected key and already-known inactive launch/saved keys are included in best-effort snapshot redaction. The final serialized request still has a 32,000-byte cap, including nested JSON escaping. Accepted responses are capped at 32,768 bytes. Any refused or malformed answer rejects the whole judgment. Probability values and the existing score/floor policy are not recalibrated. Quota/spend errors are distinguished from transient rate limits without printing raw API errors. Optional local logs identify Decisions records and contain the actual wire body, never authorization headers.
+
+Pi, Codex, and Grok bound response stream accumulation and reject redirects; their existing two-second deadlines cancel the request. Claude Code exposes already-materialized response text and no redirect or abort control: its deadline bounds waiting, not the host's network operation or response allocation. Its accepted response size is still checked. The loopback-only regression endpoint in Claude, Codex, and Grok also applies to Decisions fixtures; do not set it in normal use.
+
+Decisions remains opt-in and experimental. Deterministic integration tests and synthetic live requests do not establish equivalent compaction accuracy, calibration, or the alternative-judge evaluation bar in VISION.md. No real-session quality result is claimed for this provider.
+
 ## Package separation
 
 The Pi implementation lives only in `packages/pi-extension` and owns its Pi-specific configuration and session entries.
@@ -39,7 +49,7 @@ Codex requests use Node's `fetch` from the hook process.
 Besides `TYPESAFE_BASE`, the only endpoint override, `COMPACT_ADVISER_TEST_ENDPOINT`, exists for the live regressions and is ignored unless it is an `http://127.0.0.1:<port>/` URL.
 The automatic-mode acknowledgement is kept in the plugin's own store, not in `/config`, so experimental auto cannot be granted without the disclosure dialog. A legacy `sharingConsent` field in that store is ignored.
 
-The Pi client rejects redirects from the TypeSafe endpoint. The Grok plugin uses Node's built-in fetch against that endpoint.
+The Pi, Codex, and Grok clients reject redirects from the selected judge endpoint.
 The user's Pi, Claude Code, Codex, or Grok installation is independently managed.
 
 ## Development SDK

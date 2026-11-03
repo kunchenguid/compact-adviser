@@ -92,6 +92,8 @@ export function workedHistory(marker = "one"): Record_[] {
 export interface Fixture {
   url: string;
   bodies: string[];
+  requests: { url: string; authorization: string | undefined }[];
+  reply?: unknown;
   close: () => void;
   /** Probabilities the next judgment answers with. */
   verdict: { finished: number; handsOn: number };
@@ -110,6 +112,7 @@ export function typesafeFixture(t: TestContext): Promise<Fixture> {
   const state: Fixture = {
     url: "",
     bodies,
+    requests: [],
     close: () => undefined,
     verdict: { finished: 0.97, handsOn: 0.96 },
     oversize: false,
@@ -128,7 +131,13 @@ export function typesafeFixture(t: TestContext): Promise<Fixture> {
     });
     request.on("end", () => {
       bodies.push(body);
+      state.requests.push({ url: request.url ?? "", authorization: request.headers.authorization });
       state.onRequest?.();
+      if (state.reply !== undefined) {
+        response.writeHead(state.status ?? 200, { "content-type": "application/json" });
+        response.end(JSON.stringify(state.reply));
+        return;
+      }
       if (state.hang) return;
       if (state.status !== undefined) {
         response.writeHead(state.status, { "content-type": "application/json" });
@@ -180,7 +189,10 @@ export function runShell(
     env: {
       ...process.env,
       TYPESAFE_API_KEY: undefined,
+      OPENAI_API_KEY: undefined,
+      COMPACT_ADVISER_PROVIDER: undefined,
       TYPESAFE_BASE: undefined,
+      COMPACT_ADVISER_DISABLE: undefined,
       ...(lab ? { GROK_HOME: lab.home, GROK_SESSION_ID: lab.sessionId } : {}),
       NO_COLOR: "1",
       ...env,
@@ -211,6 +223,9 @@ export function runLauncher(
     env: {
       ...process.env,
       TYPESAFE_API_KEY: undefined,
+      OPENAI_API_KEY: undefined,
+      COMPACT_ADVISER_PROVIDER: undefined,
+      COMPACT_ADVISER_DISABLE: undefined,
       GROK_HOME: lab.home,
       GROK_SESSION_ID: lab.sessionId,
       NO_COLOR: "1",
@@ -241,6 +256,10 @@ export function runCli(
     env: {
       ...process.env,
       TYPESAFE_API_KEY: undefined,
+      TYPESAFE_BASE: undefined,
+      OPENAI_API_KEY: undefined,
+      COMPACT_ADVISER_PROVIDER: undefined,
+      COMPACT_ADVISER_DISABLE: undefined,
       ...(lab ? { GROK_HOME: lab.home, GROK_SESSION_ID: lab.sessionId } : {}),
       NO_COLOR: "1",
       ...env,

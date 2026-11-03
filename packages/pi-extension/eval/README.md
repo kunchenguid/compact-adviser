@@ -68,6 +68,12 @@ production request. It reads `~/.pi/agent/compact-adviser-requests.jsonl` unless
 used to gate the hint; it never includes the API key. Response and error lines
 are ignored when matching live request bodies.
 
+## Experimental Decisions replay
+
+`eval/score-profile.ts` also accepts launch `COMPACT_ADVISER_PROVIDER=openai-decisions` and uses only launch `OPENAI_API_KEY` for execution. Set the limits file's `expectedModel` to `gpt-6-luna` and approve explicit call, token, and cost ceilings before adding `--execute`. Its default remains a no-network dry run and needs no key. Use only a separately authorized, frozen labeled checkpoint set; this repository supplies no private corpus or Decisions accuracy result.
+
+Decisions caches and results go under `<PRIVATE_DIRECTORY>/openai-decisions/`. The cache hashes the actual Decisions request bytes and expected model, and production `judge()` parses its response. The existing replay permits one bounded retry and uses a 60-second deadline, not the product's two seconds; include both in your evaluation plan and report production-deadline availability separately. Legacy `score.ts` and other Jev-only probes remain TypeSafe-only. Do not infer Decisions quality from the Jev measurements or from successful protocol fixtures.
+
 ## Commands
 
 | Script | What |

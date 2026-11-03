@@ -47,6 +47,13 @@ import {
   STATUS_LINE_ITEMS,
   writeSettings,
 } from "../lib/config.ts";
+import {
+  DECISIONS_ENDPOINT,
+  type JudgeProvider,
+  providerMessage,
+  providerStatus,
+  selectedProvider,
+} from "../lib/decisions.ts";
 import { DISABLE_ENV, disabledByEnv } from "../lib/disable.ts";
 import { formatKeyStatus, parseDotenvKey, resolveTypesafeApiKey } from "../lib/env.ts";
 import {
@@ -153,7 +160,16 @@ function dotenvKey(cwd: string): string | undefined {
   }
 }
 
-function resolveKey(settings: Settings, cwd: string) {
+function resolveKey(
+  settings: Settings,
+  cwd: string,
+  provider = selectedProvider(process.env.COMPACT_ADVISER_PROVIDER),
+) {
+  if (provider !== "typesafe") {
+    return resolveTypesafeApiKey(
+      provider === "openai-decisions" ? process.env.OPENAI_API_KEY : undefined,
+    );
+  }
   return resolveTypesafeApiKey(
     process.env.TYPESAFE_API_KEY,
     settings.typesafeApiKey,
@@ -167,8 +183,12 @@ function testEndpoint(): string | undefined {
 }
 
 /** The live regression's fixture, else TypeSafe under `TYPESAFE_BASE` from the hook environment. */
-function judgeEndpoint(): string {
-  const endpoint = testEndpoint() ?? typesafeEndpoint(process.env.TYPESAFE_BASE);
+function judgeEndpoint(provider: JudgeProvider): string {
+  const endpoint =
+    testEndpoint() ??
+    (provider === "openai-decisions"
+      ? DECISIONS_ENDPOINT
+      : typesafeEndpoint(process.env.TYPESAFE_BASE));
   if (endpoint === undefined) throw new JudgeError("configuration");
   return endpoint;
 }
@@ -219,7 +239,11 @@ function cancellableJudgeTransport(): {
   return {
     fetch: async (url, init) => {
       try {
-        const response = await fetch(url, { ...init, signal: controller.signal });
+        const response = await fetch(url, {
+          ...init,
+          redirect: "error",
+          signal: controller.signal,
+        });
         const text = await readBoundedText(response);
         stopTimer();
         return { status: response.status, ok: response.ok, text };
@@ -337,14 +361,23 @@ async function runStop(payload: HookPayload): Promise<void> {
     clearVerdict(verdict);
     return;
   }
-  const key = resolveKey(settings, cwd);
+  const provider = selectedProvider(process.env.COMPACT_ADVISER_PROVIDER);
+  if (provider === undefined) {
+    clearVerdict(verdict);
+    return;
+  }
+  const key = resolveKey(settings, cwd, provider);
   const activeKey = key.value?.trim() ?? "";
   if (!activeKey) return;
 
   const transcript = readTranscript(dir);
   if (transcript.unreadableLines !== 0) return;
   if (!transcript.messages.length) return;
-  const view = snapshot(transcript.messages, [activeKey], transcript.hasImages);
+  const view = snapshot(
+    transcript.messages,
+    [activeKey, settings.typesafeApiKey, process.env.TYPESAFE_API_KEY, process.env.OPENAI_API_KEY],
+    transcript.hasImages,
+  );
   if (view.conversationTokens <= MINIMUM_CONVERSATION_TOKENS) return;
 
   // `contextTokensUsed` is the honest number when signals.json is readable; the local estimate
@@ -360,7 +393,7 @@ async function runStop(payload: HookPayload): Promise<void> {
   let loggedBody: string | undefined;
   if (settings.logRequests) {
     try {
-      loggedBody = requestBody(view.state, profile);
+      loggedBody = requestBody(view.state, profile, provider);
       appendLog(sessionId, requestLogLine(loggedBody));
     } catch {
       // A body too large to send is reported by `judge` below; logging does not decide.
@@ -373,16 +406,23 @@ async function runStop(payload: HookPayload): Promise<void> {
       activeKey,
       {
         ...cancellableJudgeTransport(),
-        endpoint: judgeEndpoint(),
+        endpoint: judgeEndpoint(provider),
       },
       profile,
+      provider,
     );
   } catch (error) {
     if (settings.logRequests) {
-      appendLog(sessionId, errorLogLine(loggedJudgeErrorKind(error), loggedBody));
+      appendLog(
+        sessionId,
+        errorLogLine(loggedJudgeErrorKind(error), loggedBody, undefined, provider),
+      );
     }
     saveSessionState(statePath, backoff(state, now));
-    saveDiagnostic(diagnosticPath(dataDir(env()), sessionId), loggedJudgeErrorKind(error));
+    saveDiagnostic(
+      diagnosticPath(dataDir(env()), sessionId),
+      `${provider === "openai-decisions" ? "openai-decisions:" : ""}${loggedJudgeErrorKind(error)}`,
+    );
     clearVerdict(verdict);
     return;
   }
@@ -392,7 +432,7 @@ async function runStop(payload: HookPayload): Promise<void> {
     appendLog(
       sessionId,
       responseLogLine(
-        loggedBody ?? requestBody(view.state, profile),
+        loggedBody ?? requestBody(view.state, profile, provider),
         judgment,
         fraction,
         undefined,
@@ -628,7 +668,7 @@ function statusText(): string {
     `Mode: ${settings.mode} (Grok is hint-only; nothing outside a session can run /compact).`,
     `Minimum context: ${formatTokens(settings.minContextTokens)} tokens.`,
     `Budget: ${settings.contextBudgetTokens > 0 ? `${formatTokens(settings.contextBudgetTokens)} tokens` : "off"}.`,
-    `${formatKeyStatus(key.source)}.`,
+    `${providerStatus(selectedProvider(process.env.COMPACT_ADVISER_PROVIDER))}${formatKeyStatus(key.source)}.`,
     `Request log: ${settings.logRequests ? requestLogPath(dataDir(env()), "<session-id>") : "off"}.`,
     `Settings file: ${settingsPath(env())}.`,
     `Grok home: ${home}.`,
@@ -654,7 +694,12 @@ function statusText(): string {
       }`,
     );
     const diagnostic = loadDiagnostic(diagnosticPath(dataDir(env()), sessionId));
-    if (diagnostic) lines.push(`Last TypeSafe outcome: ${diagnostic}.`);
+    if (diagnostic)
+      lines.push(
+        diagnostic.startsWith("openai-decisions:")
+          ? `Last OpenAI Decisions outcome: ${diagnostic.slice("openai-decisions:".length)}.`
+          : `Last TypeSafe outcome: ${diagnostic}.`,
+      );
   }
   return lines.join("\n");
 }
@@ -721,7 +766,10 @@ function runCommand(argv: readonly string[]): string {
     case "log": {
       if (value !== "on" && value !== "off") throw new SettingsError("Choose on or off.");
       updateSettings({ logRequests: value === "on" });
-      return `TypeSafe request logging ${value}.`;
+      return providerMessage(
+        `TypeSafe request logging ${value}.`,
+        selectedProvider(process.env.COMPACT_ADVISER_PROVIDER) ?? "typesafe",
+      );
     }
     case "snooze":
       return snooze();

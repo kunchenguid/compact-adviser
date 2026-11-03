@@ -20,6 +20,7 @@ import {
   parseMode,
   parseSavedApiKey,
 } from "./config.ts";
+import { providerMessage, providerStatus, selectedProvider } from "./decisions.ts";
 import { DISABLE_ENV, disabledByEnv } from "./disable.ts";
 import { formatKeyStatus } from "./env.ts";
 import { resolveKey } from "./hook.ts";
@@ -76,7 +77,7 @@ function statusText(environment: CliEnvironment): string {
     `Mode: ${config.mode}.`,
     `Minimum: ${formatTokens(config.minContextTokens)} tokens.`,
     `Budget: ${budget > 0 ? `${formatTokens(budget)} tokens` : "off"}.`,
-    `${formatKeyStatus(key.source)}.`,
+    `${providerStatus(selectedProvider(environment.env.COMPACT_ADVISER_PROVIDER))}${formatKeyStatus(key.source)}.`,
     `${cooldown}${window}`,
     `Request log: ${config.logRequests ? requestLogPath(root, latest?.id ?? "<session>") : "off"}.`,
     `Settings file: ${new ConfigStore(root).path}.`,
@@ -108,9 +109,12 @@ function saveLog(environment: CliEnvironment, value: string): string {
   if (value !== "on" && value !== "off") throw new Error("Enter on or off.");
   const root = adviserRoot(environment.env);
   new ConfigStore(root).update({ logRequests: value === "on" });
-  return value === "on"
-    ? `TypeSafe request logging on (all sessions). ${requestLogPath(root, "<session>")}`
-    : "TypeSafe request logging off (all sessions).";
+  return providerMessage(
+    value === "on"
+      ? `TypeSafe request logging on (all sessions). ${requestLogPath(root, "<session>")}`
+      : "TypeSafe request logging off (all sessions).",
+    selectedProvider(environment.env.COMPACT_ADVISER_PROVIDER) ?? "typesafe",
+  );
 }
 
 async function changeKey(environment: CliEnvironment, action: string): Promise<string> {
@@ -122,8 +126,9 @@ async function changeKey(environment: CliEnvironment, action: string): Promise<s
   }
   if (action === "status" || action === "") {
     const config = store.read();
-    return formatKeyStatus(
-      resolveKey(environment.env, config.typesafeApiKey, environment.cwd).source,
+    return (
+      providerStatus(selectedProvider(environment.env.COMPACT_ADVISER_PROVIDER)) +
+      formatKeyStatus(resolveKey(environment.env, config.typesafeApiKey, environment.cwd).source)
     );
   }
   if (action !== "set") throw new Error("Use key set, key clear, or key status.");

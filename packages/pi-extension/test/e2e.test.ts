@@ -42,6 +42,7 @@ function run(
     coordinating?: boolean;
     logRequests?: boolean;
     jevStatus?: number;
+    decisions?: boolean;
   } = {},
 ) {
   const dir = temp(t),
@@ -109,6 +110,9 @@ function run(
       PI_OFFLINE: "1",
       PI_TELEMETRY: "0",
       TYPESAFE_API_KEY: "test-key-not-a-secret",
+      OPENAI_API_KEY: "openai-test-key-not-a-secret",
+      COMPACT_ADVISER_PROVIDER: fixture.decisions ? "openai-decisions" : "typesafe",
+      COMPACT_ADVISER_DISABLE: "0",
       COMPACT_TEST_LOG: log,
       COMPACT_TEST_INPUT_TOKENS: String(fixture.inputTokens ?? 45000),
       COMPACT_TEST_COORDINATING: fixture.coordinating ? "1" : "0",
@@ -187,6 +191,29 @@ test("signed Pi: real settled event produces the hint and a complete Jev decisio
   if (process.env.COMPACT_TEST_LOG_EVIDENCE) {
     cpSync(r.requestLog, process.env.COMPACT_TEST_LOG_EVIDENCE);
   }
+});
+
+test("signed Pi: explicit Decisions selection produces the human-only hint and protocol-correct log", (t) => {
+  const r = run(
+    t,
+    "hint",
+    [{ send: "Finish the fixture report.\r", wait: "Run /compact to save tokens." }],
+    false,
+    { decisions: true, logRequests: true },
+  );
+  assert.equal(r.events.filter((e) => e.event === "jev").length, 1);
+  assert.ok(r.events.some((e) => e.event === "settled" && e.idle));
+  assert.ok(!r.events.some((e) => e.event === "compacted"));
+  assert.equal(r.logLines.length, 2);
+  assert.equal(r.logLines[0].provider, "openai-decisions");
+  assert.equal(r.logLines[0].body.model, "gpt-6-luna");
+  assert.equal(typeof r.logLines[0].body.input, "string");
+  assert.deepEqual(
+    r.logLines[0].body.questions.map((q: { name: string }) => q.name),
+    ["done", "shape"],
+  );
+  assert.equal(r.logLines[1].provider, "openai-decisions");
+  assert.equal(r.logLines[1].qualifies, true);
 });
 
 test("signed Pi: materially different consecutive checkpoints each produce a hint", (t) => {

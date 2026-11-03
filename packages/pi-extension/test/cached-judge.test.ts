@@ -5,7 +5,7 @@ import { type TestContext, test } from "node:test";
 import { cachedJudge, cacheUsage, productionEvaluate } from "../eval/cached-judge.ts";
 import { digest } from "../eval/dataset.ts";
 import { partition } from "../eval/score-profile.ts";
-import { parseJudgment } from "../src/judge.ts";
+import { parseJudgment, requestBody } from "../src/judge.ts";
 import { parseProfile } from "../src/profile.ts";
 import { apiResponse } from "./helpers.ts";
 
@@ -60,6 +60,69 @@ test("cached replay keys complete request bytes, reuses numeric profiles, and en
       assert.ok(!readFileSync(join(root, hash, file), "utf8").includes("secret"));
     }
   }
+});
+
+test("Decisions replay caches its actual wire bytes and preserves provider/model identity", async (t) => {
+  const root = directory(t);
+  const old = apiResponse();
+  const response = {
+    ...old,
+    model: "gpt-6-luna",
+    answers: Object.entries(old.answers).map(([name, a]) => ({
+      ...a,
+      name,
+      probabilities: Object.entries(a.probabilities).map(([value, probability]) => ({
+        value,
+        probability,
+      })),
+    })),
+  };
+  let calls = 0;
+  const state = { text: "Synthetic completed work." };
+  const evaluate = async () =>
+    productionEvaluate(
+      state,
+      "synthetic-key",
+      undefined,
+      undefined,
+      async (url, init) => {
+        calls++;
+        assert.equal(url, "https://api.openai.com/v1/decisions");
+        assert.equal(init?.body, requestBody(state, undefined, "openai-decisions"));
+        return new Response(JSON.stringify(response));
+      },
+      "openai-decisions",
+    );
+  const budget = { ...limits, expectedModel: "gpt-6-luna" };
+  const first = await cachedJudge(
+    root,
+    state,
+    "synthetic-key",
+    budget,
+    undefined,
+    evaluate,
+    "openai-decisions",
+  );
+  assert.equal(first.requestHash, digest(requestBody(state, undefined, "openai-decisions")));
+  assert.deepEqual(
+    await cachedJudge(
+      root,
+      state,
+      "synthetic-key",
+      budget,
+      undefined,
+      evaluate,
+      "openai-decisions",
+    ),
+    first,
+  );
+  assert.equal(calls, 1);
+  const saved = readFileSync(join(root, readdirSync(root)[0] ?? "", "request.json"), "utf8");
+  assert.equal(saved, requestBody(state, undefined, "openai-decisions"));
+  await assert.rejects(
+    cachedJudge(root, state, "synthetic-key", limits, undefined, evaluate, "openai-decisions"),
+    /expectedModel/,
+  );
 });
 
 test("failed calls retain estimated spend and stop after exactly one retry", async (t) => {
@@ -194,7 +257,7 @@ test("holdout unlock binds exact checkpoint bytes and rejects cross-split sessio
     partition(text, "holdout", selection).map((row) => row.id),
     ["b"],
   );
-  assert.throws(() => partition(text + "\n", "holdout", selection), /locked/);
+  assert.throws(() => partition(`${text}\n`, "holdout", selection), /locked/);
   rows[1].group = "one";
   assert.throws(
     () => partition(rows.map((row) => JSON.stringify(row)).join("\n"), "development"),

@@ -36,7 +36,7 @@
   },
   "scripts": {
     "prepack": "node ../../scripts/generate-package-readme.mjs README.md",
-    "test": "node --import tsx --test test/adviser.test.ts test/cached-judge.test.ts test/core.test.ts test/eval-harness.test.ts test/lockstep.test.ts test/numeric-profile.test.ts test/profile.test.ts test/readme.test.ts",
+    "test": "node --import tsx --test test/adviser.test.ts test/cached-judge.test.ts test/core.test.ts test/decisions.test.ts test/eval-harness.test.ts test/lockstep.test.ts test/numeric-profile.test.ts test/profile.test.ts test/readme.test.ts",
     "typecheck": "tsc --noEmit",
     "lint": "biome check .",
     "format": "biome check --write .",

@@ -14,6 +14,13 @@ import {
   parseSavedApiKey,
 } from "./config.ts";
 import { snapshot } from "./context.ts";
+import {
+  DECISIONS_ENDPOINT,
+  INVALID_PROVIDER_MESSAGE,
+  providerMessage,
+  providerStatus,
+  selectedProvider,
+} from "./decisions.ts";
 import { DISABLE_ENV, disabledByEnv } from "./disable.ts";
 import { formatKeyStatus, type ResolvedTypesafeApiKey, resolveTypesafeApiKey } from "./env.ts";
 import {
@@ -69,7 +76,12 @@ export function installAdviser(pi: ExtensionAPI, options: Options): void {
   // and re-reading it per event would only invite a mid-session half-disabled state.
   if (disabledByEnv(process.env[DISABLE_ENV])) return;
   const store = new ConfigStore(options.agentDir);
+  const provider = selectedProvider(process.env.COMPACT_ADVISER_PROVIDER);
+  const openaiKey = process.env.OPENAI_API_KEY?.trim();
   const resolvedKey = (cwd = process.cwd()): ResolvedTypesafeApiKey => {
+    if (provider === undefined) return { value: undefined, source: "missing" };
+    if (provider === "openai-decisions")
+      return { value: openaiKey || undefined, source: openaiKey ? "env" : "missing" };
     if (options.key) {
       const value = options.key();
       return value !== undefined && value.trim() !== ""
@@ -83,9 +95,13 @@ export function installAdviser(pi: ExtensionAPI, options: Options): void {
   const evaluate =
     options.evaluate ??
     ((state, key, signal, profile) => {
-      const endpoint = typesafeEndpoint(process.env.TYPESAFE_BASE);
-      if (endpoint === undefined) return Promise.reject(new JudgeError("configuration"));
-      return judge(state, key, signal, undefined, undefined, profile, endpoint);
+      const endpoint =
+        provider === "openai-decisions"
+          ? DECISIONS_ENDPOINT
+          : typesafeEndpoint(process.env.TYPESAFE_BASE);
+      if (provider === undefined || endpoint === undefined)
+        return Promise.reject(new JudgeError("configuration"));
+      return judge(state, key, signal, undefined, undefined, profile, endpoint, provider);
     });
   const [major, minor] = options.version.split(".").map(Number);
   const supported = Number.isFinite(major) && (major > 0 || minor >= 82);
@@ -181,14 +197,23 @@ export function installAdviser(pi: ExtensionAPI, options: Options): void {
       refresh(ctx);
       return;
     }
+    if (provider === undefined) {
+      notice(ctx, INVALID_PROVIDER_MESSAGE);
+      return;
+    }
     if (request || eligible(ctx, config, state) === undefined) return;
     const profile = parseProfile(config.profile);
-    const view = snapshot(ctx, [key(ctx.cwd), savedApiKey(store)]);
+    const view = snapshot(ctx, [
+      key(ctx.cwd),
+      savedApiKey(store),
+      process.env.TYPESAFE_API_KEY,
+      openaiKey,
+    ]);
     if (view.conversationTokens <= 20000 || view.checkpointKey === state.lastHintKey) return;
     let loggedBody: string | undefined;
     if (config.logRequests) {
       try {
-        loggedBody = requestBody(view.state, profile);
+        loggedBody = requestBody(view.state, profile, provider);
         appendRequestLog(options.agentDir, loggedBody);
       } catch {
         // Request logging must not replace or delay the judgment.
@@ -213,7 +238,7 @@ export function installAdviser(pi: ExtensionAPI, options: Options): void {
         try {
           appendResponseLog(
             options.agentDir,
-            loggedBody ?? requestBody(view.state, profile),
+            loggedBody ?? requestBody(view.state, profile, provider),
             result,
             usageFraction(ctx, config),
             profile,
@@ -277,7 +302,7 @@ export function installAdviser(pi: ExtensionAPI, options: Options): void {
       if (!current()) return;
       if (config.logRequests) {
         try {
-          appendErrorLog(options.agentDir, error, loggedBody);
+          appendErrorLog(options.agentDir, error, loggedBody, provider);
         } catch {
           // Error logging must not replace backoff.
         }
@@ -288,7 +313,7 @@ export function installAdviser(pi: ExtensionAPI, options: Options): void {
         ctx,
         error instanceof Error && error.name === "JudgeError"
           ? error.message
-          : JUDGE_UNAVAILABLE_MESSAGE,
+          : providerMessage(JUDGE_UNAVAILABLE_MESSAGE, provider),
       );
     } finally {
       if (request === controller) request = undefined;
@@ -392,7 +417,10 @@ export function installAdviser(pi: ExtensionAPI, options: Options): void {
       save(
         ctx,
         { mode, autoAcknowledged: true },
-        "Automatic mode saved (all sessions). A TypeSafe key is still required.",
+        providerMessage(
+          "Automatic mode saved (all sessions). A TypeSafe key is still required.",
+          provider ?? "typesafe",
+        ),
       );
     } else
       save(
@@ -431,7 +459,7 @@ export function installAdviser(pi: ExtensionAPI, options: Options): void {
       t = usage?.tokens,
       u = usageFraction(ctx, c);
     ctx.ui.notify(
-      `Mode: ${c.mode}. Minimum: ${c.minContextTokens.toLocaleString("en-US")} tokens. Budget: ${c.contextBudgetTokens > 0 ? `${c.contextBudgetTokens.toLocaleString("en-US")} tokens` : "off"}. Context: ${t ?? "unknown"}${Number.isFinite(u) ? ` (${Math.round(u * 100)}% of the ${effectiveBudget(usage?.contextWindow ?? Number.NaN, c.contextBudgetTokens) > 0 ? "budget" : "window"}; hint floor ${floorFor(u, parseProfile(c.profile)).toFixed(2)})` : ""}. ${formatKeyStatus(resolvedKey(ctx.cwd).source)}. ${typeof t === "number" ? `${cooldownReason(s, t, now()) ?? "No cooldown; semantic checks still apply"}.` : "Waiting for fresh model usage."} Request log: ${c.logRequests ? requestLogPath(options.agentDir) : "off"}. Settings: ${store.path}`,
+      `${providerStatus(provider)}Mode: ${c.mode}. Minimum: ${c.minContextTokens.toLocaleString("en-US")} tokens. Budget: ${c.contextBudgetTokens > 0 ? `${c.contextBudgetTokens.toLocaleString("en-US")} tokens` : "off"}. Context: ${t ?? "unknown"}${Number.isFinite(u) ? ` (${Math.round(u * 100)}% of the ${effectiveBudget(usage?.contextWindow ?? Number.NaN, c.contextBudgetTokens) > 0 ? "budget" : "window"}; hint floor ${floorFor(u, parseProfile(c.profile)).toFixed(2)})` : ""}. ${formatKeyStatus(resolvedKey(ctx.cwd).source)}. ${typeof t === "number" ? `${cooldownReason(s, t, now()) ?? "No cooldown; semantic checks still apply"}.` : "Waiting for fresh model usage."} Request log: ${c.logRequests ? requestLogPath(options.agentDir) : "off"}. Settings: ${store.path}`,
       "info",
     );
   }
@@ -439,9 +467,12 @@ export function installAdviser(pi: ExtensionAPI, options: Options): void {
     save(
       ctx,
       { logRequests: enabled },
-      enabled
-        ? `TypeSafe request logging on (all sessions). ${requestLogPath(options.agentDir)}`
-        : "TypeSafe request logging off (all sessions).",
+      providerMessage(
+        enabled
+          ? `TypeSafe request logging on (all sessions). ${requestLogPath(options.agentDir)}`
+          : "TypeSafe request logging off (all sessions).",
+        provider ?? "typesafe",
+      ),
     );
   }
   function changeSavedApiKey(ctx: ExtensionCommandContext, text: string) {
@@ -461,17 +492,23 @@ export function installAdviser(pi: ExtensionAPI, options: Options): void {
   async function menu(ctx: ExtensionCommandContext) {
     while (true) {
       const c = store.read();
-      const keyLabel = `TypeSafe API key: ${c.typesafeApiKey ? "saved" : "not saved"}`;
+      const keyLabel = `TypeSafe API key${provider === "openai-decisions" ? " (inactive)" : ""}: ${c.typesafeApiKey ? "saved" : "not saved"}`;
       const labels = [
         `Mode: ${c.mode}`,
         `Minimum context: ${c.minContextTokens.toLocaleString("en-US")} tokens`,
-        `Log TypeSafe requests: ${c.logRequests ? "on" : "off"}`,
+        providerMessage(
+          `Log TypeSafe requests: ${c.logRequests ? "on" : "off"}`,
+          provider ?? "typesafe",
+        ),
         keyLabel,
         "Reset minimum to 40,000",
         "Status",
         "Close",
       ];
-      const selected = await ctx.ui.select("Compact adviser (saved for all sessions)", labels);
+      const selected = await ctx.ui.select(
+        `${providerStatus(provider)}Compact adviser (saved for all sessions)`,
+        labels,
+      );
       if (!selected || selected === "Close") return;
       if (selected === labels[0]) {
         const mode = await ctx.ui.select("Mode", [
@@ -499,7 +536,10 @@ export function installAdviser(pi: ExtensionAPI, options: Options): void {
           }
         }
       } else if (selected === labels[2]) {
-        const logging = await ctx.ui.select("Log TypeSafe requests", ["Off (default)", "On"]);
+        const logging = await ctx.ui.select(
+          providerMessage("Log TypeSafe requests", provider ?? "typesafe"),
+          ["Off (default)", "On"],
+        );
         if (logging) await changeLogRequests(ctx, logging.startsWith("On"));
       } else if (selected === keyLabel) {
         const actions = c.typesafeApiKey ? ["Set key", "Clear saved key"] : ["Set key"];

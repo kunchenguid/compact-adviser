@@ -6,7 +6,8 @@ import { floorFor, JudgeError, qualifies, score } from "../src/judge.ts";
 import { parseProfile } from "../src/profile.ts";
 import { cachedJudge, type ReplayLimits } from "./cached-judge.ts";
 import { digest, writePrivate } from "./dataset.ts";
-import { typesafeKeyFromEnv } from "./key.ts";
+import { judgeKeyFromEnv } from "./key.ts";
+import { DECISIONS_MODEL, INVALID_PROVIDER_MESSAGE, selectedProvider } from "../src/decisions.ts";
 
 export interface ExperimentCheckpoint {
   id: string;
@@ -57,16 +58,20 @@ async function main(): Promise<void> {
     throw new Error("Only shipped questions and the frozen candidate may be scored on holdout.");
   }
   const limits: ReplayLimits = JSON.parse(readFileSync(limitsFile, "utf8"));
+  const provider = selectedProvider(process.env.COMPACT_ADVISER_PROVIDER);
+  if (provider === undefined) throw new Error(INVALID_PROVIDER_MESSAGE);
+  if (provider === "openai-decisions" && limits.expectedModel !== DECISIONS_MODEL) throw new Error("Decisions replay requires expectedModel gpt-6-luna.");
+  const outputDirectory = provider === "typesafe" ? directory : join(directory, provider);
   if (!execute) {
-    console.log(`Prepared ${rows.length} ${split} rows. No paid calls; pass --execute to score.`);
+    console.log(`Prepared ${rows.length} ${split} rows. No paid calls; pass --execute to score.${provider === "openai-decisions" ? " Provider: openai-decisions (experimental)." : ""}`);
     return;
   }
-  const key = typesafeKeyFromEnv();
+  const key = judgeKeyFromEnv(provider);
   const output = [];
   for (const row of rows) {
     let cached;
     try {
-      cached = await cachedJudge(join(directory, "cache"), row.state, key, limits, profile);
+      cached = await cachedJudge(join(outputDirectory, "cache"), row.state, key, limits, profile, undefined, provider);
     } catch (error) {
       if (error instanceof JudgeError && error.kind === "input") {
         output.push({ id: row.id, group: row.group, split: row.split, stratum: row.stratum, ok: false, error: "input", hint: false, auto: false });
@@ -93,7 +98,7 @@ async function main(): Promise<void> {
     });
     console.log(`Scored ${output.length}/${rows.length}; ${j.inputTokens} input tokens; ${cached.latencyMs} ms.`);
   }
-  writePrivate(join(directory, `${split}-${digest(profileText)}.jsonl`), output.map((row) => JSON.stringify(row)).join("\n") + "\n");
+  writePrivate(join(outputDirectory, `${split}-${digest(profileText)}.jsonl`), output.map((row) => JSON.stringify(row)).join("\n") + "\n");
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

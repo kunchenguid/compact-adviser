@@ -15,6 +15,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { ConfigStore } from "./config.ts";
+import { DECISIONS_ENDPOINT, type JudgeProvider, selectedProvider } from "./decisions.ts";
 import { DISABLE_ENV, disabledByEnv } from "./disable.ts";
 import { parseDotenvKey, type ResolvedTypesafeApiKey, resolveTypesafeApiKey } from "./env.ts";
 import {
@@ -75,8 +76,10 @@ function testEndpoint(env: NodeJS.ProcessEnv): string | undefined {
 }
 
 /** The live regression's fixture, else TypeSafe under `TYPESAFE_BASE` from the launch environment. */
-function judgeEndpoint(env: NodeJS.ProcessEnv): string {
-  const endpoint = testEndpoint(env) ?? typesafeEndpoint(env.TYPESAFE_BASE);
+function judgeEndpoint(env: NodeJS.ProcessEnv, provider: JudgeProvider): string {
+  const endpoint =
+    testEndpoint(env) ??
+    (provider === "openai-decisions" ? DECISIONS_ENDPOINT : typesafeEndpoint(env.TYPESAFE_BASE));
   if (endpoint === undefined) throw new JudgeError("configuration");
   return endpoint;
 }
@@ -86,7 +89,12 @@ export function resolveKey(
   env: NodeJS.ProcessEnv,
   saved: string | undefined,
   cwd: string,
+  provider = selectedProvider(env.COMPACT_ADVISER_PROVIDER),
 ): ResolvedTypesafeApiKey {
+  if (provider !== "typesafe") {
+    const value = provider === "openai-decisions" ? env.OPENAI_API_KEY?.trim() : undefined;
+    return { value: value || undefined, source: value ? "env" : "missing" };
+  }
   let dotenv: string | undefined;
   try {
     dotenv = parseDotenvKey(readFileSync(join(cwd, ".env"), "utf8"), "TYPESAFE_API_KEY");
@@ -107,6 +115,27 @@ export interface Environment {
   fetch: typeof globalThis.fetch;
 }
 
+async function readBoundedText(response: Response): Promise<string> {
+  const reader = response.body?.getReader();
+  if (!reader) return "";
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  try {
+    while (true) {
+      const next = await reader.read();
+      if (next.done) break;
+      size += next.value.byteLength;
+      if (size > 32768) return "x".repeat(32769);
+      chunks.push(next.value);
+    }
+  } finally {
+    try {
+      await reader.cancel();
+    } catch {}
+  }
+  return Buffer.concat(chunks).toString("utf8");
+}
+
 function cancellableJudgeTransport(fetch: Environment["fetch"]): {
   fetch: (
     url: string,
@@ -124,8 +153,12 @@ function cancellableJudgeTransport(fetch: Environment["fetch"]): {
   return {
     fetch: async (url, init) => {
       try {
-        const response = await fetch(url, { ...init, signal: controller.signal });
-        const text = await response.text();
+        const response = await fetch(url, {
+          ...init,
+          redirect: "error",
+          signal: controller.signal,
+        });
+        const text = await readBoundedText(response);
         stopTimer();
         return { status: response.status, ok: response.ok, text };
       } catch (error) {
@@ -175,7 +208,14 @@ async function onStop(payload: HookPayload, environment: Environment): Promise<H
   if (!isInteractive(rollout)) return {};
   if (!payload.last_assistant_message?.trim()) return {};
 
-  const key = resolveKey(environment.env, config.typesafeApiKey, payload.cwd ?? process.cwd());
+  const provider = selectedProvider(environment.env.COMPACT_ADVISER_PROVIDER);
+  if (provider === undefined) return {};
+  const key = resolveKey(
+    environment.env,
+    config.typesafeApiKey,
+    payload.cwd ?? process.cwd(),
+    provider,
+  );
   if (!key.value) return {};
 
   const tokens = rollout.tokens;
@@ -183,9 +223,18 @@ async function onStop(payload: HookPayload, environment: Environment): Promise<H
   if (tokens < config.minContextTokens) return {};
   if (cooldownReason(state, tokens, now) !== undefined) return {};
 
-  const view = snapshot(rollout.messages, [key.value, config.typesafeApiKey], {
-    truncated: rollout.truncated,
-  });
+  const view = snapshot(
+    rollout.messages,
+    [
+      key.value,
+      config.typesafeApiKey,
+      environment.env.TYPESAFE_API_KEY,
+      environment.env.OPENAI_API_KEY,
+    ],
+    {
+      truncated: rollout.truncated,
+    },
+  );
   if (view.conversationTokens <= MINIMUM_CONVERSATION_TOKENS) return {};
   const fingerprint = await checkpointKey(view.checkpointText);
   if (state.lastHintKey === fingerprint) return {};
@@ -193,7 +242,7 @@ async function onStop(payload: HookPayload, environment: Environment): Promise<H
   let loggedBody: string | undefined;
   if (config.logRequests) {
     try {
-      loggedBody = requestBody(view.state, profile);
+      loggedBody = requestBody(view.state, profile, provider);
       appendRequestLogLine(root, sessionId, requestLogLine(loggedBody));
     } catch {
       // Request logging must not replace or delay the judgment.
@@ -207,9 +256,10 @@ async function onStop(payload: HookPayload, environment: Environment): Promise<H
       key.value,
       {
         ...cancellableJudgeTransport(environment.fetch),
-        endpoint: judgeEndpoint(environment.env),
+        endpoint: judgeEndpoint(environment.env, provider),
       },
       profile,
+      provider,
     );
   } catch (error) {
     if (config.logRequests) {
@@ -217,7 +267,7 @@ async function onStop(payload: HookPayload, environment: Environment): Promise<H
         appendRequestLogLine(
           root,
           sessionId,
-          errorLogLine(loggedJudgeErrorKind(error), loggedBody),
+          errorLogLine(loggedJudgeErrorKind(error), loggedBody, undefined, provider),
         );
       } catch {
         // Error logging must not replace backoff.
@@ -237,7 +287,7 @@ async function onStop(payload: HookPayload, environment: Environment): Promise<H
         root,
         sessionId,
         responseLogLine(
-          loggedBody ?? requestBody(view.state, profile),
+          loggedBody ?? requestBody(view.state, profile, provider),
           result,
           fraction,
           undefined,

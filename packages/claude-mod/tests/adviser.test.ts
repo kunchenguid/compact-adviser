@@ -134,6 +134,79 @@ describe("turn-end gates", () => {
     expect(response.floor).toBe(1);
     expect(response.qualifies).toBe(false);
   });
+  test("Decisions opt-in preserves the host gate and logs the actual wire request", async ($, on) => {
+    const w = world(on, {
+      provider: "openai-decisions",
+      openaiKey: "openai-fixture",
+      base: "invalid",
+      logRequests: true,
+    });
+    const old = jevAnswer();
+    w.respond = async () => ({
+      status: 200,
+      text: JSON.stringify({
+        ...old,
+        model: "gpt-6-luna",
+        answers: Object.entries(old.answers).map(([name, a]) => ({
+          ...a,
+          name,
+          probabilities: Object.entries(a.probabilities).map(([value, probability]) => ({
+            value,
+            probability,
+          })),
+        })),
+      }),
+    });
+    await $.session.start(interactiveStart);
+    await turnEnd($, w);
+    expect(w.journal.requests).toHaveLength(1);
+    const request = w.journal.requests[0];
+    expect(request?.url).toBe("https://api.openai.com/v1/decisions");
+    expect(request?.headers.Authorization).toBe("Bearer openai-fixture");
+    expect(hinted(w)).toBe(true);
+    expect(lastJsonl(w.journal.fsWrites[0]).body).toEqual(JSON.parse(request?.body ?? "{}"));
+    expect(lastJsonl(w.journal.fsWrites[0]).provider).toBe("openai-decisions");
+    expect(lastJsonl(w.journal.fsWrites[1]).provider).toBe("openai-decisions");
+    await $.command.run(commandRun("status"));
+    expect(w.journal.logs.join(" ")).toContain("OpenAI Decisions (experimental");
+  });
+
+  for (const provider of ["openai-decisions", "invalid"]) {
+    test(`${provider} does not use TypeSafe env, saved, or dotenv credentials`, async ($, on) => {
+      const w = world(on, {
+        provider,
+        savedKey: "saved-fixture",
+        dotenv: "OPENAI_API_KEY=ignored\nTYPESAFE_API_KEY=ignored",
+      });
+      await $.session.start(interactiveStart);
+      await turnEnd($, w);
+      expect(w.journal.requests).toHaveLength(0);
+      expect(hinted(w)).toBe(false);
+    });
+  }
+
+  test("Decisions quota errors identify OpenAI without echoing the provider error", async ($, on) => {
+    const w = world(on, {
+      provider: "openai-decisions",
+      openaiKey: "openai-fixture",
+      logRequests: true,
+    });
+    w.respond = async () => ({
+      status: 429,
+      text: JSON.stringify({
+        error: { type: "insufficient_quota", message: "private-provider-message" },
+      }),
+    });
+    await $.session.start(interactiveStart);
+    await turnEnd($, w);
+    expect(hinted(w)).toBe(false);
+    expect(w.journal.requests).toHaveLength(1);
+    expect(w.journal.toasts.join(" ")).toContain("OpenAI Decisions");
+    expect(w.journal.toasts.join(" ").includes("private-provider-message")).toBe(false);
+    expect(lastJsonl(w.journal.fsWrites[1]).provider).toBe("openai-decisions");
+    expect(lastJsonl(w.journal.fsWrites[1]).error.kind).toBe("billing");
+  });
+
   test("a qualifying settled checkpoint shows the hint once, without blocking the turn", async ($, on) => {
     const w = world(on);
     await $.session.start(interactiveStart);

@@ -28,7 +28,7 @@
 
 ![Compact adviser status line: "Compact adviser: work appears completed or recorded. Run /compact to save tokens." shown above a terminal prompt](docs/hint-status-line.png)
 
-It uses [Jev](https://typesafe.ai) to instantly judge whether the current session is likely at a boundary that's safe to compact.
+It uses [Jev](https://typesafe.ai) by default to judge whether the current session is likely at a boundary that's safe to compact. An explicit, experimental [OpenAI Decisions](#openai-decisions-experimental) option is also available.
 
 It can give you a hint to run `/compact` - or, on Pi and Claude Code, if you opt in, it can run it for you at the right time automatically. Codex CLI and Grok are hint-only: nothing outside their sessions can trigger `/compact`.
 
@@ -106,6 +106,16 @@ Then paste the `[ui.status_line]` block `install` printed into the config.toml p
 
 On Grok, save the TypeSafe key as `TYPESAFE_API_KEY` or a cwd `.env`, or with the CLI `key` command from a shell outside Grok. Do not type secrets after a Grok slash command; Grok appends those words to the model.
 
+## OpenAI Decisions (experimental)
+
+All four hosts can use the [Decisions API](https://developers.openai.com/api/docs/guides/decisions), not Responses or Chat Completions. Set `COMPACT_ADVISER_PROVIDER=openai-decisions` in the host's launch environment and securely provision `OPENAI_API_KEY` there. Use a project-scoped OpenAI API key with access to `gpt-6-luna` and the Decisions endpoint; a ChatGPT subscription login is not an API key.
+
+The adviser sends the same bounded, redacted checkpoint and two questions to `https://api.openai.com/v1/decisions`, using `gpt-6-luna`. It preserves profiles, scoring, thresholds, cooldowns, and automatic-mode consent. A refusal, missing answer, invalid probability, timeout, or API error produces no advice. There is no fallback to TypeSafe.
+
+Selection is launch-only. An OpenAI key alone does not select this provider. Saved keys, key editors, and cwd `.env` files remain **TypeSafe-only**; `TYPESAFE_BASE` has no effect on Decisions. `/compact-adviser status` (or the external host CLI's `status`) identifies the selected provider and key source, never the key. Unset the selector or set it to `typesafe` to restore the default. Unknown selections disable advice.
+
+**Protocol compatibility is not evidence of equivalent compaction accuracy.** Decisions is opt-in and experimental pending representative checkpoint evaluation; the Jev measurements below do not apply to it. Prefer hint mode while evaluating it. The existing two-second deadline and final 32,000-byte request cap are unchanged. JSON escaping can make a Decisions request exceed that cap even when its TypeSafe equivalent fits; such checkpoints are not sent. See [SECURITY.md](SECURITY.md) for host transport limits and [the eval guide](packages/pi-extension/eval/README.md#experimental-decisions-replay) for bounded replay tooling.
+
 ## If it does nothing
 
 | Symptom | Cause |
@@ -125,23 +135,25 @@ On Grok, save the TypeSafe key as `TYPESAFE_API_KEY` or a cwd `.env`, or with th
 
 | Variable | Effect |
 | --- | --- |
+| `COMPACT_ADVISER_PROVIDER` | Launch-only judge selection: unset, blank, or `typesafe` keeps Jev; `openai-decisions` explicitly enables experimental Decisions; any other value disables advice |
+| `OPENAI_API_KEY` | Launch-only key used exclusively when Decisions is selected; never loaded from saved settings or cwd `.env` |
 | `TYPESAFE_API_KEY` | The Jev key; a saved key or the session cwd's `./.env` is used when this is unset |
 | `TYPESAFE_BASE` | Replaces the TypeSafe API base URL, `https://api.typesafe.ai` by default; the request goes to `<base>/v1/systemone` with a trailing slash dropped. Read from the launch environment only, never a saved setting or `./.env`. It must be an `https` URL; plain `http` is accepted only for a loopback host (`127.0.0.1`, `[::1]`, `localhost`). Any other value, or one that carries credentials, a query or a fragment, is a configuration error: no request and no advice |
-| `COMPACT_ADVISER_DISABLE` | `1`, `true`, `yes` or `on` (any case) makes the session inert: no TypeSafe request, no hint, no automatic compaction, no command. It wins over a saved `hint` or `auto` mode |
+| `COMPACT_ADVISER_DISABLE` | `1`, `true`, `yes` or `on` (any case) makes the session inert: no judge request, no hint, no automatic compaction, no command. It wins over a saved `hint` or `auto` mode |
 | `CLAUDE_CODE_ENABLE_FUNCTION_HOOKS` | Claude Code only; must be exactly `1` for the mod to load |
 | `COMPACT_ADVISER_NODE` | Codex only; absolute path to a Node 22.18 or newer executable when the hook cannot find one on its rebuilt PATH |
 
 Export `COMPACT_ADVISER_DISABLE=1` for unattended agent sessions, where advice has nobody to read it.
 
-## What is sent to TypeSafe
+## What is sent to the selected judge
 
 | Included | Not sent |
 | --- | --- |
 | Bounded user constraints, up to the last 64 visible replies and tool results (clipped), short tool-result excerpts, an existing summary, saved-artifact names, omission markers | System prompts, hidden reasoning, images, environment variables, the API key in the model context and request body, complete transcripts |
 | Best-effort redaction of known key patterns and obvious sensitive-file results | A guarantee. Uninstall or set mode Off for material that must not leave the machine |
 
-Requests go to `https://api.typesafe.ai/v1/systemone`, or `<TYPESAFE_BASE>/v1/systemone` when that is set, are capped at 32,000 serialized UTF-8 bytes, and never treat an error as an affirmative judgment.
-The TypeSafe API key never enters the model context or the request body; it is sent as the Authorization header to authenticate the call.
+By default, requests go to `https://api.typesafe.ai/v1/systemone`, or `<TYPESAFE_BASE>/v1/systemone` when that is set. Explicit Decisions selection sends them to `https://api.openai.com/v1/decisions` instead. Requests are capped at 32,000 serialized UTF-8 bytes and never treat an error as an affirmative judgment.
+The selected API key never enters the model context or the request body; it is sent as the Authorization header to authenticate the call. Optional local request logs identify Decisions records and contain the actual redacted request body.
 Details: [SECURITY.md](SECURITY.md).
 
 ## How It Works

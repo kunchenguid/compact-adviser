@@ -32,8 +32,12 @@ export function loggedJudgeErrorKind(error: unknown): string {
   return error instanceof JudgeError ? error.kind : "unavailable";
 }
 
+function logProvider(body: string): { provider?: "openai-decisions" } {
+  return JSON.parse(body).model === "gpt-6-luna" ? { provider: "openai-decisions" } : {};
+}
+
 export function requestLogLine(body: string, at = new Date().toISOString()): string {
-  return `${JSON.stringify({ at, kind: "request", id: requestLogId(body), body: JSON.parse(body) })}\n`;
+  return `${JSON.stringify({ at, kind: "request", ...logProvider(body), id: requestLogId(body), body: JSON.parse(body) })}\n`;
 }
 
 export function responseLogLine(
@@ -48,6 +52,7 @@ export function responseLogLine(
   return `${JSON.stringify({
     at,
     kind: "response",
+    ...logProvider(body),
     id: requestLogId(body),
     answers: {
       done: { choice: judgment.done.choice, probabilities: judgment.done.probabilities },
@@ -61,10 +66,16 @@ export function responseLogLine(
   })}\n`;
 }
 
-export function errorLogLine(kind: string, body?: string, at = new Date().toISOString()): string {
+export function errorLogLine(
+  kind: string,
+  body?: string,
+  at = new Date().toISOString(),
+  provider: "typesafe" | "openai-decisions" = "typesafe",
+): string {
   return `${JSON.stringify({
     at,
     kind: "error",
+    ...(provider === "openai-decisions" ? { provider } : {}),
     ...(body === undefined ? {} : { id: requestLogId(body) }),
     error: { kind },
   })}\n`;

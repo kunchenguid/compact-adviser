@@ -91,6 +91,8 @@ export type WorldOptions = {
   /** The `COMPACT_ADVISER_DISABLE` kill switch; omit to leave the variable unset. */
   disable?: string;
   key?: string | undefined;
+  provider?: string;
+  openaiKey?: string;
   endpoint?: string;
   /** The `TYPESAFE_BASE` override; omit to leave the variable unset. */
   base?: string;
@@ -143,6 +145,8 @@ export function world(on: On, options: WorldOptions = {}): World {
     ...(options.endpoint === undefined ? {} : { COMPACT_ADVISER_TEST_ENDPOINT: options.endpoint }),
     ...(options.disable === undefined ? {} : { COMPACT_ADVISER_DISABLE: options.disable }),
     ...(options.base === undefined ? {} : { TYPESAFE_BASE: options.base }),
+    ...(options.provider === undefined ? {} : { COMPACT_ADVISER_PROVIDER: options.provider }),
+    ...(options.openaiKey === undefined ? {} : { OPENAI_API_KEY: options.openaiKey }),
   });
   const consent = "consent" in options ? options.consent : "absent";
   // The plugin store, in memory and visible to the test.

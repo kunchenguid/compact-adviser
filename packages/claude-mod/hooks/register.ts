@@ -41,6 +41,14 @@ import {
   readConfig,
   readSavedApiKey,
 } from "../lib/config.ts";
+import {
+  DECISIONS_ENDPOINT,
+  INVALID_PROVIDER_MESSAGE,
+  type JudgeProvider,
+  providerMessage,
+  providerStatus,
+  selectedProvider,
+} from "../lib/decisions.ts";
 import { disabledByEnv } from "../lib/disable.ts";
 import {
   formatKeyStatus,
@@ -158,7 +166,18 @@ function isActivated($: EngineInterface): Promise<boolean> {
   return activation;
 }
 
+let launchProvider: Promise<JudgeProvider | undefined> | undefined;
+function selectedJudge($: EngineInterface): Promise<JudgeProvider | undefined> {
+  launchProvider ??= $.env.get("COMPACT_ADVISER_PROVIDER").then(selectedProvider);
+  return launchProvider;
+}
+
 async function resolvedKey($: EngineInterface) {
+  const provider = await selectedJudge($);
+  if (provider !== "typesafe")
+    return resolveTypesafeApiKey(
+      provider === "openai-decisions" ? await $.env.get("OPENAI_API_KEY") : undefined,
+    );
   const fromEnv = await $.env.get("TYPESAFE_API_KEY");
   if (fromEnv !== undefined && fromEnv.trim() !== "") {
     return resolveTypesafeApiKey(fromEnv);
@@ -185,8 +204,12 @@ async function testEndpoint($: EngineInterface): Promise<string | undefined> {
 }
 
 /** The live regression's fixture, else TypeSafe under `TYPESAFE_BASE` from the launch environment. */
-async function judgeEndpoint($: EngineInterface): Promise<string> {
-  const endpoint = (await testEndpoint($)) ?? typesafeEndpoint(await $.env.get("TYPESAFE_BASE"));
+async function judgeEndpoint($: EngineInterface, provider: JudgeProvider): Promise<string> {
+  const endpoint =
+    (await testEndpoint($)) ??
+    (provider === "openai-decisions"
+      ? DECISIONS_ENDPOINT
+      : typesafeEndpoint(await $.env.get("TYPESAFE_BASE")));
   if (endpoint === undefined) throw new JudgeError("configuration");
   return endpoint;
 }
@@ -209,13 +232,15 @@ async function checkpointKey(text: string): Promise<string> {
   return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-function judgeFailureMessage(error: unknown): string {
+function judgeFailureMessage(error: unknown, provider: JudgeProvider): string {
   // Claude Code refuses plugin network access outright under
   // CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC; say so instead of a generic network error.
   if (String((error as { cause?: unknown })?.cause).includes("nonessential network traffic")) {
-    return JUDGE_DISABLED_NETWORK_MESSAGE;
+    return providerMessage(JUDGE_DISABLED_NETWORK_MESSAGE, provider);
   }
-  return error instanceof JudgeError ? error.message : JUDGE_UNAVAILABLE_MESSAGE;
+  return error instanceof JudgeError
+    ? error.message
+    : providerMessage(JUDGE_UNAVAILABLE_MESSAGE, provider);
 }
 
 async function logHome($: EngineInterface): Promise<string> {
@@ -285,6 +310,10 @@ async function eligible(
   tokens: number | undefined,
   now: number,
 ): Promise<boolean> {
+  if ((await selectedJudge($)) === undefined) {
+    notice($, INVALID_PROVIDER_MESSAGE);
+    return false;
+  }
   return (
     interactive &&
     !compacting &&
@@ -433,20 +462,27 @@ async function judgeCheckpoint($: EngineInterface, epoch: number): Promise<void>
   judging = true;
   try {
     const initial = await loadConfig($);
+    const provider = await selectedJudge($);
+    if (provider === undefined) return;
     const profile = parseProfile(initial.profile);
     const [messages, activeKey, rows] = await Promise.all([
       $.session.messages(),
       apiKey($),
       $.config.list(),
     ]);
-    const view = snapshot(messages, [activeKey, readSavedApiKey(rows, loadedOptions)]);
+    const view = snapshot(messages, [
+      activeKey,
+      readSavedApiKey(rows, loadedOptions),
+      await $.env.get("TYPESAFE_API_KEY"),
+      await $.env.get("OPENAI_API_KEY"),
+    ]);
     if (view.conversationTokens <= 20000) return;
     const fingerprint = await checkpointKey(view.checkpointText);
     if ((await loadState($)).state.lastHintKey === fingerprint) return;
     let loggedBody: string | undefined;
     if (initial.logRequests) {
       try {
-        loggedBody = requestBody(view.state, profile);
+        loggedBody = requestBody(view.state, profile, provider);
         await appendTypeSafeLog($, requestLogLine(loggedBody));
       } catch {
         // Request logging must not replace or delay the judgment.
@@ -454,29 +490,33 @@ async function judgeCheckpoint($: EngineInterface, epoch: number): Promise<void>
     }
     let result: Awaited<ReturnType<typeof judge>>;
     try {
-      const endpoint = await judgeEndpoint($);
+      const endpoint = await judgeEndpoint($, provider);
       result = await judge(
         view.state,
-        await apiKey($),
+        activeKey,
         {
           fetch: (url, init) => $.http.fetch(url, init),
           sleep: (ms) => $.clock.sleep(ms),
           endpoint,
         },
         profile,
+        provider,
       );
     } catch (error) {
       if (epoch !== generation) return;
       if (initial.logRequests) {
         try {
-          await appendTypeSafeLog($, errorLogLine(loggedJudgeErrorKind(error), loggedBody));
+          await appendTypeSafeLog(
+            $,
+            errorLogLine(loggedJudgeErrorKind(error), loggedBody, undefined, provider),
+          );
         } catch {
           // Error logging must not replace backoff.
         }
       }
       const { key, state } = await loadState($);
       await $.store.set(key, backoff(state, await $.clock.now()));
-      notice($, judgeFailureMessage(error));
+      notice($, judgeFailureMessage(error, provider));
       return;
     }
     if (epoch !== generation) return;
@@ -489,7 +529,7 @@ async function judgeCheckpoint($: EngineInterface, epoch: number): Promise<void>
         await appendTypeSafeLog(
           $,
           responseLogLine(
-            loggedBody ?? requestBody(view.state, profile),
+            loggedBody ?? requestBody(view.state, profile, provider),
             result,
             usageFraction(context, latest.contextBudgetTokens),
             undefined,
@@ -736,7 +776,10 @@ async function changeMode($: EngineInterface, mode: Mode, fromPane = false): Pro
       $,
       MODE_KEY,
       "auto",
-      "Automatic mode saved (all sessions). A TypeSafe key is still required.",
+      providerMessage(
+        "Automatic mode saved (all sessions). A TypeSafe key is still required.",
+        (await selectedJudge($)) ?? "typesafe",
+      ),
     );
     return;
   }
@@ -782,9 +825,12 @@ async function changeLogRequests($: EngineInterface, enabled: boolean): Promise<
     $,
     LOG_KEY,
     enabled,
-    enabled
-      ? `TypeSafe request logging on (all sessions). ${await sessionLogPath($)}`
-      : "TypeSafe request logging off (all sessions).",
+    providerMessage(
+      enabled
+        ? `TypeSafe request logging on (all sessions). ${await sessionLogPath($)}`
+        : "TypeSafe request logging off (all sessions).",
+      (await selectedJudge($)) ?? "typesafe",
+    ),
   );
 }
 
@@ -825,7 +871,7 @@ async function statusText($: EngineInterface): Promise<string> {
       : "Waiting for fresh model usage.";
   const budget = config.contextBudgetTokens;
   const fraction = usageFraction(usage.context, budget);
-  return `Mode: ${config.mode}${config.mode === "auto" && !config.autoAcknowledged ? " (not confirmed)" : ""}. Minimum: ${formatTokens(config.minContextTokens)} tokens. Budget: ${budget > 0 ? `${formatTokens(budget)} tokens` : "off"}. Context: ${typeof tokens === "number" ? formatTokens(tokens) : "unknown"}${Number.isFinite(fraction) ? ` (${Math.round(fraction * 100)}% of the ${effectiveBudget(contextLimit(usage.context), budget) > 0 ? "budget" : "context limit"}; hint floor ${floorFor(fraction, parseProfile(config.profile)).toFixed(2)})` : ""}. ${formatKeyStatus((await resolvedKey($)).source)}. ${cooldown}${engine} Request log: ${config.logRequests ? await sessionLogPath($) : "off"}. Settings: /config (compact-adviser rows) and /compact-adviser.`;
+  return `${providerStatus(await selectedJudge($))}Mode: ${config.mode}${config.mode === "auto" && !config.autoAcknowledged ? " (not confirmed)" : ""}. Minimum: ${formatTokens(config.minContextTokens)} tokens. Budget: ${budget > 0 ? `${formatTokens(budget)} tokens` : "off"}. Context: ${typeof tokens === "number" ? formatTokens(tokens) : "unknown"}${Number.isFinite(fraction) ? ` (${Math.round(fraction * 100)}% of the ${effectiveBudget(contextLimit(usage.context), budget) > 0 ? "budget" : "context limit"}; hint floor ${floorFor(fraction, parseProfile(config.profile)).toFixed(2)})` : ""}. ${formatKeyStatus((await resolvedKey($)).source)}. ${cooldown}${engine} Request log: ${config.logRequests ? await sessionLogPath($) : "off"}. Settings: /config (compact-adviser rows) and /compact-adviser.`;
 }
 
 async function snoozeOrDismiss($: EngineInterface, command: "snooze" | "dismiss") {
@@ -1047,6 +1093,7 @@ export const register: Register = (on, options) => {
       return Text({ children: USAGE });
     }
     const { Box, Text, Input, Button } = $.ui.resolve(e);
+    const provider = await selectedJudge($);
     const column = (children: RenderChildren[]) => Box({ flexDirection: "column", children });
     const heading = (crumb?: string) =>
       Box({
@@ -1148,7 +1195,7 @@ export const register: Register = (on, options) => {
     }
     if (view === "logging") {
       return options(
-        "Log TypeSafe requests",
+        providerMessage("Log TypeSafe requests", provider ?? "typesafe"),
         config.logRequests ? "on" : "off",
         [
           { value: "off", label: "Off (default)" },
@@ -1191,7 +1238,14 @@ export const register: Register = (on, options) => {
     if (view === "key") {
       return column([
         heading("TypeSafe API key"),
-        Text({ dimColor: true, wrap: "wrap", children: keyDetail(key.source, savedKey) }),
+        Text({
+          dimColor: true,
+          wrap: "wrap",
+          children:
+            provider === "typesafe"
+              ? keyDetail(key.source, savedKey)
+              : `${providerStatus(provider)}This editor saves only the inactive TypeSafe key.`,
+        }),
         Input({
           key: "typesafeApiKey",
           label: "Key",
@@ -1244,6 +1298,9 @@ export const register: Register = (on, options) => {
     };
     return column([
       heading(),
+      ...(provider !== "typesafe"
+        ? [Text({ dimColor: true, wrap: "wrap", children: providerStatus(provider) })]
+        : []),
       list(
         [
           {
@@ -1258,7 +1315,10 @@ export const register: Register = (on, options) => {
           },
           {
             key: "menu:logRequests",
-            label: setting("Log TypeSafe requests", config.logRequests ? "On" : "Off"),
+            label: setting(
+              providerMessage("Log TypeSafe requests", provider ?? "typesafe"),
+              config.logRequests ? "On" : "Off",
+            ),
             onPress: open(
               "logging",
               "menu:logRequests",
@@ -1267,7 +1327,10 @@ export const register: Register = (on, options) => {
           },
           {
             key: "menu:typesafeApiKey",
-            label: setting("TypeSafe API key", KEY_SOURCE_LABELS[key.source]),
+            label: setting(
+              "TypeSafe API key",
+              provider === "typesafe" ? KEY_SOURCE_LABELS[key.source] : "Inactive",
+            ),
             onPress: open("key", "menu:typesafeApiKey", "typesafeApiKey"),
           },
           {

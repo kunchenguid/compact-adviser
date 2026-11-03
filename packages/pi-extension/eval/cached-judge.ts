@@ -2,6 +2,7 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { judge, type Judgment, requestBody } from "../src/judge.ts";
+import { DECISIONS_MODEL, type JudgeProvider } from "../src/decisions.ts";
 import type { JudgeProfile } from "../src/profile.ts";
 import { digest, privateOutput, writePrivate } from "./dataset.ts";
 
@@ -42,6 +43,7 @@ function read<T>(path: string): T {
 /** The capture is bounded and stores no headers. Oversized replies retain a marker, not a secret prefix. */
 export async function productionEvaluate(
   state: unknown, key: string, profile?: JudgeProfile, capture?: Capture, network: typeof fetch = fetch,
+  provider: JudgeProvider = "typesafe",
 ): Promise<Judgment> {
   return judge(state, key, new AbortController().signal, async (url, init) => {
     const response = await network(url, init);
@@ -67,7 +69,7 @@ export async function productionEvaluate(
       capture?.(text.replaceAll(key, "[REDACTED]").replaceAll(escapedKey, "[REDACTED]"), truncated);
     }
     return response;
-  }, 60000, profile);
+  }, 60000, profile, undefined, provider);
 }
 
 function attempts(directory: string): string[] {
@@ -134,14 +136,16 @@ function failureAccounting(raw: string | undefined, limits: ReplayLimits): Accou
 
 export async function cachedJudge(
   directory: string, state: unknown, key: string, limits: ReplayLimits,
-  profile?: JudgeProfile, transport: Evaluate = productionEvaluate,
+  profile?: JudgeProfile, transport?: Evaluate, provider: JudgeProvider = "typesafe",
 ): Promise<CachedJudgment> {
+  if (provider === "openai-decisions" && limits.expectedModel !== DECISIONS_MODEL) throw new Error("Decisions replay requires expectedModel gpt-6-luna.");
+  const evaluate = transport ?? ((state, key, profile, capture) => productionEvaluate(state, key, profile, capture, fetch, provider));
   if (!key.trim() || !limits.expectedModel || !Number.isSafeInteger(limits.maxCalls) || limits.maxCalls < 1 ||
     !Number.isSafeInteger(limits.maxInputTokens) || limits.maxInputTokens < 1 ||
     ![limits.maxEstimatedUsd, limits.inputUsdPerMillion, limits.failedCallEstimateUsd].every((value) => Number.isFinite(value) && value > 0)) {
     throw new Error("Replay requires a key, model identity, and positive call/token/cost limits.");
   }
-  const body = requestBody(state, profile);
+  const body = requestBody(state, profile, provider);
   const requestHash = digest(body);
   const base = join(directory, digest(`${limits.expectedModel}\n${body}`));
   let last: CachedJudgment | undefined;
@@ -170,7 +174,7 @@ export async function cachedJudge(
     const started = Date.now();
     let raw: string | undefined;
     try {
-      const judgment = await transport(state, key, profile, (text, truncated) => {
+      const judgment = await evaluate(state, key, profile, (text, truncated) => {
         raw = text;
         writePrivate(join(root, "response.json"), JSON.stringify({ text, truncated }));
       });
