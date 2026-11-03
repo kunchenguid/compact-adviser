@@ -580,14 +580,37 @@ test("Decisions opt-in drives Pi's settled hook, key isolation, redaction and ex
   h.install("0.82.0", "unused-typesafe-key", true);
   h.enable();
   h.store.update({ logRequests: true });
+  h.sm.appendMessage({
+    role: "user",
+    content:
+      "DECISIONS_USER_MARKER selected=openai-fixture-key inactive=inactive-fixture-key. Finish the saved report.",
+    timestamp: Date.now(),
+  });
+  h.next(
+    "DECISIONS_ANSWER_MARKER selected=openai-fixture-key inactive=inactive-fixture-key. Tests passed and the report is saved.",
+  );
+  const history = JSON.stringify(h.sm.getBranch());
+  const keys = ["openai-fixture-key", "inactive-fixture-key"];
+  for (const key of keys) assert.ok(history.includes(key), "key must exist in session history");
   await h.fire("agent_settled");
   assert.equal(requests.length, 1);
   assert.ok(showedHint(h));
-  const lines = readFileSync(requestLogPath(h.dir), "utf8")
+  const wire = requests[0];
+  assert.ok(wire);
+  const log = readFileSync(requestLogPath(h.dir), "utf8");
+  for (const marker of ["DECISIONS_USER_MARKER", "DECISIONS_ANSWER_MARKER"]) {
+    assert.ok(wire.includes(marker), "key-bearing conversation must reach the request");
+    assert.ok(log.includes(marker), "key-bearing conversation must reach the request log");
+  }
+  for (const key of keys) {
+    assert.ok(!wire.includes(key), "known key must be redacted from the request");
+    assert.ok(!log.includes(key), "known key must be redacted from the request log");
+  }
+  const lines = log
     .trim()
     .split("\n")
     .map((line) => JSON.parse(line));
-  assert.deepEqual(lines[0].body, JSON.parse(requests[0] ?? "{}"));
+  assert.deepEqual(lines[0].body, JSON.parse(wire));
   assert.equal(lines[0].provider, "openai-decisions");
   assert.equal(lines[1].provider, "openai-decisions");
   assert.ok(!requests[0]?.includes("fixture-key"));
