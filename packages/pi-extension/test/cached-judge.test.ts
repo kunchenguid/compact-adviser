@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { createServer } from "node:http";
+import { join, resolve } from "node:path";
 import { type TestContext, test } from "node:test";
+import { pathToFileURL } from "node:url";
 import { cachedJudge, cacheUsage, productionEvaluate } from "../eval/cached-judge.ts";
 import { digest } from "../eval/dataset.ts";
 import { partition } from "../eval/score-profile.ts";
@@ -157,6 +160,180 @@ test("failed calls retain estimated spend and stop after exactly one retry", asy
   );
   assert.ok(hash);
   assert.ok(!readFileSync(join(root, hash, "result.json"), "utf8").includes("credential"));
+});
+
+test("zero retries reuse only the first attempt while retaining all historical accounting", async (t) => {
+  for (const provider of ["typesafe", "openai-decisions"] as const) {
+    const root = directory(t);
+    const budget = {
+      ...limits,
+      expectedModel: provider === "typesafe" ? judgment.model : "gpt-6-luna",
+      maxRetries: 0 as const,
+    };
+    let calls = 0;
+    const transport = async () => {
+      calls++;
+      if (calls === 1) throw new Error("synthetic failure");
+      return { ...judgment, model: budget.expectedModel };
+    };
+    const first = await cachedJudge(
+      root,
+      {},
+      "synthetic-key",
+      budget,
+      undefined,
+      transport,
+      provider,
+    );
+    assert.equal(first.ok, false);
+    assert.deepEqual(
+      await cachedJudge(root, {}, "synthetic-key", budget, undefined, transport, provider),
+      first,
+    );
+    assert.equal(calls, 1);
+    assert.equal(cacheUsage(root, budget).estimatedUsd, 0.01);
+    assert.equal(cacheUsage(root, budget).unknownUsageCalls, 1);
+    const retried = await cachedJudge(
+      root,
+      {},
+      "synthetic-key",
+      { ...budget, maxRetries: 1 },
+      undefined,
+      transport,
+      provider,
+    );
+    assert.equal(retried.ok, true);
+    assert.equal(calls, 2);
+    assert.deepEqual(
+      await cachedJudge(root, {}, "synthetic-key", budget, undefined, transport, provider),
+      first,
+    );
+    assert.equal(calls, 2);
+    assert.equal(cacheUsage(root, budget).calls, 2);
+    assert.equal(cacheUsage(root, budget).unknownUsageCalls, 1);
+  }
+});
+
+test("invalid retry limits fail before transport or cache writes", async (t) => {
+  const root = directory(t);
+  let calls = 0;
+  for (const maxRetries of [null, false, "0", -1, 2, 0.5]) {
+    const invalidLimits = JSON.parse(JSON.stringify({ ...limits, maxRetries }));
+    await assert.rejects(
+      cachedJudge(root, {}, "synthetic-key", invalidLimits, undefined, async () => {
+        calls++;
+        return judgment;
+      }),
+      /maxRetries/,
+    );
+  }
+  assert.equal(calls, 0);
+  assert.deepEqual(readdirSync(root), []);
+});
+
+test("replay CLI honors zero retries and preserves default request counts", async (t) => {
+  const requests: string[] = [];
+  const server = createServer((request, response) => {
+    let body = "";
+    request.setEncoding("utf8");
+    request.on("data", (chunk) => {
+      body += chunk;
+    });
+    request.on("end", () => {
+      requests.push(body);
+      response.writeHead(503, { Connection: "close" });
+      response.end("Synthetic judge unavailable");
+    });
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => new Promise<void>((resolve) => server.close(() => resolve())));
+  const address = server.address();
+  assert.ok(address && typeof address === "object");
+  for (const maxRetries of [undefined, 0]) {
+    const root = directory(t);
+    const checkpoints = join(root, "checkpoints.jsonl");
+    const limitsFile = join(root, "limits.json");
+    const preload = join(root, "loopback-only.mjs");
+    writeFileSync(
+      preload,
+      `
+      const localFetch = globalThis.fetch;
+      globalThis.fetch = (url, init) => {
+        if (url !== "https://api.typesafe.ai/v1/systemone") throw new Error("Unexpected fixture endpoint");
+        return localFetch("http://127.0.0.1:${address.port}/v1/systemone", init);
+      };
+    `,
+    );
+    const rows = ["first", "second"].map((id) => ({
+      id,
+      group: id,
+      split: "train",
+      stratum: "synthetic",
+      state: { checkpoint: id },
+    }));
+    writeFileSync(checkpoints, rows.map((row) => JSON.stringify(row)).join("\n"));
+    writeFileSync(limitsFile, JSON.stringify({ ...limits, maxCalls: 4, maxRetries }));
+    const before = requests.length;
+    const child = spawn(
+      process.execPath,
+      [
+        "--import",
+        pathToFileURL(resolve(preload)).href,
+        "--import",
+        "tsx",
+        "eval/score-profile.ts",
+        checkpoints,
+        root,
+        "development",
+        limitsFile,
+        "--execute",
+      ],
+      {
+        env: {
+          PATH: process.env.PATH,
+          HOME: root,
+          COMPACT_ADVISER_PROVIDER: "typesafe",
+          TYPESAFE_API_KEY: "synthetic-replay-key",
+        },
+        stdio: ["ignore", "pipe", "pipe"],
+        timeout: 10_000,
+      },
+    );
+    let output = "";
+    child.stdout.on("data", (chunk) => {
+      output += chunk;
+    });
+    child.stderr.on("data", (chunk) => {
+      output += chunk;
+    });
+    const code = await new Promise<number | null>((resolve, reject) => {
+      child.on("error", reject);
+      child.on("close", resolve);
+    });
+    assert.equal(code, 0, output);
+    const calls = requests.length - before;
+    t.diagnostic(
+      `maxRetries=${maxRetries ?? "omitted"}: ${calls} HTTP requests for two checkpoints`,
+    );
+    const expectedAttempts = maxRetries === 0 ? 1 : 2;
+    assert.equal(calls, 2 * expectedAttempts);
+    for (const row of rows) {
+      assert.equal(
+        requests
+          .slice(before)
+          .filter((body) => JSON.stringify(JSON.parse(body).state) === JSON.stringify(row.state))
+          .length,
+        expectedAttempts,
+      );
+    }
+    const results = readFileSync(join(root, `development-${digest("")}.jsonl`), "utf8")
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
+    assert.equal(results.length, 2);
+    assert.ok(results.every((row) => row.ok === false && row.hint === false && row.auto === false));
+    assert.equal(cacheUsage(join(root, "cache"), limits).calls, calls);
+  }
 });
 
 test("corrupt persisted usage stops before another paid attempt", async (t) => {

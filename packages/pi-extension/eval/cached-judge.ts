@@ -9,6 +9,7 @@ import { digest, privateOutput, writePrivate } from "./dataset.ts";
 export interface ReplayLimits {
   expectedModel: string;
   maxCalls: number;
+  maxRetries?: 0 | 1;
   maxInputTokens: number;
   maxEstimatedUsd: number;
   inputUsdPerMillion: number;
@@ -145,11 +146,13 @@ export async function cachedJudge(
     ![limits.maxEstimatedUsd, limits.inputUsdPerMillion, limits.failedCallEstimateUsd].every((value) => Number.isFinite(value) && value > 0)) {
     throw new Error("Replay requires a key, model identity, and positive call/token/cost limits.");
   }
+  const maxRetries = limits.maxRetries === undefined ? 1 : limits.maxRetries;
+  if (maxRetries !== 0 && maxRetries !== 1) throw new Error("Replay maxRetries must be 0 or 1.");
   const body = requestBody(state, profile, provider);
   const requestHash = digest(body);
   const base = join(directory, digest(`${limits.expectedModel}\n${body}`));
   let last: CachedJudgment | undefined;
-  for (const root of [base, join(base, "retry")]) {
+  for (const root of maxRetries === 0 ? [base] : [base, join(base, "retry")]) {
     privateOutput(join(root, "result.json"));
     const saved = join(root, "result.json");
     if (existsSync(saved)) {
@@ -201,7 +204,7 @@ export async function cachedJudge(
       return last;
     }
   }
-  // Two failed attempts remain an observed no-hint outcome, never an invented judgment.
+  // Exhausted attempts remain an observed no-hint outcome, never an invented judgment.
   if (!last) throw new Error("Missing replay outcome.");
   return last;
 }

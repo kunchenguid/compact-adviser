@@ -72,7 +72,7 @@ are ignored when matching live request bodies.
 
 `eval/score-profile.ts` also accepts launch `COMPACT_ADVISER_PROVIDER=openai-decisions` and uses only launch `OPENAI_API_KEY` for execution. Set the limits file's `expectedModel` to `gpt-6-luna` and approve explicit call, token, and cost ceilings before adding `--execute`. Its default remains a no-network dry run and needs no key. Use only a separately authorized, frozen labeled checkpoint set; this repository supplies no private corpus or Decisions accuracy result.
 
-Decisions caches and results go under `<PRIVATE_DIRECTORY>/openai-decisions/`. The cache hashes the actual Decisions request bytes and expected model, and production `judge()` parses its response. The existing replay permits one bounded retry and uses a 60-second deadline, not the product's two seconds; include both in your evaluation plan and report production-deadline availability separately. Legacy `score.ts` and other Jev-only probes remain TypeSafe-only. Do not infer Decisions quality from the Jev measurements or from successful protocol fixtures.
+Decisions caches and results go under `<PRIVATE_DIRECTORY>/openai-decisions/`. The cache hashes the actual Decisions request bytes and expected model, and production `judge()` parses its response. Replay defaults to one bounded retry; set `"maxRetries": 0` in the limits file when retries are not authorized (`0` and `1` are the only accepted values). It uses a 60-second deadline, not the product's two seconds; include both settings in your evaluation plan and report production-deadline availability separately. Legacy `score.ts` and other Jev-only probes remain TypeSafe-only. Do not infer Decisions quality from the Jev measurements or from successful protocol fixtures.
 
 ## Commands
 

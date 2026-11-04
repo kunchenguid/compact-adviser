@@ -81,7 +81,7 @@ async function main(): Promise<void> {
     }
     if (!cached.ok) {
       output.push({ id: row.id, group: row.group, split: row.split, stratum: row.stratum, ...cached, hint: false, auto: false });
-      console.log(`Skipped ${output.length}/${rows.length} after the bounded retry.`);
+      console.log(`Skipped ${output.length}/${rows.length} after the configured attempt limit.`);
       continue;
     }
     const j = cached.judgment;

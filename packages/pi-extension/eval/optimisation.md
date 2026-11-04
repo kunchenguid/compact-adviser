@@ -75,8 +75,13 @@ Each new attempt saves its request, start marker, bounded response capture, resu
 A crash with an incomplete attempt stops replay for reconciliation.
 A changed model version also stops replay.
 
-A failed judgment receives one retry with identical request bytes.
-A second failure remains a saved no-hint outcome, and replay continues within its ceilings.
+A failed judgment receives one retry with identical request bytes by default.
+The optional limits field `maxRetries` accepts only `0` or `1`; omission keeps `1`.
+Set `"maxRetries": 0` when retries are not authorized. Each checkpoint then has only its
+first attempt, and a saved first-attempt failure is reused without another request.
+Existing retry results are not substituted in zero-retry mode; their attempts still
+count in ledger usage. Use a fresh replay directory for a separately frozen experiment.
+Exhausted attempts remain a saved no-hint outcome, and replay continues within its ceilings.
 Response capture excludes headers and redacts known key values.
 An oversized response retains a truncation marker rather than partial sensitive text.
 Historical failures without response capture require an explicit accounting record before replay resumes.
