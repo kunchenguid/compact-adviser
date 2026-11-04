@@ -6,6 +6,14 @@
 // `JudgeError` is spelled without a constructor parameter property so Node can run this file
 // through its own type stripping, with no build step in an installed plugin.
 
+import {
+  DECISIONS_ENDPOINT,
+  decisionsQuotaError,
+  decisionsRequest,
+  type JudgeProvider,
+  normalizeDecisions,
+  providerMessage,
+} from "./decisions.ts";
 import type { JudgeProfile } from "./profile.ts";
 
 export const DEFAULT_BASE = "https://api.typesafe.ai";
@@ -129,7 +137,15 @@ const JUDGE_KIND_CAUSE: Record<JudgeErrorKind, string> = {
   configuration: "TYPESAFE_BASE is not a valid https URL or loopback http URL",
 };
 
-export function judgeErrorMessage(kind: JudgeErrorKind): string {
+export function judgeErrorMessage(
+  kind: JudgeErrorKind,
+  provider: JudgeProvider = "typesafe",
+): string {
+  if (provider === "openai-decisions") {
+    if (kind === "billing")
+      return "OpenAI Decisions requires available credits or a higher account limit. Check OpenAI billing and limits; this is not a temporary glitch. Context was left unchanged.";
+    return providerMessage(judgeErrorMessage(kind), provider);
+  }
   const core =
     `The compact adviser asked TypeSafe (Jev) but did not get a usable judgment (${JUDGE_KIND_CAUSE[kind]}). ` +
     "Context was left unchanged on purpose so a compact or hint cannot come from a bad answer.";
@@ -159,8 +175,14 @@ export const JUDGE_UNAVAILABLE_MESSAGE =
 export class JudgeError extends Error {
   readonly kind: JudgeErrorKind;
 
-  constructor(kind: JudgeErrorKind, options?: { cause?: unknown }) {
-    super(judgeErrorMessage(kind), options);
+  readonly provider: JudgeProvider;
+  constructor(
+    kind: JudgeErrorKind,
+    options?: { cause?: unknown },
+    provider: JudgeProvider = "typesafe",
+  ) {
+    super(judgeErrorMessage(kind, provider), options);
+    this.provider = provider;
     this.kind = kind;
     this.name = "JudgeError";
   }
@@ -198,7 +220,14 @@ function choice(value: unknown, options: string[]): Choice {
   return { choice: c.choice, confidence: c.confidence, probabilities };
 }
 
-export function parseJudgment(value: unknown): Judgment {
+export function parseJudgment(value: unknown, provider: JudgeProvider = "typesafe"): Judgment {
+  if (provider === "openai-decisions") {
+    try {
+      return parseJudgment(normalizeDecisions(value));
+    } catch {
+      throw new JudgeError("response", undefined, provider);
+    }
+  }
   const r = value as {
     model?: unknown;
     answers?: Record<string, unknown>;
@@ -314,13 +343,21 @@ export function byteLength(text: string): number {
   return new TextEncoder().encode(text).byteLength;
 }
 
-export function requestBody(state: unknown, profile?: JudgeProfile): string {
-  const body = JSON.stringify({
-    model: "jev-latest",
-    state,
-    questions: profile?.questions ?? QUESTIONS,
-  });
-  if (byteLength(body) > MAX_REQUEST_BYTES) throw new JudgeError("input");
+export function requestBody(
+  state: unknown,
+  profile?: JudgeProfile,
+  provider: JudgeProvider = "typesafe",
+): string {
+  const body = JSON.stringify(
+    provider === "openai-decisions"
+      ? decisionsRequest(state, profile?.questions ?? QUESTIONS)
+      : {
+          model: "jev-latest",
+          state,
+          questions: profile?.questions ?? QUESTIONS,
+        },
+  );
+  if (byteLength(body) > MAX_REQUEST_BYTES) throw new JudgeError("input", undefined, provider);
   return body;
 }
 
@@ -341,39 +378,50 @@ export async function judge(
   key: string,
   transport: Transport,
   profile?: JudgeProfile,
+  provider: JudgeProvider = "typesafe",
 ): Promise<Judgment> {
-  const body = requestBody(state, profile);
+  const body = requestBody(state, profile, provider);
   let response: { status: number; ok: boolean; text: string } | typeof TIMED_OUT;
   try {
     response = await Promise.race([
-      transport.fetch(transport.endpoint ?? ENDPOINT, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
-        body,
-      }),
+      transport.fetch(
+        transport.endpoint ?? (provider === "openai-decisions" ? DECISIONS_ENDPOINT : ENDPOINT),
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
+          body,
+        },
+      ),
       transport.sleep(TIMEOUT_MS).then((): typeof TIMED_OUT => TIMED_OUT),
     ]);
   } catch (cause) {
-    throw new JudgeError("network", { cause });
+    throw new JudgeError("network", { cause }, provider);
   }
-  if (response === TIMED_OUT) throw new JudgeError("timeout");
+  if (response === TIMED_OUT) throw new JudgeError("timeout", undefined, provider);
+  if (
+    (provider === "openai-decisions" || response.ok) &&
+    (typeof response.text !== "string" || byteLength(response.text) > MAX_RESPONSE_BYTES)
+  )
+    throw new JudgeError("response", undefined, provider);
   if (!response.ok) {
     throw new JudgeError(
       response.status === 401 || response.status === 403
         ? "authentication"
-        : response.status === 402
+        : response.status === 402 ||
+            (response.status === 429 &&
+              provider === "openai-decisions" &&
+              decisionsQuotaError(response.text))
           ? "billing"
           : response.status === 429
             ? "rate-limit"
             : "server",
+      undefined,
+      provider,
     );
   }
-  if (typeof response.text !== "string" || byteLength(response.text) > MAX_RESPONSE_BYTES) {
-    throw new JudgeError("response");
-  }
   try {
-    return parseJudgment(JSON.parse(response.text));
+    return parseJudgment(JSON.parse(response.text), provider);
   } catch {
-    throw new JudgeError("response");
+    throw new JudgeError("response", undefined, provider);
   }
 }

@@ -536,6 +536,96 @@ test("a judgment failure logs the error kind without the key", async (t) => {
   assert.ok(!logged.includes(secret));
 });
 
+test("Decisions opt-in drives Pi's settled hook, key isolation, redaction and exact logs", async (t) => {
+  const names = [
+    "COMPACT_ADVISER_PROVIDER",
+    "OPENAI_API_KEY",
+    "TYPESAFE_API_KEY",
+    "TYPESAFE_BASE",
+  ] as const;
+  const previous = names.map((name) => process.env[name]);
+  const originalFetch = globalThis.fetch;
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+    names.forEach((name, i) => {
+      if (previous[i] === undefined) delete process.env[name];
+      else process.env[name] = previous[i];
+    });
+  });
+  process.env.COMPACT_ADVISER_PROVIDER = "openai-decisions";
+  process.env.OPENAI_API_KEY = "openai-fixture-key";
+  process.env.TYPESAFE_API_KEY = "inactive-fixture-key";
+  process.env.TYPESAFE_BASE = "invalid";
+  const old = apiResponse();
+  const response = {
+    ...old,
+    model: "gpt-6-luna",
+    answers: Object.entries(old.answers).map(([name, answer]) => ({
+      ...answer,
+      name,
+      probabilities: Object.entries(answer.probabilities).map(([value, probability]) => ({
+        value,
+        probability,
+      })),
+    })),
+  };
+  const requests: string[] = [];
+  globalThis.fetch = async (url, init) => {
+    assert.equal(url, "https://api.openai.com/v1/decisions");
+    assert.equal(new Headers(init?.headers).get("Authorization"), "Bearer openai-fixture-key");
+    requests.push(String(init?.body));
+    return new Response(JSON.stringify(response));
+  };
+  const h = harness(t);
+  h.install("0.82.0", "unused-typesafe-key", true);
+  h.enable();
+  h.store.update({ logRequests: true });
+  h.sm.appendMessage({
+    role: "user",
+    content:
+      "DECISIONS_USER_MARKER selected=openai-fixture-key inactive=inactive-fixture-key. Finish the saved report.",
+    timestamp: Date.now(),
+  });
+  h.next(
+    "DECISIONS_ANSWER_MARKER selected=openai-fixture-key inactive=inactive-fixture-key. Tests passed and the report is saved.",
+  );
+  const history = JSON.stringify(h.sm.getBranch());
+  const keys = ["openai-fixture-key", "inactive-fixture-key"];
+  for (const key of keys) assert.ok(history.includes(key), "key must exist in session history");
+  await h.fire("agent_settled");
+  assert.equal(requests.length, 1);
+  assert.ok(showedHint(h));
+  const wire = requests[0];
+  assert.ok(wire);
+  const log = readFileSync(requestLogPath(h.dir), "utf8");
+  for (const marker of ["DECISIONS_USER_MARKER", "DECISIONS_ANSWER_MARKER"]) {
+    assert.ok(wire.includes(marker), "key-bearing conversation must reach the request");
+    assert.ok(log.includes(marker), "key-bearing conversation must reach the request log");
+  }
+  for (const key of keys) {
+    assert.ok(!wire.includes(key), "known key must be redacted from the request");
+    assert.ok(!log.includes(key), "known key must be redacted from the request log");
+  }
+  const lines = log
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line));
+  assert.deepEqual(lines[0].body, JSON.parse(wire));
+  assert.equal(lines[0].provider, "openai-decisions");
+  assert.equal(lines[1].provider, "openai-decisions");
+  assert.ok(!requests[0]?.includes("fixture-key"));
+  for (const selection of ["openai-decisions", "invalid"]) {
+    process.env.COMPACT_ADVISER_PROVIDER = selection;
+    delete process.env.OPENAI_API_KEY;
+    const missing = harness(t);
+    missing.install("0.82.0", "unused-typesafe-key", true);
+    missing.enable();
+    await missing.fire("agent_settled");
+    assert.ok(!showedHint(missing));
+  }
+  assert.equal(requests.length, 1);
+});
+
 test("TYPESAFE_BASE redirects the product's judge and an invalid base asks nobody", async (t) => {
   const previous = { base: process.env.TYPESAFE_BASE, fetch: globalThis.fetch };
   const urls: string[] = [];

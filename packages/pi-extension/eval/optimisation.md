@@ -44,7 +44,7 @@ No reflection calls are needed for this numeric search.
 
 Create a private limits JSON file with these required fields:
 
-- `expectedModel`: the exact returned Jev model version that the comparison expects.
+- `expectedModel`: the exact returned judge model version that the comparison expects.
 - `maxCalls`: the approved number of paid attempts, including retries.
 - `maxInputTokens`: the ceiling for known input-token usage.
 - `maxEstimatedUsd`: the approved estimate ceiling for this replay.
@@ -62,21 +62,27 @@ node --import tsx eval/score-profile.ts eval/local/run/checkpoints.jsonl \
 ```
 
 The command above makes no paid calls.
-Supply `TYPESAFE_API_KEY` through the environment, then add `--execute` to score.
+For the default direct Jev route, supply `TYPESAFE_API_KEY` through the environment, then add `--execute` to score.
+For alternative routes and their key, model, cache, and accounting requirements, see [Decisions replay](README.md#experimental-decisions-replay) and [Jev through OpenRouter](README.md#jev-replay-through-openrouter).
 Never put the key in arguments, logs, or files.
 Optional arguments after the limits file select a profile JSON file and a frozen selection file.
 Use `-` for the shipped profile.
 
 Run one scoring controller per ledger; replay is sequential.
-The cache keys complete request bytes and the expected model version.
+The cache keys complete request bytes and the expected model version, plus any non-default TypeSafe endpoint.
 Numeric profiles with unchanged questions share responses.
 A cache hit does not make a model call.
 Each new attempt saves its request, start marker, bounded response capture, result, and failure accounting.
 A crash with an incomplete attempt stops replay for reconciliation.
 A changed model version also stops replay.
 
-A failed judgment receives one retry with identical request bytes.
-A second failure remains a saved no-hint outcome, and replay continues within its ceilings.
+A failed judgment receives one retry with identical request bytes by default.
+The optional limits field `maxRetries` accepts only `0` or `1`; omission keeps `1`.
+Set `"maxRetries": 0` when retries are not authorized. Each checkpoint then has only its
+first attempt, and a saved first-attempt failure is reused without another request.
+Existing retry results are not substituted in zero-retry mode; their attempts still
+count in ledger usage. Use a fresh replay directory for a separately frozen experiment.
+Exhausted attempts remain a saved no-hint outcome, and replay continues within its ceilings.
 Response capture excludes headers and redacts known key values.
 An oversized response retains a truncation marker rather than partial sensitive text.
 Historical failures without response capture require an explicit accounting record before replay resumes.

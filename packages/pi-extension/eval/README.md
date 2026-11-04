@@ -1,7 +1,7 @@
 # compact-adviser judgment eval
 
 Offline replay of the shipped compact-adviser checkpoint pipeline against your
-own Pi session transcripts, plus a label rubric and a live TypeSafe Jev scorer.
+own Pi session transcripts, plus a label rubric and live judge scorers.
 
 The harness drives production `snapshot()` from `src/context.ts` through a
 minimal fake `ExtensionContext`, and production `judge()` / `qualifies()` from
@@ -61,12 +61,45 @@ carries both answers (`doneP`, `shapeP`) and the composed `score`; `hint` and
 0.5, floor 0.70), and `metrics.py` or `schedule.py` re-gate from `score` at any
 floor, so one live run measures the whole usage-dependent ladder.
 
-Optional provenance: `build.ts` marks rows whose snapshot state matches a logged
-production request. It reads `~/.pi/agent/compact-adviser-requests.jsonl` unless
+Optional TypeSafe provenance: `build.ts` marks rows whose snapshot state matches a logged
+production TypeSafe request. It reads `~/.pi/agent/compact-adviser-requests.jsonl` unless
 `COMPACT_ADVISER_REQUEST_LOG` is set. Enable request logging from
-`/compact-adviser` first. The log is the redacted body plus the Jev response
-used to gate the hint; it never includes the API key. Response and error lines
-are ignored when matching live request bodies.
+`/compact-adviser` first. See the [logging contract](../../../docs/product-contract.md#semantics) for log contents. Response and error lines
+are ignored when matching live request bodies; this matcher does not normalize Decisions logs.
+
+## Experimental Decisions replay
+
+`eval/score-profile.ts` also accepts launch `COMPACT_ADVISER_PROVIDER=openai-decisions` and uses only launch `OPENAI_API_KEY` for execution. Set the limits file's `expectedModel` to `gpt-6-luna` and approve explicit call, token, and cost ceilings before adding `--execute`. Its default remains a no-network dry run and needs no key. Use only a separately authorized, frozen labeled checkpoint set; this repository supplies no private corpus or Decisions accuracy result.
+
+Decisions caches and results go under `<PRIVATE_DIRECTORY>/openai-decisions/`. The cache hashes the actual Decisions request bytes and expected model, and production `judge()` parses its response. The [replay retry policy](optimisation.md#score-development-data) also applies to Decisions. It uses a 60-second deadline, not the product's two seconds; include both settings in your evaluation plan and report production-deadline availability separately. Legacy `score.ts` and other Jev-only probes remain TypeSafe-only. Do not infer Decisions quality from the Jev measurements or from successful protocol fixtures.
+
+## Jev replay through OpenRouter
+
+For this evaluation-only route, select `COMPACT_ADVISER_PROVIDER=typesafe`, supply launch
+`OPENROUTER_API_KEY`, and explicitly set these limits fields alongside the ordinary ceilings:
+
+```json
+{
+  "typesafeBase": "https://openrouter.ai/api",
+  "requestModel": "jev-1.13",
+  "expectedModel": "typesafe/jev-1.13-20260917",
+  "maxRetries": 0
+}
+```
+
+The served model above is an example from OpenRouter's documentation, not a promise about
+current service identity. Pin the expected served version for the comparison; a mismatch
+is recorded and stops replay. This is the System One endpoint, not `typesafe/jev-router`.
+OpenRouter requires an explicit non-latest request model and uses only `OPENROUTER_API_KEY`,
+never a fallback key. This runner does not use the TypeSafe SDK or infer routing from
+`TYPESAFE_BASE` / `TYPESAFE_BASE_URL`. Never supply an OpenRouter key as the direct TypeSafe key.
+
+Caches bind the actual request model/body and non-default endpoint. OpenRouter successes
+require a finite nonnegative `usage.cost`; accounting reserves the greater of that reported
+charge and the input-price proxy. Missing cost fails closed; failed calls retain explicit
+allowances and any reported charge. Provider-reported cost is not an invoice. Establish
+appropriate input/output/cache tariffs and per-attempt reserves before executing; these
+checks do not make an unbounded experiment safe. No production provider default changes.
 
 ## Commands
 

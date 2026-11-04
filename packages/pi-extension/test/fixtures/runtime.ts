@@ -7,18 +7,21 @@ export default function fixture(pi: ExtensionAPI) {
   const coordinating = process.env.COMPACT_TEST_COORDINATING === "1";
   const inputTokens = Number(process.env.COMPACT_TEST_INPUT_TOKENS ?? 45000);
   globalThis.fetch=async(input,init)=>{
-    if(String(input)!=="https://api.typesafe.ai/v1/systemone")throw new Error("Unexpected network request in isolated smoke test");
+    const decisions = process.env.COMPACT_ADVISER_PROVIDER === "openai-decisions";
+    if(String(input)!==(decisions ? "https://api.openai.com/v1/decisions" : "https://api.typesafe.ai/v1/systemone"))throw new Error("Unexpected network request in isolated smoke test");
+    if (new Headers(init?.headers).get("Authorization") !== `Bearer ${decisions ? "openai-test-key-not-a-secret" : "test-key-not-a-secret"}`) throw new Error("Wrong fixture credential");
     log({event:"jev",body:JSON.parse(String(init?.body))});
     const status=Number(process.env.COMPACT_TEST_JEV_STATUS??200);
     if(status!==200)return new Response("",{status});
-    return new Response(JSON.stringify({model:"jev-fixture",usage:{input_tokens:2000,output_tokens:60},answers:{
+    const reply = {model:"jev-fixture",usage:{input_tokens:2000,output_tokens:60},answers:{
       done:coordinating
         ? {type:"choice",choice:"finished",probabilities:{finished:1,not_finished:0,unclear:0},confidence:1}
         : {type:"choice",choice:"finished",probabilities:{finished:0.995,not_finished:0.004,unclear:0.001},confidence:0.99},
       shape:coordinating
         ? {type:"choice",choice:"coordinating",probabilities:{hands_on:0,coordinating:1,unclear:0},confidence:1}
         : {type:"choice",choice:"hands_on",probabilities:{hands_on:0.99,coordinating:0.008,unclear:0.002},confidence:0.98},
-    }}));
+    }};
+    return new Response(JSON.stringify(decisions ? {...reply, model:"gpt-6-luna", answers:Object.entries(reply.answers).map(([name, answer]) => ({...answer, name, probabilities:Object.entries(answer.probabilities).map(([value, probability]) => ({value, probability}))}))} : reply));
   };
   pi.registerProvider("compact-fixture",{baseUrl:"http://127.0.0.1:1",apiKey:"fixture-not-a-secret",api:"compact-fixture",models:[{id:"local",name:"Local test provider",reasoning:false,input:["text"],cost:{input:0,output:0,cacheRead:0,cacheWrite:0},contextWindow:272000,maxTokens:1000}],streamSimple:(model)=>{
     const stream=createAssistantMessageEventStream();

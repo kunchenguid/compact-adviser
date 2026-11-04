@@ -2,7 +2,8 @@
 
 A profile is a JSON object that changes judge questions or decision thresholds.
 Use a profile to evaluate a session-specific policy without changing the shipped defaults.
-The runtime judge remains TypeSafe Jev on every host.
+TypeSafe Jev remains the default judge on every host.
+Selecting the experimental OpenAI Decisions provider through the launch environment is separate from configuring a profile.
 An empty or absent `profile` setting uses the shipped policy.
 
 Keep `mode` set to `hint` while evaluating a profile.

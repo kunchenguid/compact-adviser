@@ -9,12 +9,13 @@
 // process run `/compact` on the user's session, so there is no automatic mode here.
 //
 // The decisions live in the sibling modules (settings, cooldowns, the bounded judge input, and
-// the Jev client); this file is the only one that knows Codex's event shapes. Nothing it does
+// the judge client); this file is the only one that knows Codex's event shapes. Nothing it does
 // may break a turn, so every failure path exits quietly with no hint.
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { ConfigStore } from "./config.ts";
+import { DECISIONS_ENDPOINT, type JudgeProvider, selectedProvider } from "./decisions.ts";
 import { DISABLE_ENV, disabledByEnv } from "./disable.ts";
 import { parseDotenvKey, type ResolvedTypesafeApiKey, resolveTypesafeApiKey } from "./env.ts";
 import {
@@ -43,7 +44,7 @@ export const HINT =
   "Compact adviser: work appears completed or recorded. Run /compact to save tokens.";
 /** Below this the conversation is too small for a judgment to be worth a request. */
 export const MINIMUM_CONVERSATION_TOKENS = 20000;
-/** A loopback-only endpoint override for the live regression's local TypeSafe fixture. */
+/** A loopback-only endpoint override for the live regression's local judge fixture. */
 const LOOPBACK_ENDPOINT = /^http:\/\/127\.0\.0\.1:\d{1,5}\/[\x21-\x7e]*$/;
 
 export interface HookPayload {
@@ -63,7 +64,7 @@ export interface HookOutput {
 
 /**
  * Only the interactive TUI judges. `codex exec` and other scripted runners settle the same
- * way, but a hint no person is watching is only a TypeSafe request nobody asked for.
+ * way, but a hint no person is watching is only a judge request nobody asked for.
  */
 export function isInteractive(rollout: Pick<Rollout, "originator">): boolean {
   return rollout.originator === "codex-tui";
@@ -74,19 +75,25 @@ function testEndpoint(env: NodeJS.ProcessEnv): string | undefined {
   return value !== undefined && LOOPBACK_ENDPOINT.test(value) ? value : undefined;
 }
 
-/** The live regression's fixture, else TypeSafe under `TYPESAFE_BASE` from the launch environment. */
-function judgeEndpoint(env: NodeJS.ProcessEnv): string {
-  const endpoint = testEndpoint(env) ?? typesafeEndpoint(env.TYPESAFE_BASE);
+function judgeEndpoint(env: NodeJS.ProcessEnv, provider: JudgeProvider): string {
+  const endpoint =
+    testEndpoint(env) ??
+    (provider === "openai-decisions" ? DECISIONS_ENDPOINT : typesafeEndpoint(env.TYPESAFE_BASE));
   if (endpoint === undefined) throw new JudgeError("configuration");
   return endpoint;
 }
 
-/** Launch environment, then the key saved in settings, then `TYPESAFE_API_KEY` in `cwd/.env`. */
+/** Saved and cwd keys are TypeSafe-only; Decisions must use its explicit launch key. */
 export function resolveKey(
   env: NodeJS.ProcessEnv,
   saved: string | undefined,
   cwd: string,
+  provider = selectedProvider(env.COMPACT_ADVISER_PROVIDER),
 ): ResolvedTypesafeApiKey {
+  if (provider !== "typesafe") {
+    const value = provider === "openai-decisions" ? env.OPENAI_API_KEY?.trim() : undefined;
+    return { value: value || undefined, source: value ? "env" : "missing" };
+  }
   let dotenv: string | undefined;
   try {
     dotenv = parseDotenvKey(readFileSync(join(cwd, ".env"), "utf8"), "TYPESAFE_API_KEY");
@@ -107,6 +114,27 @@ export interface Environment {
   fetch: typeof globalThis.fetch;
 }
 
+async function readBoundedText(response: Response): Promise<string> {
+  const reader = response.body?.getReader();
+  if (!reader) return "";
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  try {
+    while (true) {
+      const next = await reader.read();
+      if (next.done) break;
+      size += next.value.byteLength;
+      if (size > 32768) return "x".repeat(32769);
+      chunks.push(next.value);
+    }
+  } finally {
+    try {
+      await reader.cancel();
+    } catch {}
+  }
+  return Buffer.concat(chunks).toString("utf8");
+}
+
 function cancellableJudgeTransport(fetch: Environment["fetch"]): {
   fetch: (
     url: string,
@@ -124,8 +152,12 @@ function cancellableJudgeTransport(fetch: Environment["fetch"]): {
   return {
     fetch: async (url, init) => {
       try {
-        const response = await fetch(url, { ...init, signal: controller.signal });
-        const text = await response.text();
+        const response = await fetch(url, {
+          ...init,
+          redirect: "error",
+          signal: controller.signal,
+        });
+        const text = await readBoundedText(response);
         stopTimer();
         return { status: response.status, ok: response.ok, text };
       } catch (error) {
@@ -149,7 +181,7 @@ function cancellableJudgeTransport(fetch: Environment["fetch"]): {
 
 /**
  * One completed Codex turn: count the exchange, run the cheap local gates, and only then ask
- * TypeSafe. A failed or unqualified judgment returns no hint and leaves context alone.
+ * the selected judge. A failed or unqualified judgment returns no hint and leaves context alone.
  */
 async function onStop(payload: HookPayload, environment: Environment): Promise<HookOutput> {
   const sessionId = payload.session_id;
@@ -175,7 +207,14 @@ async function onStop(payload: HookPayload, environment: Environment): Promise<H
   if (!isInteractive(rollout)) return {};
   if (!payload.last_assistant_message?.trim()) return {};
 
-  const key = resolveKey(environment.env, config.typesafeApiKey, payload.cwd ?? process.cwd());
+  const provider = selectedProvider(environment.env.COMPACT_ADVISER_PROVIDER);
+  if (provider === undefined) return {};
+  const key = resolveKey(
+    environment.env,
+    config.typesafeApiKey,
+    payload.cwd ?? process.cwd(),
+    provider,
+  );
   if (!key.value) return {};
 
   const tokens = rollout.tokens;
@@ -183,9 +222,18 @@ async function onStop(payload: HookPayload, environment: Environment): Promise<H
   if (tokens < config.minContextTokens) return {};
   if (cooldownReason(state, tokens, now) !== undefined) return {};
 
-  const view = snapshot(rollout.messages, [key.value, config.typesafeApiKey], {
-    truncated: rollout.truncated,
-  });
+  const view = snapshot(
+    rollout.messages,
+    [
+      key.value,
+      config.typesafeApiKey,
+      environment.env.TYPESAFE_API_KEY,
+      environment.env.OPENAI_API_KEY,
+    ],
+    {
+      truncated: rollout.truncated,
+    },
+  );
   if (view.conversationTokens <= MINIMUM_CONVERSATION_TOKENS) return {};
   const fingerprint = await checkpointKey(view.checkpointText);
   if (state.lastHintKey === fingerprint) return {};
@@ -193,7 +241,7 @@ async function onStop(payload: HookPayload, environment: Environment): Promise<H
   let loggedBody: string | undefined;
   if (config.logRequests) {
     try {
-      loggedBody = requestBody(view.state, profile);
+      loggedBody = requestBody(view.state, profile, provider);
       appendRequestLogLine(root, sessionId, requestLogLine(loggedBody));
     } catch {
       // Request logging must not replace or delay the judgment.
@@ -207,9 +255,10 @@ async function onStop(payload: HookPayload, environment: Environment): Promise<H
       key.value,
       {
         ...cancellableJudgeTransport(environment.fetch),
-        endpoint: judgeEndpoint(environment.env),
+        endpoint: judgeEndpoint(environment.env, provider),
       },
       profile,
+      provider,
     );
   } catch (error) {
     if (config.logRequests) {
@@ -217,14 +266,14 @@ async function onStop(payload: HookPayload, environment: Environment): Promise<H
         appendRequestLogLine(
           root,
           sessionId,
-          errorLogLine(loggedJudgeErrorKind(error), loggedBody),
+          errorLogLine(loggedJudgeErrorKind(error), loggedBody, undefined, provider),
         );
       } catch {
         // Error logging must not replace backoff.
       }
     }
     // Silence is the only honest report here: Codex's one channel is a permanent scrollback
-    // line, and a transient TypeSafe failure is not worth one. Backoff keeps retries rare.
+    // line, and a transient judge failure is not worth one. Backoff keeps retries rare.
     const current = sessions.read(sessionId, environment.now()).state;
     sessions.write(sessionId, backoff(current, environment.now()), usage);
     return {};
@@ -237,7 +286,7 @@ async function onStop(payload: HookPayload, environment: Environment): Promise<H
         root,
         sessionId,
         responseLogLine(
-          loggedBody ?? requestBody(view.state, profile),
+          loggedBody ?? requestBody(view.state, profile, provider),
           result,
           fraction,
           undefined,
