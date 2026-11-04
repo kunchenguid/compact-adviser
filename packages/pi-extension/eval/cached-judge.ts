@@ -1,12 +1,17 @@
 /** Durable, request-byte keyed replay through the production judge. Never stores the key. */
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import { judge, type Judgment, requestBody } from "../src/judge.ts";
-import { DECISIONS_MODEL, type JudgeProvider } from "../src/decisions.ts";
+import { judge, type Judgment, requestBody, typesafeEndpoint, ENDPOINT, MAX_REQUEST_BYTES, JudgeError } from "../src/judge.ts";
+import { OPENROUTER_ENDPOINT } from "./key.ts";
+import { DECISIONS_MODEL, DECISIONS_ENDPOINT, type JudgeProvider } from "../src/decisions.ts";
 import type { JudgeProfile } from "../src/profile.ts";
 import { digest, privateOutput, writePrivate } from "./dataset.ts";
 
-export interface ReplayLimits {
+export interface ReplayRoute {
+  typesafeBase?: string;
+  requestModel?: string;
+}
+export interface ReplayLimits extends ReplayRoute {
   expectedModel: string;
   maxCalls: number;
   maxRetries?: 0 | 1;
@@ -36,6 +41,27 @@ interface Accounting {
   inputTokens: number | null;
   outputTokens: number | null;
   basis: string;
+  reportedCostUsd?: number;
+}
+export function replayEndpoint(route: ReplayRoute, provider: JudgeProvider): string {
+  if (provider === "openai-decisions") {
+    if (route.typesafeBase !== undefined || route.requestModel !== undefined) throw new Error("TypeSafe replay routing cannot override Decisions.");
+    return DECISIONS_ENDPOINT;
+  }
+  if (route.typesafeBase !== undefined && typeof route.typesafeBase !== "string") throw new Error("Invalid TypeSafe replay base.");
+  const endpoint = typesafeEndpoint(route.typesafeBase);
+  if (!endpoint) throw new Error("Invalid TypeSafe replay base.");
+  if (route.requestModel !== undefined && (typeof route.requestModel !== "string" || !/^[a-zA-Z0-9][a-zA-Z0-9/._~-]{0,127}$/.test(route.requestModel))) throw new Error("Invalid replay request model.");
+  if (endpoint === OPENROUTER_ENDPOINT && (!route.requestModel || route.requestModel.includes("latest"))) throw new Error("OpenRouter replay requires an explicit versioned Jev request model.");
+  return endpoint;
+}
+export function replayRequestBody(state: unknown, profile: JudgeProfile | undefined, provider: JudgeProvider, route: ReplayRoute): string {
+  replayEndpoint(route, provider);
+  const original = requestBody(state, profile, provider);
+  if (route.requestModel === undefined) return original;
+  const body = JSON.stringify({ ...JSON.parse(original), model: route.requestModel });
+  if (Buffer.byteLength(body) > MAX_REQUEST_BYTES) throw new JudgeError("input", provider);
+  return body;
 }
 function read<T>(path: string): T {
   return JSON.parse(readFileSync(path, "utf8")) as T;
@@ -44,10 +70,12 @@ function read<T>(path: string): T {
 /** The capture is bounded and stores no headers. Oversized replies retain a marker, not a secret prefix. */
 export async function productionEvaluate(
   state: unknown, key: string, profile?: JudgeProfile, capture?: Capture, network: typeof fetch = fetch,
-  provider: JudgeProvider = "typesafe",
+  provider: JudgeProvider = "typesafe", route: ReplayRoute = {},
 ): Promise<Judgment> {
+  const endpoint = replayEndpoint(route, provider);
+  const body = replayRequestBody(state, profile, provider, route);
   return judge(state, key, new AbortController().signal, async (url, init) => {
-    const response = await network(url, init);
+    const response = await network(url, { ...init, body });
     const reader = response.clone().body?.getReader();
     if (reader) {
       const chunks: Uint8Array[] = [];
@@ -70,7 +98,7 @@ export async function productionEvaluate(
       capture?.(text.replaceAll(key, "[REDACTED]").replaceAll(escapedKey, "[REDACTED]"), truncated);
     }
     return response;
-  }, 60000, profile, undefined, provider);
+  }, 60000, profile, endpoint, provider);
 }
 
 function attempts(directory: string): string[] {
@@ -83,12 +111,15 @@ function accounting(root: string, result: CachedJudgment, limits: ReplayLimits):
   if (!result.ok && !existsSync(join(root, "accounting.json"))) {
     throw new Error("Failed call lacks an explicit accounting estimate; reconcile before continuing.");
   }
-  const value: Accounting = result.ok ? {
+  const saved = join(root, "accounting.json");
+  if (result.ok && typesafeEndpoint(limits.typesafeBase) === OPENROUTER_ENDPOINT && !existsSync(saved)) throw new Error("OpenRouter replay lacks reported cost accounting.");
+  const value: Accounting = existsSync(saved) ? read<Accounting>(saved) : result.ok ? {
     estimated: true, costUsd: result.judgment.inputTokens * limits.inputUsdPerMillion / 1e6,
     inputTokens: result.judgment.inputTokens, outputTokens: result.judgment.outputTokens,
     basis: "input-price proxy; output tariff unavailable",
-  } : read<Accounting>(join(root, "accounting.json"));
+  } : read<Accounting>(saved);
   if (value.estimated !== true || !Number.isFinite(value.costUsd) || value.costUsd < 0 ||
+    (value.reportedCostUsd !== undefined && (!Number.isFinite(value.reportedCostUsd) || value.reportedCostUsd < 0 || value.costUsd < value.reportedCostUsd)) ||
     [value.inputTokens, value.outputTokens].some((tokens) =>
       tokens === null ? result.ok : !Number.isSafeInteger(tokens) || tokens < 0)) {
     throw new Error("Invalid call accounting record; reconcile before continuing.");
@@ -119,8 +150,10 @@ export function cacheUsage(directory: string, limits: ReplayLimits): { calls: nu
 function failureAccounting(raw: string | undefined, limits: ReplayLimits): Accounting {
   let inputTokens: number | null = null;
   let outputTokens: number | null = null;
+  let reportedCostUsd: number | undefined;
   try {
     const usage = JSON.parse(raw ?? "null")?.usage;
+    if (typeof usage?.cost === "number" && Number.isFinite(usage.cost) && usage.cost >= 0) reportedCostUsd = usage.cost;
     if (Number.isSafeInteger(usage?.input_tokens) && usage.input_tokens >= 0 &&
       Number.isSafeInteger(usage?.output_tokens) && usage.output_tokens >= 0) {
       inputTokens = usage.input_tokens;
@@ -129,8 +162,8 @@ function failureAccounting(raw: string | undefined, limits: ReplayLimits): Accou
   } catch { /* Keep unknown usage explicit. */ }
   return {
     estimated: true,
-    costUsd: Math.max(limits.failedCallEstimateUsd, (inputTokens ?? 0) * limits.inputUsdPerMillion / 1e6),
-    inputTokens, outputTokens,
+    costUsd: Math.max(limits.failedCallEstimateUsd, (inputTokens ?? 0) * limits.inputUsdPerMillion / 1e6, reportedCostUsd ?? 0),
+    inputTokens, outputTokens, ...(reportedCostUsd === undefined ? {} : { reportedCostUsd }),
     basis: inputTokens === null ? "explicit failed-call allowance; token usage unknown" : "failed-call allowance with recovered response usage",
   };
 }
@@ -140,7 +173,8 @@ export async function cachedJudge(
   profile?: JudgeProfile, transport?: Evaluate, provider: JudgeProvider = "typesafe",
 ): Promise<CachedJudgment> {
   if (provider === "openai-decisions" && limits.expectedModel !== DECISIONS_MODEL) throw new Error("Decisions replay requires expectedModel gpt-6-luna.");
-  const evaluate = transport ?? ((state, key, profile, capture) => productionEvaluate(state, key, profile, capture, fetch, provider));
+  const endpoint = replayEndpoint(limits, provider);
+  const evaluate = transport ?? ((state, key, profile, capture) => productionEvaluate(state, key, profile, capture, fetch, provider, limits));
   if (!key.trim() || !limits.expectedModel || !Number.isSafeInteger(limits.maxCalls) || limits.maxCalls < 1 ||
     !Number.isSafeInteger(limits.maxInputTokens) || limits.maxInputTokens < 1 ||
     ![limits.maxEstimatedUsd, limits.inputUsdPerMillion, limits.failedCallEstimateUsd].every((value) => Number.isFinite(value) && value > 0)) {
@@ -148,9 +182,10 @@ export async function cachedJudge(
   }
   const maxRetries = limits.maxRetries === undefined ? 1 : limits.maxRetries;
   if (maxRetries !== 0 && maxRetries !== 1) throw new Error("Replay maxRetries must be 0 or 1.");
-  const body = requestBody(state, profile, provider);
+  const body = replayRequestBody(state, profile, provider, limits);
   const requestHash = digest(body);
-  const base = join(directory, digest(`${limits.expectedModel}\n${body}`));
+  const routeIdentity = provider === "typesafe" && endpoint !== ENDPOINT ? `${endpoint}\n` : "";
+  const base = join(directory, digest(`${limits.expectedModel}\n${routeIdentity}${body}`));
   let last: CachedJudgment | undefined;
   for (const root of maxRetries === 0 ? [base] : [base, join(base, "retry")]) {
     privateOutput(join(root, "result.json"));
@@ -181,6 +216,16 @@ export async function cachedJudge(
         raw = text;
         writePrivate(join(root, "response.json"), JSON.stringify({ text, truncated }));
       });
+      if (endpoint === OPENROUTER_ENDPOINT) {
+        const reportedCostUsd: unknown = JSON.parse(raw ?? "null")?.usage?.cost;
+        if (typeof reportedCostUsd !== "number" || !Number.isFinite(reportedCostUsd) || reportedCostUsd < 0) throw new Error("OpenRouter reply lacks a valid reported charge.");
+        writePrivate(join(root, "accounting.json"), JSON.stringify({
+          estimated: true, reportedCostUsd,
+          costUsd: Math.max(reportedCostUsd, judgment.inputTokens * limits.inputUsdPerMillion / 1e6),
+          inputTokens: judgment.inputTokens, outputTokens: judgment.outputTokens,
+          basis: "maximum of provider-reported charge and input-price proxy; not an invoice",
+        } satisfies Accounting));
+      }
       last = { ok: true, requestHash, judgment, latencyMs: Date.now() - started };
     } catch (error) {
       const kind = (error as { kind?: unknown })?.kind;
@@ -198,7 +243,7 @@ export async function cachedJudge(
     if (last.ok) {
       if (last.judgment.model !== limits.expectedModel) throw new Error("Jev model identity changed.");
       if (usage.inputTokens + last.judgment.inputTokens > limits.maxInputTokens ||
-        usage.estimatedUsd + last.judgment.inputTokens * limits.inputUsdPerMillion / 1e6 > limits.maxEstimatedUsd) {
+        usage.estimatedUsd + accounting(root, last, limits).costUsd > limits.maxEstimatedUsd) {
         throw new Error("Jev ceiling exceeded by the completed call. Stop before further scoring.");
       }
       return last;

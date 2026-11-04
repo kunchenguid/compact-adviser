@@ -1,6 +1,13 @@
 import type { JudgeProvider } from "../src/decisions.ts";
 
-export function judgeKeyFromEnv(provider: JudgeProvider): string {
+export const OPENROUTER_ENDPOINT = "https://openrouter.ai/api/v1/systemone";
+
+export function judgeKeyFromEnv(provider: JudgeProvider, endpoint?: string): string {
+  if (provider === "typesafe" && endpoint === OPENROUTER_ENDPOINT) {
+    const key = process.env.OPENROUTER_API_KEY?.trim();
+    if (!key) throw new Error("OPENROUTER_API_KEY is missing from the launch environment (do not pass it as argv)");
+    return key;
+  }
   if (provider === "typesafe") return typesafeKeyFromEnv();
   const key = process.env.OPENAI_API_KEY?.trim();
   if (!key) throw new Error("OPENAI_API_KEY is missing from the launch environment (do not pass it as argv)");

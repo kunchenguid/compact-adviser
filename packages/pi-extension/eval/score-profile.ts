@@ -4,7 +4,7 @@ import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { floorFor, JudgeError, qualifies, score } from "../src/judge.ts";
 import { parseProfile } from "../src/profile.ts";
-import { cachedJudge, type ReplayLimits } from "./cached-judge.ts";
+import { cachedJudge, replayEndpoint, type ReplayLimits } from "./cached-judge.ts";
 import { digest, writePrivate } from "./dataset.ts";
 import { judgeKeyFromEnv } from "./key.ts";
 import { DECISIONS_MODEL, INVALID_PROVIDER_MESSAGE, selectedProvider } from "../src/decisions.ts";
@@ -61,12 +61,13 @@ async function main(): Promise<void> {
   const provider = selectedProvider(process.env.COMPACT_ADVISER_PROVIDER);
   if (provider === undefined) throw new Error(INVALID_PROVIDER_MESSAGE);
   if (provider === "openai-decisions" && limits.expectedModel !== DECISIONS_MODEL) throw new Error("Decisions replay requires expectedModel gpt-6-luna.");
+  const endpoint = replayEndpoint(limits, provider);
   const outputDirectory = provider === "typesafe" ? directory : join(directory, provider);
   if (!execute) {
     console.log(`Prepared ${rows.length} ${split} rows. No paid calls; pass --execute to score.${provider === "openai-decisions" ? " Provider: openai-decisions (experimental)." : ""}`);
     return;
   }
-  const key = judgeKeyFromEnv(provider);
+  const key = judgeKeyFromEnv(provider, endpoint);
   const output = [];
   for (const row of rows) {
     let cached;

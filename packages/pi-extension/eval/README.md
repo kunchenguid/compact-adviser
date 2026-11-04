@@ -74,6 +74,34 @@ are ignored when matching live request bodies.
 
 Decisions caches and results go under `<PRIVATE_DIRECTORY>/openai-decisions/`. The cache hashes the actual Decisions request bytes and expected model, and production `judge()` parses its response. Replay defaults to one bounded retry; set `"maxRetries": 0` in the limits file when retries are not authorized (`0` and `1` are the only accepted values). It uses a 60-second deadline, not the product's two seconds; include both settings in your evaluation plan and report production-deadline availability separately. Legacy `score.ts` and other Jev-only probes remain TypeSafe-only. Do not infer Decisions quality from the Jev measurements or from successful protocol fixtures.
 
+## Jev replay through OpenRouter
+
+For this evaluation-only route, select `COMPACT_ADVISER_PROVIDER=typesafe`, supply launch
+`OPENROUTER_API_KEY`, and explicitly set these limits fields alongside the ordinary ceilings:
+
+```json
+{
+  "typesafeBase": "https://openrouter.ai/api",
+  "requestModel": "jev-1.13",
+  "expectedModel": "typesafe/jev-1.13-20260917",
+  "maxRetries": 0
+}
+```
+
+The served model above is an example from OpenRouter's documentation, not a promise about
+current service identity. Pin the expected served version for the comparison; a mismatch
+is recorded and stops replay. This is the System One endpoint, not `typesafe/jev-router`.
+OpenRouter requires an explicit non-latest request model and uses only `OPENROUTER_API_KEY`,
+never a fallback key. This runner does not use the TypeSafe SDK or infer routing from
+`TYPESAFE_BASE` / `TYPESAFE_BASE_URL`. Never supply an OpenRouter key as the direct TypeSafe key.
+
+Caches bind the actual request model/body and non-default endpoint. OpenRouter successes
+require a finite nonnegative `usage.cost`; accounting reserves the greater of that reported
+charge and the input-price proxy. Missing cost fails closed; failed calls retain explicit
+allowances and any reported charge. Provider-reported cost is not an invoice. Establish
+appropriate input/output/cache tariffs and per-attempt reserves before executing; these
+checks do not make an unbounded experiment safe. No production provider default changes.
+
 ## Commands
 
 | Script | What |

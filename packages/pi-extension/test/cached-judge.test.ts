@@ -5,7 +5,14 @@ import { createServer } from "node:http";
 import { join, resolve } from "node:path";
 import { type TestContext, test } from "node:test";
 import { pathToFileURL } from "node:url";
-import { cachedJudge, cacheUsage, productionEvaluate } from "../eval/cached-judge.ts";
+import {
+  cachedJudge,
+  cacheUsage,
+  type Evaluate,
+  productionEvaluate,
+  type ReplayLimits,
+  replayEndpoint,
+} from "../eval/cached-judge.ts";
 import { digest } from "../eval/dataset.ts";
 import { partition } from "../eval/score-profile.ts";
 import { parseJudgment, requestBody } from "../src/judge.ts";
@@ -233,6 +240,7 @@ test("invalid retry limits fail before transport or cache writes", async (t) => 
 
 test("replay CLI honors zero retries and preserves default request counts", async (t) => {
   const requests: string[] = [];
+  const servedModel = "typesafe/jev-1.13-20260917";
   const server = createServer((request, response) => {
     let body = "";
     request.setEncoding("utf8");
@@ -241,15 +249,40 @@ test("replay CLI honors zero retries and preserves default request counts", asyn
     });
     request.on("end", () => {
       requests.push(body);
-      response.writeHead(503, { Connection: "close" });
-      response.end("Synthetic judge unavailable");
+      if (JSON.parse(body).model === "jev-1.13") {
+        response.writeHead(200, { Connection: "close" });
+        response.end(
+          JSON.stringify({
+            ...apiResponse(),
+            model: servedModel,
+            usage: { input_tokens: 100, output_tokens: 1, cost: 0.2 },
+          }),
+        );
+      } else {
+        response.writeHead(503, { Connection: "close" });
+        response.end("Synthetic judge unavailable");
+      }
     });
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   t.after(() => new Promise<void>((resolve) => server.close(() => resolve())));
   const address = server.address();
   assert.ok(address && typeof address === "object");
-  for (const maxRetries of [undefined, 0]) {
+  const variants: Partial<ReplayLimits>[] = [
+    {},
+    { maxRetries: 0 },
+    {
+      maxRetries: 0,
+      typesafeBase: "https://openrouter.ai/api",
+      requestModel: "jev-1.13",
+      expectedModel: servedModel,
+    },
+  ];
+  for (const variant of variants) {
+    const budget = { ...limits, maxCalls: 4, ...variant };
+    const openRouter = variant.typesafeBase !== undefined;
+    const endpoint = replayEndpoint(budget, "typesafe");
+    const expectedKey = openRouter ? "synthetic-openrouter-key" : "synthetic-replay-key";
     const root = directory(t);
     const checkpoints = join(root, "checkpoints.jsonl");
     const limitsFile = join(root, "limits.json");
@@ -259,7 +292,8 @@ test("replay CLI honors zero retries and preserves default request counts", asyn
       `
       const localFetch = globalThis.fetch;
       globalThis.fetch = (url, init) => {
-        if (url !== "https://api.typesafe.ai/v1/systemone") throw new Error("Unexpected fixture endpoint");
+        if (url !== ${JSON.stringify(endpoint)}) throw new Error("Unexpected fixture endpoint");
+        if (new Headers(init.headers).get("Authorization") !== ${JSON.stringify("Bearer ")} + ${JSON.stringify(expectedKey)}) throw new Error("Wrong fixture key");
         return localFetch("http://127.0.0.1:${address.port}/v1/systemone", init);
       };
     `,
@@ -272,7 +306,7 @@ test("replay CLI honors zero retries and preserves default request counts", asyn
       state: { checkpoint: id },
     }));
     writeFileSync(checkpoints, rows.map((row) => JSON.stringify(row)).join("\n"));
-    writeFileSync(limitsFile, JSON.stringify({ ...limits, maxCalls: 4, maxRetries }));
+    writeFileSync(limitsFile, JSON.stringify(budget));
     const before = requests.length;
     const child = spawn(
       process.execPath,
@@ -294,6 +328,7 @@ test("replay CLI honors zero retries and preserves default request counts", asyn
           HOME: root,
           COMPACT_ADVISER_PROVIDER: "typesafe",
           TYPESAFE_API_KEY: "synthetic-replay-key",
+          OPENROUTER_API_KEY: "synthetic-openrouter-key",
         },
         stdio: ["ignore", "pipe", "pipe"],
         timeout: 10_000,
@@ -313,9 +348,9 @@ test("replay CLI honors zero retries and preserves default request counts", asyn
     assert.equal(code, 0, output);
     const calls = requests.length - before;
     t.diagnostic(
-      `maxRetries=${maxRetries ?? "omitted"}: ${calls} HTTP requests for two checkpoints`,
+      `route=${openRouter ? "openrouter" : "default"}, maxRetries=${budget.maxRetries ?? "omitted"}: ${calls} HTTP requests for two checkpoints`,
     );
-    const expectedAttempts = maxRetries === 0 ? 1 : 2;
+    const expectedAttempts = budget.maxRetries === 0 ? 1 : 2;
     assert.equal(calls, 2 * expectedAttempts);
     for (const row of rows) {
       assert.equal(
@@ -331,9 +366,92 @@ test("replay CLI honors zero retries and preserves default request counts", asyn
       .split("\n")
       .map((line) => JSON.parse(line));
     assert.equal(results.length, 2);
-    assert.ok(results.every((row) => row.ok === false && row.hint === false && row.auto === false));
-    assert.equal(cacheUsage(join(root, "cache"), limits).calls, calls);
+    if (openRouter) {
+      assert.ok(results.every((row) => row.ok === true && row.model === servedModel));
+      assert.equal(cacheUsage(join(root, "cache"), budget).estimatedUsd, 0.4);
+      for (const hash of readdirSync(join(root, "cache"))) {
+        const saved = readFileSync(join(root, "cache", hash, "request.json"), "utf8");
+        assert.equal(JSON.parse(saved).model, "jev-1.13");
+        assert.ok(results.some((row) => row.requestHash === digest(saved)));
+      }
+    } else {
+      assert.ok(
+        results.every((row) => row.ok === false && row.hint === false && row.auto === false),
+      );
+    }
+    assert.equal(cacheUsage(join(root, "cache"), budget).calls, calls);
   }
+});
+
+test("explicit replay routes are validated and cannot override Decisions or select a moving OpenRouter alias", () => {
+  assert.throws(
+    () => replayEndpoint({ typesafeBase: "http://example.invalid" }, "typesafe"),
+    /base/,
+  );
+  assert.throws(
+    () => replayEndpoint({ typesafeBase: "https://openrouter.ai/api" }, "typesafe"),
+    /versioned/,
+  );
+  assert.throws(
+    () =>
+      replayEndpoint(
+        { typesafeBase: "https://openrouter.ai/api", requestModel: "jev-latest" },
+        "typesafe",
+      ),
+    /versioned/,
+  );
+  assert.throws(() => replayEndpoint({ requestModel: "jev-1.13" }, "openai-decisions"), /override/);
+});
+
+test("OpenRouter replay separates route caches and requires reported cost", async (t) => {
+  const root = directory(t);
+  const budget: ReplayLimits = {
+    ...limits,
+    typesafeBase: "https://openrouter.ai/api",
+    requestModel: "jev-1.13",
+    expectedModel: "typesafe/jev-1.13-20260917",
+    maxRetries: 0,
+  };
+  let calls = 0;
+  const evaluate =
+    (route: ReplayLimits, cost: number | undefined): Evaluate =>
+    (state, key, profile, capture) =>
+      productionEvaluate(
+        state,
+        key,
+        profile,
+        capture,
+        async (url, init) => {
+          calls++;
+          assert.equal(String(url), replayEndpoint(route, "typesafe"));
+          assert.equal(JSON.parse(String(init?.body)).model, "jev-1.13");
+          return Response.json({
+            ...apiResponse(),
+            model: budget.expectedModel,
+            usage: { input_tokens: 100, output_tokens: 1, cost },
+          });
+        },
+        "typesafe",
+        route,
+      );
+  const first = await cachedJudge(root, {}, "synthetic", budget, undefined, evaluate(budget, 0.2));
+  assert.equal(first.ok, true);
+  assert.equal(cacheUsage(root, budget).estimatedUsd, 0.2);
+  const direct = { ...budget, typesafeBase: undefined };
+  assert.equal(
+    (await cachedJudge(root, {}, "synthetic", direct, undefined, evaluate(direct, undefined))).ok,
+    true,
+  );
+  assert.equal(calls, 2);
+  assert.equal(readdirSync(root).length, 2);
+  const missing = directory(t);
+  assert.equal(
+    (await cachedJudge(missing, {}, "synthetic", budget, undefined, evaluate(budget, undefined)))
+      .ok,
+    false,
+  );
+  assert.equal(cacheUsage(missing, budget).calls, 1);
+  assert.equal(cacheUsage(missing, budget).estimatedUsd, 0.01);
 });
 
 test("corrupt persisted usage stops before another paid attempt", async (t) => {
