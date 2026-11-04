@@ -5,7 +5,7 @@
 // handler requires that variable to equal `1`, so rollout-only loading is a no-op.
 //
 // This is the only file that touches the engine interface `$`. The decisions live in
-// ../lib (settings, cooldowns, the bounded judge input, and the Jev client), which the
+// ../lib (settings, cooldowns, the bounded judge input, and the judge client), which the
 // suites under ../tests exercise through `claude plugin test`. ../README.md owns the
 // user-facing contract and ../../../docs/product-contract.md the shared semantics.
 //
@@ -150,7 +150,7 @@ let statusDetails: string | undefined;
  * Both environment gates, resolved once per module environment and cached: function
  * hooks must be on, and `COMPACT_ADVISER_DISABLE` must not be set to a truthy value.
  * Every hook goes through here, so a disabled session registers no command, shows no
- * status, and never reaches TypeSafe.
+ * status, and never reaches the judge.
  */
 function isActivated($: EngineInterface): Promise<boolean> {
   if (activation === undefined) {
@@ -197,13 +197,12 @@ async function apiKey($: EngineInterface): Promise<string> {
   return (await resolvedKey($)).value?.trim() ?? "";
 }
 
-/** A loopback-only endpoint override for the live regression's local TypeSafe fixture. */
+/** A loopback-only endpoint override for the live regression's local judge fixture. */
 async function testEndpoint($: EngineInterface): Promise<string | undefined> {
   const value = await $.env.get("COMPACT_ADVISER_TEST_ENDPOINT");
   return value !== undefined && LOOPBACK_ENDPOINT.test(value) ? value : undefined;
 }
 
-/** The live regression's fixture, else TypeSafe under `TYPESAFE_BASE` from the launch environment. */
 async function judgeEndpoint($: EngineInterface, provider: JudgeProvider): Promise<string> {
   const endpoint =
     (await testEndpoint($)) ??

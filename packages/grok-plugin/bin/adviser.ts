@@ -182,7 +182,6 @@ function testEndpoint(): string | undefined {
   return value !== undefined && LOOPBACK_ENDPOINT.test(value) ? value : undefined;
 }
 
-/** The live regression's fixture, else TypeSafe under `TYPESAFE_BASE` from the hook environment. */
 function judgeEndpoint(provider: JudgeProvider): string {
   const endpoint =
     testEndpoint() ??
@@ -349,7 +348,7 @@ async function runStop(payload: HookPayload): Promise<void> {
 
   const stored = loadSessionState(statePath, now);
   // This turn has already been through the gate: a second registration of the same hook, or a
-  // re-fire, must not count the exchange twice or ask TypeSafe twice for one checkpoint.
+  // re-fire, must not count the exchange twice or ask the judge twice for one checkpoint.
   if (promptId !== null && stored.lastPromptId === promptId) return;
 
   const dir = findSessionDir(cwd, sessionId, env());

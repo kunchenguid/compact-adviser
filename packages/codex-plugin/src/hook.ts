@@ -9,7 +9,7 @@
 // process run `/compact` on the user's session, so there is no automatic mode here.
 //
 // The decisions live in the sibling modules (settings, cooldowns, the bounded judge input, and
-// the Jev client); this file is the only one that knows Codex's event shapes. Nothing it does
+// the judge client); this file is the only one that knows Codex's event shapes. Nothing it does
 // may break a turn, so every failure path exits quietly with no hint.
 
 import { readFileSync } from "node:fs";
@@ -44,7 +44,7 @@ export const HINT =
   "Compact adviser: work appears completed or recorded. Run /compact to save tokens.";
 /** Below this the conversation is too small for a judgment to be worth a request. */
 export const MINIMUM_CONVERSATION_TOKENS = 20000;
-/** A loopback-only endpoint override for the live regression's local TypeSafe fixture. */
+/** A loopback-only endpoint override for the live regression's local judge fixture. */
 const LOOPBACK_ENDPOINT = /^http:\/\/127\.0\.0\.1:\d{1,5}\/[\x21-\x7e]*$/;
 
 export interface HookPayload {
@@ -64,7 +64,7 @@ export interface HookOutput {
 
 /**
  * Only the interactive TUI judges. `codex exec` and other scripted runners settle the same
- * way, but a hint no person is watching is only a TypeSafe request nobody asked for.
+ * way, but a hint no person is watching is only a judge request nobody asked for.
  */
 export function isInteractive(rollout: Pick<Rollout, "originator">): boolean {
   return rollout.originator === "codex-tui";
@@ -75,7 +75,6 @@ function testEndpoint(env: NodeJS.ProcessEnv): string | undefined {
   return value !== undefined && LOOPBACK_ENDPOINT.test(value) ? value : undefined;
 }
 
-/** The live regression's fixture, else TypeSafe under `TYPESAFE_BASE` from the launch environment. */
 function judgeEndpoint(env: NodeJS.ProcessEnv, provider: JudgeProvider): string {
   const endpoint =
     testEndpoint(env) ??
@@ -84,7 +83,7 @@ function judgeEndpoint(env: NodeJS.ProcessEnv, provider: JudgeProvider): string 
   return endpoint;
 }
 
-/** Launch environment, then the key saved in settings, then `TYPESAFE_API_KEY` in `cwd/.env`. */
+/** Saved and cwd keys are TypeSafe-only; Decisions must use its explicit launch key. */
 export function resolveKey(
   env: NodeJS.ProcessEnv,
   saved: string | undefined,
@@ -182,7 +181,7 @@ function cancellableJudgeTransport(fetch: Environment["fetch"]): {
 
 /**
  * One completed Codex turn: count the exchange, run the cheap local gates, and only then ask
- * TypeSafe. A failed or unqualified judgment returns no hint and leaves context alone.
+ * the selected judge. A failed or unqualified judgment returns no hint and leaves context alone.
  */
 async function onStop(payload: HookPayload, environment: Environment): Promise<HookOutput> {
   const sessionId = payload.session_id;
@@ -274,7 +273,7 @@ async function onStop(payload: HookPayload, environment: Environment): Promise<H
       }
     }
     // Silence is the only honest report here: Codex's one channel is a permanent scrollback
-    // line, and a transient TypeSafe failure is not worth one. Backoff keeps retries rare.
+    // line, and a transient judge failure is not worth one. Backoff keeps retries rare.
     const current = sessions.read(sessionId, environment.now()).state;
     sessions.write(sessionId, backoff(current, environment.now()), usage);
     return {};

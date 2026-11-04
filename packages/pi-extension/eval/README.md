@@ -1,7 +1,7 @@
 # compact-adviser judgment eval
 
 Offline replay of the shipped compact-adviser checkpoint pipeline against your
-own Pi session transcripts, plus a label rubric and a live TypeSafe Jev scorer.
+own Pi session transcripts, plus a label rubric and live judge scorers.
 
 The harness drives production `snapshot()` from `src/context.ts` through a
 minimal fake `ExtensionContext`, and production `judge()` / `qualifies()` from
@@ -61,18 +61,17 @@ carries both answers (`doneP`, `shapeP`) and the composed `score`; `hint` and
 0.5, floor 0.70), and `metrics.py` or `schedule.py` re-gate from `score` at any
 floor, so one live run measures the whole usage-dependent ladder.
 
-Optional provenance: `build.ts` marks rows whose snapshot state matches a logged
-production request. It reads `~/.pi/agent/compact-adviser-requests.jsonl` unless
+Optional TypeSafe provenance: `build.ts` marks rows whose snapshot state matches a logged
+production TypeSafe request. It reads `~/.pi/agent/compact-adviser-requests.jsonl` unless
 `COMPACT_ADVISER_REQUEST_LOG` is set. Enable request logging from
-`/compact-adviser` first. The log is the redacted body plus the Jev response
-used to gate the hint; it never includes the API key. Response and error lines
-are ignored when matching live request bodies.
+`/compact-adviser` first. See the [logging contract](../../../docs/product-contract.md#semantics) for log contents. Response and error lines
+are ignored when matching live request bodies; this matcher does not normalize Decisions logs.
 
 ## Experimental Decisions replay
 
 `eval/score-profile.ts` also accepts launch `COMPACT_ADVISER_PROVIDER=openai-decisions` and uses only launch `OPENAI_API_KEY` for execution. Set the limits file's `expectedModel` to `gpt-6-luna` and approve explicit call, token, and cost ceilings before adding `--execute`. Its default remains a no-network dry run and needs no key. Use only a separately authorized, frozen labeled checkpoint set; this repository supplies no private corpus or Decisions accuracy result.
 
-Decisions caches and results go under `<PRIVATE_DIRECTORY>/openai-decisions/`. The cache hashes the actual Decisions request bytes and expected model, and production `judge()` parses its response. Replay defaults to one bounded retry; set `"maxRetries": 0` in the limits file when retries are not authorized (`0` and `1` are the only accepted values). It uses a 60-second deadline, not the product's two seconds; include both settings in your evaluation plan and report production-deadline availability separately. Legacy `score.ts` and other Jev-only probes remain TypeSafe-only. Do not infer Decisions quality from the Jev measurements or from successful protocol fixtures.
+Decisions caches and results go under `<PRIVATE_DIRECTORY>/openai-decisions/`. The cache hashes the actual Decisions request bytes and expected model, and production `judge()` parses its response. The [replay retry policy](optimisation.md#score-development-data) also applies to Decisions. It uses a 60-second deadline, not the product's two seconds; include both settings in your evaluation plan and report production-deadline availability separately. Legacy `score.ts` and other Jev-only probes remain TypeSafe-only. Do not infer Decisions quality from the Jev measurements or from successful protocol fixtures.
 
 ## Jev replay through OpenRouter
 
