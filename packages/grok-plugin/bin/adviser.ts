@@ -113,7 +113,7 @@ const USAGE = `compact-adviser (Grok)
   threshold <tokens|default> minimum context tokens before a checkpoint is judged
   budget <tokens|off>        relax the hint floor toward this context size, or the window if smaller
   key <value>|key clear      save or clear the TypeSafe API key from a shell (TYPESAFE_API_KEY still wins)
-  log on|off                 TypeSafe request logging, off by default
+  log on|off                 selected judge request logging, off by default
   snooze                     no advice for three more completed exchanges in this session
   dismiss                    take the current hint off the status row
   install                    register the hooks in your Grok home, then print the status-line block`;
