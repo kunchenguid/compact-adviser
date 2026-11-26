@@ -270,15 +270,11 @@ export class Input implements Rows {
     else if (keys("tui.editor.cursorWordRight")) this.#cursor = this.#wordEnd();
     else if (keys("tui.editor.deleteCharBackward"))
       this.#delete(this.#cursor - before, this.#cursor);
-    else if (keys("tui.editor.deleteCharForward"))
-      this.#delete(this.#cursor, this.#cursor + after);
-    else if (keys("tui.editor.deleteWordBackward"))
-      this.#delete(this.#wordStart(), this.#cursor);
-    else if (keys("tui.editor.deleteWordForward"))
-      this.#delete(this.#cursor, this.#wordEnd());
+    else if (keys("tui.editor.deleteCharForward")) this.#delete(this.#cursor, this.#cursor + after);
+    else if (keys("tui.editor.deleteWordBackward")) this.#delete(this.#wordStart(), this.#cursor);
+    else if (keys("tui.editor.deleteWordForward")) this.#delete(this.#cursor, this.#wordEnd());
     else if (keys("tui.editor.deleteToLineStart")) this.#delete(0, this.#cursor);
-    else if (keys("tui.editor.deleteToLineEnd"))
-      this.#delete(this.#cursor, this.#value.length);
+    else if (keys("tui.editor.deleteToLineEnd")) this.#delete(this.#cursor, this.#value.length);
     else if (![...data].some(isControl)) this.#insert(data);
   }
   render(width: number): string[] {
