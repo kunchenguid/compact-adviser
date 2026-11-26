@@ -107,6 +107,13 @@ test("Input types escape-encoded plain and Shift keys, including the Kitty keypa
   assert.equal(input("ab", "\x1b[99;1:3u", "\x1b[57376u", "\x1b[57414u").getValue(), "ab");
 });
 
+test("Input word moves and deletes stop at punctuation like the retired editor", () => {
+  assert.equal(input("tsk_live-abc123", "\x1b[F", "\x17").getValue(), "tsk_live-");
+  assert.equal(input("tsk_live-abc123", "\x1b[F", "\x1bb", "X").getValue(), "tsk_live-Xabc123");
+  assert.equal(input("tsk_live-abc123", "\x1b[H", "\x1bf", "X").getValue(), "tsk_liveX-abc123");
+  assert.equal(input("  spaced  ", "\x1b[F", "\x1bb", "X").getValue(), "  Xspaced  ");
+});
+
 test("Input undoes edits and yanks what word and line deletions removed", () => {
   assert.equal(input("ab", "\x1b[F", "c", "d", "\x1f").getValue(), "ab");
   assert.equal(input("ab", "\x1b[F", "c", " ", "d", "\x1f").getValue(), "abc");

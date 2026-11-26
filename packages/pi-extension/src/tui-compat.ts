@@ -259,6 +259,57 @@ export function matchesKey(keys: Keys, data: string, keybinding: Keybinding): bo
   return id !== undefined && keys.matchesId(id, keybinding);
 }
 
+const PUNCTUATION = /[(){}[\]<>.,;:'"!?+\-=*/\\|&%^$#@~`]/;
+const wordSegmenter = new Intl.Segmenter(undefined, { granularity: "word" });
+
+/** Cursor one word backward, stopping inside a word at its last punctuation character. */
+function wordBackward(text: string, cursor: number): number {
+  if (cursor <= 0) return 0;
+  const segments = [...wordSegmenter.segment(text.slice(0, cursor))];
+  let at = cursor;
+  while (segments.length > 0 && /^\s+$/.test(segments[segments.length - 1]?.segment ?? "")) {
+    at -= segments.pop()?.segment.length ?? 0;
+  }
+  if (segments.length === 0) return at;
+  const last = segments[segments.length - 1];
+  if (last.isWordLike) {
+    const matches = [...last.segment.matchAll(new RegExp(PUNCTUATION, "g"))];
+    const tail = matches[matches.length - 1];
+    at -= tail ? last.segment.length - (tail.index + tail[0].length) : last.segment.length;
+  } else {
+    while (
+      segments.length > 0 &&
+      !segments[segments.length - 1]?.isWordLike &&
+      !/^\s+$/.test(segments[segments.length - 1]?.segment ?? "")
+    ) {
+      at -= segments.pop()?.segment.length ?? 0;
+    }
+  }
+  return at;
+}
+
+/** Cursor one word forward, stopping inside a word at its first punctuation character. */
+function wordForward(text: string, cursor: number): number {
+  if (cursor >= text.length) return text.length;
+  const iterator = wordSegmenter.segment(text.slice(cursor))[Symbol.iterator]();
+  let next = iterator.next();
+  let at = cursor;
+  while (!next.done && /^\s+$/.test(next.value.segment)) {
+    at += next.value.segment.length;
+    next = iterator.next();
+  }
+  if (next.done) return at;
+  if (next.value.isWordLike) {
+    at += PUNCTUATION.exec(next.value.segment)?.index ?? next.value.segment.length;
+  } else {
+    while (!next.done && !next.value.isWordLike && !/^\s+$/.test(next.value.segment)) {
+      at += next.value.segment.length;
+      next = iterator.next();
+    }
+  }
+  return at;
+}
+
 const PROMPT = "> ";
 const PASTE_START = "\x1b[200~";
 const PASTE_END = "\x1b[201~";
@@ -288,10 +339,10 @@ export class Input implements Rows {
   }
   invalidate(): void {}
   #wordStart(): number {
-    return this.#value.slice(0, this.#cursor).search(/\S*\s*$/);
+    return wordBackward(this.#value, this.#cursor);
   }
   #wordEnd(): number {
-    return this.#cursor + (/^\s*\S*/.exec(this.#value.slice(this.#cursor))?.[0].length ?? 0);
+    return wordForward(this.#value, this.#cursor);
   }
   #splice(from: number, to: number, text = ""): void {
     this.#value = this.#value.slice(0, from) + text + this.#value.slice(to);
