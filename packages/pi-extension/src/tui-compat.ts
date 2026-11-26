@@ -129,6 +129,90 @@ export class DynamicBorder implements Rows {
   }
 }
 
+type Keybinding = Parameters<KeybindingsManager["matches"]>[1];
+/** pi matches raw input bytes; omp matches only decoded key events, or bare ids via `matchesId`. */
+type Keys = Pick<KeybindingsManager, "matches"> & {
+  matchesId?(id: string, keybinding: Keybinding): boolean;
+};
+
+const MODIFIERS: [number, string][] = [
+  [4, "ctrl+"],
+  [2, "alt+"],
+  [1, "shift+"],
+  [8, "super+"],
+];
+const CSI_LETTERS: Record<string, string> = {
+  A: "up",
+  B: "down",
+  C: "right",
+  D: "left",
+  H: "home",
+  F: "end",
+};
+const CSI_TILDES: Record<string, string> = {
+  1: "home",
+  3: "delete",
+  4: "end",
+  7: "home",
+  8: "end",
+};
+const CODEPOINTS: Record<number, string> = {
+  8: "backspace",
+  9: "tab",
+  13: "enter",
+  27: "escape",
+  32: "space",
+  127: "backspace",
+};
+const CSI_LETTER = new RegExp(`^${ESC}(?:\\[(?:1)?(?:;(\\d+)(?::(\\d+))?)?|O)([ABCDHF])$`);
+const OTHER_KEYS = new RegExp(`^${ESC}\\[27;(\\d+);(\\d+)~$`);
+const CSI_TILDE = new RegExp(`^${ESC}\\[(\\d+)(?:;(\\d+)(?::(\\d+))?)?~$`);
+const CSI_U = new RegExp(`^${ESC}\\[(\\d+)(?::\\d*)*(?:;(\\d+)(?::(\\d+))?)?(?:;[\\d:]*)?u$`);
+
+/** Chord for a wire modifier value (1 + mask) and key; undefined for a release or hyper/meta. */
+function chord(mods: string | undefined, event: string | undefined, key: string) {
+  const mask = (Number(mods || 1) - 1) & ~(64 | 128);
+  if (mask < 0 || mask & (16 | 32) || event === "3") return undefined;
+  return MODIFIERS.map(([bit, name]) => (mask & bit ? name : "")).join("") + key;
+}
+
+function codepoint(cp: number, mods: string | undefined, event: string | undefined) {
+  const name =
+    CODEPOINTS[cp] ?? (cp > 32 && cp < 57344 ? String.fromCodePoint(cp).toLowerCase() : undefined);
+  return name && chord(mods, event, name);
+}
+
+/**
+ * The host chord id (`ctrl+a`, `alt+left`, `enter`) of one key's raw bytes, in omp's format,
+ * for the editing and confirm/cancel keys: legacy bytes, Alt chords, SS3, xterm CSI with
+ * modifiers, modifyOtherKeys and the Kitty keyboard protocol. Undefined for anything else.
+ */
+function keyId(data: string): string | undefined {
+  const code = data.length === 1 ? data.charCodeAt(0) : -1;
+  if (code === 10) return "enter";
+  if (code >= 1 && code <= 26 && !CODEPOINTS[code]) return `ctrl+${String.fromCharCode(code + 96)}`;
+  if (code >= 0) return CODEPOINTS[code] ?? (code > 32 ? data : undefined);
+  let match = CSI_LETTER.exec(data);
+  if (match) return chord(match[1], match[2], CSI_LETTERS[match[3]]);
+  match = OTHER_KEYS.exec(data);
+  if (match) return codepoint(Number(match[2]), match[1], undefined);
+  match = CSI_TILDE.exec(data);
+  if (match) return CSI_TILDES[match[1]] && chord(match[2], match[3], CSI_TILDES[match[1]]);
+  match = CSI_U.exec(data);
+  if (match) return codepoint(Number(match[1]), match[2], match[3]);
+  if (data.length !== 2 || data[0] !== ESC) return undefined;
+  const inner = keyId(data[1]);
+  return inner?.startsWith("ctrl+") ? `ctrl+alt+${inner.slice(5)}` : inner && `alt+${inner}`;
+}
+
+/** Whether `data` (one key's raw bytes) presses a chord the host binds to `keybinding`. */
+export function matchesKey(keys: Keys, data: string, keybinding: Keybinding): boolean {
+  if (keys.matches(data, keybinding)) return true;
+  if (typeof keys.matchesId !== "function") return false;
+  const id = keyId(data);
+  return id !== undefined && keys.matchesId(id, keybinding);
+}
+
 const PROMPT = "> ";
 const PASTE_START = "\x1b[200~";
 const PASTE_END = "\x1b[201~";
@@ -138,11 +222,11 @@ const PASTE_END = "\x1b[201~";
  * Kitty-encoded keys work; a bracketed paste is inserted as one line.
  */
 export class Input implements Rows {
-  readonly #keys: Pick<KeybindingsManager, "matches">;
+  readonly #keys: Keys;
   #value = "";
   #cursor = 0;
   focused = true;
-  constructor(keys: Pick<KeybindingsManager, "matches">) {
+  constructor(keys: Keys) {
     this.#keys = keys;
   }
   getValue(): string {
@@ -168,7 +252,7 @@ export class Input implements Rows {
     this.#cursor += text.length;
   }
   handleInput(data: string): void {
-    const keys = this.#keys;
+    const keys = (keybinding: Keybinding) => matchesKey(this.#keys, data, keybinding);
     const before = graphemes(this.#value.slice(0, this.#cursor)).at(-1)?.length ?? 0;
     const after = graphemes(this.#value.slice(this.#cursor))[0]?.length ?? 0;
     if (data.startsWith(PASTE_START) && data.endsWith(PASTE_END))
@@ -178,22 +262,22 @@ export class Input implements Rows {
           .replace(/[\r\n]/g, "")
           .replace(/\t/g, "    "),
       );
-    else if (keys.matches(data, "tui.editor.cursorLeft")) this.#cursor -= before;
-    else if (keys.matches(data, "tui.editor.cursorRight")) this.#cursor += after;
-    else if (keys.matches(data, "tui.editor.cursorLineStart")) this.#cursor = 0;
-    else if (keys.matches(data, "tui.editor.cursorLineEnd")) this.#cursor = this.#value.length;
-    else if (keys.matches(data, "tui.editor.cursorWordLeft")) this.#cursor = this.#wordStart();
-    else if (keys.matches(data, "tui.editor.cursorWordRight")) this.#cursor = this.#wordEnd();
-    else if (keys.matches(data, "tui.editor.deleteCharBackward"))
+    else if (keys("tui.editor.cursorLeft")) this.#cursor -= before;
+    else if (keys("tui.editor.cursorRight")) this.#cursor += after;
+    else if (keys("tui.editor.cursorLineStart")) this.#cursor = 0;
+    else if (keys("tui.editor.cursorLineEnd")) this.#cursor = this.#value.length;
+    else if (keys("tui.editor.cursorWordLeft")) this.#cursor = this.#wordStart();
+    else if (keys("tui.editor.cursorWordRight")) this.#cursor = this.#wordEnd();
+    else if (keys("tui.editor.deleteCharBackward"))
       this.#delete(this.#cursor - before, this.#cursor);
-    else if (keys.matches(data, "tui.editor.deleteCharForward"))
+    else if (keys("tui.editor.deleteCharForward"))
       this.#delete(this.#cursor, this.#cursor + after);
-    else if (keys.matches(data, "tui.editor.deleteWordBackward"))
+    else if (keys("tui.editor.deleteWordBackward"))
       this.#delete(this.#wordStart(), this.#cursor);
-    else if (keys.matches(data, "tui.editor.deleteWordForward"))
+    else if (keys("tui.editor.deleteWordForward"))
       this.#delete(this.#cursor, this.#wordEnd());
-    else if (keys.matches(data, "tui.editor.deleteToLineStart")) this.#delete(0, this.#cursor);
-    else if (keys.matches(data, "tui.editor.deleteToLineEnd"))
+    else if (keys("tui.editor.deleteToLineStart")) this.#delete(0, this.#cursor);
+    else if (keys("tui.editor.deleteToLineEnd"))
       this.#delete(this.#cursor, this.#value.length);
     else if (![...data].some(isControl)) this.#insert(data);
   }

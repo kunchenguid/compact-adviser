@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { keyText } from "@earendil-works/pi-coding-agent";
+import {
+  type ExtensionCommandContext,
+  type KeybindingsManager,
+  keyText,
+} from "@earendil-works/pi-coding-agent";
+import { promptSecret } from "../src/key-input.ts";
+import { promptMinimum } from "../src/minimum-input.ts";
 import { Container, DynamicBorder, Input, keyHint, Text, visibleWidth } from "../src/tui-compat.ts";
 
 const HINT = "Compact adviser: work appears completed or recorded. Run /compact to save tokens.";
@@ -144,4 +150,93 @@ test("keyHint styles the host key text and the description", () => {
   );
   assert.deepEqual(calls[0][0], "dim");
   assert.deepEqual(calls[1], ["muted", " save"]);
+});
+
+// omp 19.2.1's KeybindingsManager: `matches` reads a decoded key event, so raw bytes never
+// match there, and `matchesId` answers for a bare key id. Ids are omp's default chords.
+const OMP_DEFAULTS: Record<string, string[]> = {
+  "tui.editor.cursorLeft": ["left", "ctrl+b"],
+  "tui.editor.cursorRight": ["right", "ctrl+f"],
+  "tui.editor.cursorWordLeft": ["alt+left", "ctrl+left", "alt+b"],
+  "tui.editor.cursorWordRight": ["alt+right", "ctrl+right", "alt+f"],
+  "tui.editor.cursorLineStart": ["home", "ctrl+a"],
+  "tui.editor.cursorLineEnd": ["end", "ctrl+e"],
+  "tui.editor.deleteCharBackward": ["backspace"],
+  "tui.editor.deleteCharForward": ["delete", "ctrl+d"],
+  "tui.editor.deleteWordBackward": ["ctrl+w", "alt+backspace", "ctrl+backspace"],
+  "tui.editor.deleteWordForward": ["alt+delete", "alt+d", "ctrl+delete"],
+  "tui.editor.deleteToLineStart": ["ctrl+u"],
+  "tui.editor.deleteToLineEnd": ["ctrl+k"],
+  "tui.select.confirm": ["enter"],
+  "tui.select.cancel": ["escape", "ctrl+c"],
+};
+const ompKeybindings = {
+  matches: (event: unknown, id: string) =>
+    typeof event === "object" &&
+    event !== null &&
+    (event as { kind?: string }).kind !== "release" &&
+    (OMP_DEFAULTS[id]?.includes((event as { id: string }).id) ?? false),
+  matchesId: (id: string, action: string) => OMP_DEFAULTS[action]?.includes(id) ?? false,
+} as unknown as KeybindingsManager;
+
+function ompInput(value: string, ...keys: string[]): Input {
+  const field = new Input(ompKeybindings);
+  field.setValue(value);
+  for (const key of keys) field.handleInput(key);
+  return field;
+}
+
+test("Input edits on a host whose keybindings match decoded key ids (omp)", () => {
+  assert.equal(ompInput("40000", "\x01", "\x0b", "60000").getValue(), "60000");
+  assert.equal(ompInput("40000", "\x1b[97;5u", "\x1b[107;5u", "7").getValue(), "7");
+  assert.equal(ompInput("40000", "\x1b[27;5;97~", "\x1b[27;5;107~").getValue(), "");
+  assert.equal(ompInput("abcd", "\x05", "\x1b[D", "\x1b[D", "X").getValue(), "abXcd");
+  assert.equal(ompInput("abcd", "\x1bOF", "\x1bOD", "\x7f").getValue(), "abd");
+  assert.equal(ompInput("abcd", "\x1b[1;1H", "\x1b[3~").getValue(), "bcd");
+  assert.equal(ompInput("abcd", "\x1b[C", "\x04").getValue(), "acd");
+  assert.equal(ompInput("one two", "\x1b[F", "\x1b\x7f").getValue(), "one ");
+  assert.equal(ompInput("one two", "\x1b[F", "\x1b[1;5D", "X").getValue(), "one Xtwo");
+  assert.equal(ompInput("one two", "\x1bd").getValue(), " two");
+  assert.equal(ompInput("ab", "\x1b[F", "\x15").getValue(), "");
+  assert.equal(ompInput("ab", "\x1b[97;5:3u", "\x1b[107;5:3u").getValue(), "ab");
+});
+
+interface PromptView {
+  render(width: number): string[];
+  handleInput(data: string): void;
+}
+
+function drive(
+  prompt: (ctx: ExtensionCommandContext) => Promise<string | undefined>,
+  ...keys: string[]
+): Promise<string | undefined> {
+  const theme = { fg: (_color: string, text: string) => text };
+  const ctx = {
+    ui: {
+      custom: (factory: (...args: unknown[]) => PromptView) =>
+        new Promise((resolve) => {
+          const view = factory({ requestRender() {} }, theme, ompKeybindings, resolve);
+          for (const key of keys) {
+            view.render(60);
+            view.handleInput(key);
+          }
+        }),
+    },
+  } as unknown as ExtensionCommandContext;
+  return Promise.race([prompt(ctx), new Promise<string>((r) => setTimeout(() => r("open"), 50))]);
+}
+
+test("prompts save on Enter and cancel on Escape or Ctrl+C on an omp-style host", async () => {
+  const minimum = (ctx: ExtensionCommandContext) => promptMinimum(ctx, 40000);
+  assert.equal(await drive(minimum, "\r"), "40000");
+  assert.equal(await drive(minimum, "\x01", "\x0b", "6", "0", "0", "0", "0", "\r"), "60000");
+  assert.equal(await drive(minimum, "\x1b[13u"), "40000");
+  assert.equal(await drive(minimum, "\x1b"), undefined);
+  assert.equal(await drive(minimum, "\x03"), undefined);
+  assert.equal(await drive(minimum, "\x1b[99;5u"), undefined);
+  assert.equal(await drive(promptSecret, "a", "b", "d", "\x1b[D", "c", "\x05", "\r"), "abcd");
+  assert.equal(await drive(promptSecret, "\x1b[200~tsk_abc\x1b[201~", "\r"), "tsk_abc");
+  assert.equal(await drive(promptSecret, "x", "\x1b"), undefined);
+  assert.equal(await drive(promptSecret, "x", "\x03"), undefined);
+  assert.equal(await drive(promptSecret, "x"), "open");
 });

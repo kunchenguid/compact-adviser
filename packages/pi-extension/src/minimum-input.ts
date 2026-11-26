@@ -1,5 +1,5 @@
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
-import { Container, DynamicBorder, Input, keyHint, Text } from "./tui-compat.ts";
+import { Container, DynamicBorder, Input, keyHint, matchesKey, Text } from "./tui-compat.ts";
 
 // Pi 0.82's ui.input second argument is an ignored placeholder, not an initial
 // value. Render our own Input prefilled with it so the promised prefill really exists.
@@ -41,9 +41,9 @@ export function promptMinimum(
         box.invalidate();
       },
       handleInput(data: string) {
-        if (keybindings.matches(data, "tui.select.confirm") || data === "\n")
+        if (matchesKey(keybindings, data, "tui.select.confirm") || data === "\n")
           done(input.getValue());
-        else if (keybindings.matches(data, "tui.select.cancel")) done(undefined);
+        else if (matchesKey(keybindings, data, "tui.select.cancel")) done(undefined);
         else {
           input.handleInput(data);
           tui.requestRender();
