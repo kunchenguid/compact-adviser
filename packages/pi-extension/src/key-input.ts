@@ -1,9 +1,5 @@
-import {
-  DynamicBorder,
-  type ExtensionCommandContext,
-  keyHint,
-} from "@earendil-works/pi-coding-agent";
-import { Container, Input, Text } from "@earendil-works/pi-tui";
+import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
+import { Container, DynamicBorder, Input, keyHint, Text } from "./tui-compat.ts";
 
 export function maskSecret(value: string): string {
   return "*".repeat(value.length);
@@ -35,7 +31,7 @@ export function promptSecret(ctx: ExtensionCommandContext): Promise<string | und
         help.setText(
           theme.fg(
             "dim",
-            `${keyHint("tui.select.confirm", "save")}  ${keyHint("tui.select.cancel", "cancel")}`,
+            `${keyHint(theme, "tui.select.confirm", "save")}  ${keyHint(theme, "tui.select.cancel", "cancel")}`,
           ),
         );
         const real = input.getValue();

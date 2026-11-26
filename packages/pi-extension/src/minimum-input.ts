@@ -1,9 +1,5 @@
-import {
-  DynamicBorder,
-  type ExtensionCommandContext,
-  keyHint,
-} from "@earendil-works/pi-coding-agent";
-import { Container, Input, Text } from "@earendil-works/pi-tui";
+import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
+import { Container, DynamicBorder, Input, keyHint, Text } from "./tui-compat.ts";
 
 // Pi 0.82's ui.input second argument is an ignored placeholder, not an initial
 // value. Use Pi's native Input component so the promised prefill really exists.
@@ -36,7 +32,7 @@ export function promptMinimum(
         help.setText(
           theme.fg(
             "dim",
-            `${keyHint("tui.select.confirm", "save")}  ${keyHint("tui.select.cancel", "cancel")}`,
+            `${keyHint(theme, "tui.select.confirm", "save")}  ${keyHint(theme, "tui.select.cancel", "cancel")}`,
           ),
         );
         return box.render(width);

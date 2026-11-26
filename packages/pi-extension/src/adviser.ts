@@ -3,7 +3,6 @@ import type {
   ExtensionCommandContext,
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
-import { Text } from "@earendil-works/pi-tui";
 import {
   type Config,
   ConfigStore,
@@ -40,6 +39,7 @@ import {
   type SessionState,
   STATE_TYPE,
 } from "./state.ts";
+import { Text } from "./tui-compat.ts";
 
 const LABEL = "compact-adviser";
 const HINT = "Compact adviser: work appears completed or recorded. Run /compact to save tokens.";
