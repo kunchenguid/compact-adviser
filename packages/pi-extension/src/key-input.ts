@@ -8,10 +8,10 @@ export function maskSecret(value: string): string {
 /** Empty prompt; typed characters are masked. Escape cancels. Never prefills a saved key. */
 export function promptSecret(ctx: ExtensionCommandContext): Promise<string | undefined> {
   return ctx.ui.custom<string | undefined>((tui, theme, keybindings, done) => {
-    const input = new Input();
+    const input = new Input(keybindings);
     const box = new Container();
-    const heading = new Text("", 1, 0);
-    const help = new Text("", 1, 0);
+    const heading = new Text("", 1);
+    const help = new Text("", 1);
     box.addChild(new DynamicBorder((text: string) => theme.fg("accent", text)));
     box.addChild(heading);
     box.addChild(input);

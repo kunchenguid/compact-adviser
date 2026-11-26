@@ -2,17 +2,17 @@ import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { Container, DynamicBorder, Input, keyHint, Text } from "./tui-compat.ts";
 
 // Pi 0.82's ui.input second argument is an ignored placeholder, not an initial
-// value. Use Pi's native Input component so the promised prefill really exists.
+// value. Render our own Input prefilled with it so the promised prefill really exists.
 export function promptMinimum(
   ctx: ExtensionCommandContext,
   initial: number,
 ): Promise<string | undefined> {
   return ctx.ui.custom<string | undefined>((tui, theme, keybindings, done) => {
-    const input = new Input();
+    const input = new Input(keybindings);
     input.setValue(String(initial));
     const box = new Container();
-    const heading = new Text("", 1, 0);
-    const help = new Text("", 1, 0);
+    const heading = new Text("", 1);
+    const help = new Text("", 1);
     box.addChild(new DynamicBorder((text: string) => theme.fg("accent", text)));
     box.addChild(heading);
     box.addChild(input);

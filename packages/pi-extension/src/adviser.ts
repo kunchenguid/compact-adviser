@@ -244,7 +244,7 @@ export function installAdviser(pi: ExtensionAPI, options: Options): void {
       if (!auto) {
         state = { ...state, lastHintAt: state.completed, lastHintKey: view.checkpointKey };
         persist(state);
-        ctx.ui.setWidget(LABEL, (_tui, theme) => new Text(theme.fg("warning", HINT), 0, 0));
+        ctx.ui.setWidget(LABEL, (_tui, theme) => new Text(theme.fg("warning", HINT)));
         hintVisible = true;
       } else {
         compacting = true;
