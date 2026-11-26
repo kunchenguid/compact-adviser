@@ -24,6 +24,9 @@ const KEYS: Record<string, string[]> = {
   "tui.editor.deleteWordForward": ["\x1bd"],
   "tui.editor.deleteToLineStart": ["\x15"],
   "tui.editor.deleteToLineEnd": ["\x0b", "\x1b[107;5u"],
+  "tui.editor.undo": ["\x1f"],
+  "tui.editor.yank": ["\x19"],
+  "tui.editor.yankPop": ["\x1by"],
 };
 const keybindings = { matches: (data: string, id: string) => KEYS[id]?.includes(data) ?? false };
 
@@ -95,6 +98,37 @@ test("Input edits through the host keybindings, including Kitty-encoded keys", (
   assert.equal(input("ab", "\x1b[15~", "\x1b[A", "\x09").getValue(), "ab");
 });
 
+test("Input types escape-encoded plain and Shift keys, including the Kitty keypad", () => {
+  assert.equal(input("", "\x1b[57402u", "\x1b[57399u", "\x1b[57399u").getValue(), "300");
+  assert.equal(input("", "\x1b[57409u", "\x1b[57413;1u").getValue(), ".+");
+  assert.equal(input("", "\x1b[97:65;2u", "\x1b[98;2u", "\x1b[99;65u").getValue(), "Abc");
+  assert.equal(input("", "\x1b[27;2;65~", "\x1b[27;1;98~").getValue(), "Ab");
+  assert.equal(input("ab", "\x1b[99;3u", "\x1b[27;5;99~", "\x1b[99;9u").getValue(), "ab");
+  assert.equal(input("ab", "\x1b[99;1:3u", "\x1b[57376u", "\x1b[57414u").getValue(), "ab");
+});
+
+test("Input undoes edits and yanks what word and line deletions removed", () => {
+  assert.equal(input("ab", "\x1b[F", "c", "d", "\x1f").getValue(), "ab");
+  assert.equal(input("ab", "\x1b[F", "c", " ", "d", "\x1f").getValue(), "abc");
+  assert.equal(input("ab", "\x1b[F", "c", " ", "d", "\x1f", "\x1f").getValue(), "ab");
+  assert.equal(input("one two", "\x1b[F", "\x17", "\x1f").getValue(), "one two");
+  assert.equal(input("ab", "\x1b[F", "\x7f", "\x1b[200~xy\x1b[201~", "\x1f").getValue(), "a");
+  assert.equal(input("ab", "\x1f", "\x1f").getValue(), "ab");
+  assert.equal(input("one two", "\x1b[F", "\x17", "\x19").getValue(), "one two");
+  assert.equal(
+    input("one two", "\x1b[F", "\x17", "\x17", "\x19", "\x19").getValue(),
+    "one twoone two",
+  );
+  assert.equal(input("ab cd", "\x1b[F", "\x17", "\x1b[H", "\x0b", "\x19").getValue(), "ab ");
+  assert.equal(
+    input("ab cd", "\x1b[F", "\x17", "\x1b[H", "\x0b", "\x19", "\x1by").getValue(),
+    "cd",
+  );
+  assert.equal(input("ab", "\x1b[F", "\x7f", "\x19", "\x1by").getValue(), "a");
+  const field = input("ab cd", "\x1b[F", "\x17", "\x1b[H", "\x0b", "\x19", "\x1by", "\x1f");
+  assert.equal(field.getValue(), "ab ");
+});
+
 test("Input inserts a bracketed paste as one line at the cursor", () => {
   assert.equal(input("", "\x1b[200~tsk_abc123\x1b[201~").getValue(), "tsk_abc123");
   assert.equal(input("ad", "\x1b[C", "\x1b[200~b\r\nc\x1b[201~").getValue(), "abcd");
@@ -123,11 +157,13 @@ test("Input keeps its cursor across setValue, starting at the beginning", () => 
   assert.equal(field.getValue(), "aY");
 });
 
-test("Input renders the prompt, inverts the cursor cell, and fills the width", () => {
+test("Input renders the prompt, marks and inverts the cursor cell, and fills the width", () => {
+  const marker = "\x1b_pi:c\x07";
   const field = input("abcd", "\x1b[C", "\x1b[C");
-  assert.deepEqual(field.render(10), ["> ab\x1b[7mc\x1b[27md    "]);
+  assert.deepEqual(field.render(10), [`> ab${marker}\x1b[7mc\x1b[27md    `]);
+  assert.equal(visibleWidth(field.render(10)[0]), 10);
   field.handleInput("\x1b[F");
-  assert.deepEqual(field.render(8), ["> abcd\x1b[7m \x1b[27m "]);
+  assert.deepEqual(field.render(8), [`> abcd${marker}\x1b[7m \x1b[27m `]);
   field.focused = false;
   assert.deepEqual(field.render(8), ["> abcd  "]);
   assert.deepEqual(new Input(keybindings).render(1), [">"]);
@@ -143,7 +179,7 @@ test("Input scrolls a long value so the row fits and the cursor stays visible", 
     assert.ok(row.includes("\x1b[7mS\x1b[27m"), `width ${width}`);
   }
   const end = input("*".repeat(100), "\x1b[F");
-  assert.deepEqual(end.render(12), [`> ${"*".repeat(9)}\x1b[7m \x1b[27m`]);
+  assert.deepEqual(end.render(12), [`> ${"*".repeat(9)}\x1b_pi:c\x07\x1b[7m \x1b[27m`]);
 });
 
 test("keyHint styles the host key text and the description", () => {
@@ -177,6 +213,9 @@ const OMP_DEFAULTS: Record<string, string[]> = {
   "tui.editor.deleteWordForward": ["alt+delete", "alt+d", "ctrl+delete"],
   "tui.editor.deleteToLineStart": ["ctrl+u"],
   "tui.editor.deleteToLineEnd": ["ctrl+k"],
+  "tui.editor.undo": ["ctrl+-", "ctrl+_"],
+  "tui.editor.yank": ["ctrl+y"],
+  "tui.editor.yankPop": ["alt+y"],
   "tui.select.confirm": ["enter"],
   "tui.select.cancel": ["escape", "ctrl+c"],
 };
@@ -209,6 +248,10 @@ test("Input edits on a host whose keybindings match decoded key ids (omp)", () =
   assert.equal(ompInput("one two", "\x1bd").getValue(), " two");
   assert.equal(ompInput("ab", "\x1b[F", "\x15").getValue(), "");
   assert.equal(ompInput("ab", "\x1b[97;5:3u", "\x1b[107;5:3u").getValue(), "ab");
+  assert.equal(ompInput("abcd", "\x1b[57423u", "\x1b[57426u").getValue(), "bcd");
+  assert.equal(ompInput("abcd", "\x1b[57424u", "\x1b[57417u", "\x1b[57409u").getValue(), "abc.d");
+  assert.equal(ompInput("one two", "\x1b[F", "\x17", "\x19", "\x1f").getValue(), "one ");
+  assert.equal(ompInput("one two", "\x1b[F", "\x17", "\x1b[45;5u").getValue(), "one two");
 });
 
 interface PromptView {
@@ -241,6 +284,8 @@ test("prompts save on Enter and cancel on Escape or Ctrl+C on an omp-style host"
   assert.equal(await drive(minimum, "\r"), "40000");
   assert.equal(await drive(minimum, "\x01", "\x0b", "6", "0", "0", "0", "0", "\r"), "60000");
   assert.equal(await drive(minimum, "\x1b[13u"), "40000");
+  const keypad = ["\x1b[57402u", "\x1b[57399u", "\x1b[57399u", "\x1b[57399u", "\x1b[57399u"];
+  assert.equal(await drive(minimum, "\x01", "\x0b", ...keypad, "\x1b[57414u"), "30000");
   assert.equal(await drive(minimum, "\x1b"), undefined);
   assert.equal(await drive(minimum, "\x03"), undefined);
   assert.equal(await drive(minimum, "\x1b[99;5u"), undefined);

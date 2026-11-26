@@ -18,6 +18,8 @@ interface Rows {
 const ESC = "\x1b";
 const SGR = new RegExp(`(${ESC}\\[[0-9;:]*m)`);
 const RESETS = ["\x1b[0m", "\x1b[m"];
+/** Zero-width marker pi reads to place the hardware cursor (IME composition) and strips. */
+const CURSOR_MARKER = "\x1b_pi:c\x07";
 const segmenter = new Intl.Segmenter();
 
 function graphemes(text: string): string[] {
@@ -38,10 +40,10 @@ function cells(grapheme: string): number {
   return (grapheme.codePointAt(0) ?? 0) >= 0x1100 ? 2 : 1;
 }
 
-/** Terminal columns `text` occupies, ignoring SGR colour codes. */
+/** Terminal columns `text` occupies, ignoring SGR colour codes and the cursor marker. */
 export function visibleWidth(text: string): number {
   let width = 0;
-  for (const part of text.split(SGR)) {
+  for (const part of text.replaceAll(CURSOR_MARKER, "").split(SGR)) {
     if (!SGR.test(part)) for (const grapheme of graphemes(part)) width += cells(grapheme);
   }
   return width;
@@ -170,7 +172,28 @@ const CODEPOINTS: Record<number, string> = {
 const CSI_LETTER = new RegExp(`^${ESC}(?:\\[(?:1)?(?:;(\\d+)(?::(\\d+))?)?|O)([ABCDHF])$`);
 const OTHER_KEYS = new RegExp(`^${ESC}\\[27;(\\d+);(\\d+)~$`);
 const CSI_TILDE = new RegExp(`^${ESC}\\[(\\d+)(?:;(\\d+)(?::(\\d+))?)?~$`);
-const CSI_U = new RegExp(`^${ESC}\\[(\\d+)(?::\\d*)*(?:;(\\d+)(?::(\\d+))?)?(?:;[\\d:]*)?u$`);
+const CSI_U = new RegExp(
+  `^${ESC}\\[(\\d+)(?::(\\d*)(?::\\d*)?)?(?:;(\\d+)(?::(\\d+))?)?(?:;[\\d:]*)?u$`,
+);
+/** Kitty keypad codepoints 57399-57416, as the keys they stand for (KP_ENTER is Enter). */
+const KEYPAD = Array.from("0123456789./*-+\r=,", (ch) => ch.charCodeAt(0));
+const KEYPAD_KEYS: Record<number, string> = {
+  57417: "left",
+  57418: "right",
+  57419: "up",
+  57420: "down",
+  57423: "home",
+  57424: "end",
+  57426: "delete",
+};
+
+function unpad(cp: number): number {
+  return KEYPAD[cp - 57399] ?? cp;
+}
+
+function isFunctional(cp: number): boolean {
+  return cp >= 57344 && cp <= 63743;
+}
 
 /** Chord for a wire modifier value (1 + mask) and key; undefined for a release or hyper/meta. */
 function chord(mods: string | undefined, event: string | undefined, key: string) {
@@ -179,10 +202,29 @@ function chord(mods: string | undefined, event: string | undefined, key: string)
   return MODIFIERS.map(([bit, name]) => (mask & bit ? name : "")).join("") + key;
 }
 
-function codepoint(cp: number, mods: string | undefined, event: string | undefined) {
+function codepoint(code: number, mods: string | undefined, event: string | undefined) {
+  const cp = unpad(code);
   const name =
-    CODEPOINTS[cp] ?? (cp > 32 && cp < 57344 ? String.fromCodePoint(cp).toLowerCase() : undefined);
+    CODEPOINTS[cp] ??
+    KEYPAD_KEYS[cp] ??
+    (cp > 32 && cp <= 0x10ffff && !isFunctional(cp)
+      ? String.fromCodePoint(cp).toLowerCase()
+      : undefined);
   return name && chord(mods, event, name);
+}
+
+/**
+ * The text a plain or Shift-only key types when the terminal escape-encodes it (Kitty CSI-u,
+ * with the shifted key preferred and keypad keys as their characters, or modifyOtherKeys).
+ */
+function typed(data: string): string | undefined {
+  const kitty = CSI_U.exec(data);
+  const other = kitty ? null : OTHER_KEYS.exec(data);
+  if (!kitty && !other) return undefined;
+  const mask = (Number((kitty ? kitty[3] : other?.[1]) || 1) - 1) & ~(64 | 128);
+  if (mask & ~1 || kitty?.[4] === "3") return undefined;
+  const cp = unpad(Number(kitty ? (mask && kitty[2]) || kitty[1] : other?.[2]));
+  return cp >= 32 && cp <= 0x10ffff && !isFunctional(cp) ? String.fromCodePoint(cp) : undefined;
 }
 
 /**
@@ -193,6 +235,7 @@ function codepoint(cp: number, mods: string | undefined, event: string | undefin
 function keyId(data: string): string | undefined {
   const code = data.length === 1 ? data.charCodeAt(0) : -1;
   if (code === 10) return "enter";
+  if (code === 31) return "ctrl+-";
   if (code >= 1 && code <= 26 && !CODEPOINTS[code]) return `ctrl+${String.fromCharCode(code + 96)}`;
   if (code >= 0) return CODEPOINTS[code] ?? (code > 32 ? data : undefined);
   let match = CSI_LETTER.exec(data);
@@ -202,7 +245,7 @@ function keyId(data: string): string | undefined {
   match = CSI_TILDE.exec(data);
   if (match) return CSI_TILDES[match[1]] && chord(match[2], match[3], CSI_TILDES[match[1]]);
   match = CSI_U.exec(data);
-  if (match) return codepoint(Number(match[1]), match[2], match[3]);
+  if (match) return codepoint(Number(match[1]), match[3], match[4]);
   if (data.length !== 2 || data[0] !== ESC) return undefined;
   const inner = keyId(data[1]);
   return inner?.startsWith("ctrl+") ? `ctrl+alt+${inner.slice(5)}` : inner && `alt+${inner}`;
@@ -222,12 +265,16 @@ const PASTE_END = "\x1b[201~";
 
 /**
  * Single-line editor. Editing keys come from the host keybindings, so remapped keys and
- * Kitty-encoded keys work; a bracketed paste is inserted as one line.
+ * Kitty-encoded keys work; a bracketed paste is inserted as one line. Deletions by word or
+ * to a line end go to a kill ring for yank and yank-pop, and every edit can be undone.
  */
 export class Input implements Rows {
   readonly #keys: Keys;
   #value = "";
   #cursor = 0;
+  #last: "type" | "kill" | "yank" | undefined;
+  readonly #undo: { value: string; cursor: number }[] = [];
+  readonly #kills: string[] = [];
   focused = true;
   constructor(keys: Keys) {
     this.#keys = keys;
@@ -246,39 +293,89 @@ export class Input implements Rows {
   #wordEnd(): number {
     return this.#cursor + (/^\s*\S*/.exec(this.#value.slice(this.#cursor))?.[0].length ?? 0);
   }
-  #delete(from: number, to: number): void {
-    this.#value = this.#value.slice(0, from) + this.#value.slice(to);
-    this.#cursor = from;
+  #splice(from: number, to: number, text = ""): void {
+    this.#value = this.#value.slice(0, from) + text + this.#value.slice(to);
+    this.#cursor = from + text.length;
   }
-  #insert(text: string): void {
-    this.#value = this.#value.slice(0, this.#cursor) + text + this.#value.slice(this.#cursor);
-    this.#cursor += text.length;
+  #save(): void {
+    this.#undo.push({ value: this.#value, cursor: this.#cursor });
+  }
+  #move(to: number): void {
+    this.#cursor = to;
+    this.#last = undefined;
+  }
+  #delete(from: number, to: number): void {
+    this.#last = undefined;
+    if (from >= to) return;
+    this.#save();
+    this.#splice(from, to);
+  }
+  #cut(from: number, to: number, backward: boolean): void {
+    if (from >= to) return;
+    this.#save();
+    const text = this.#value.slice(from, to);
+    const prior = this.#last === "kill" ? this.#kills.pop() : undefined;
+    this.#kills.push(prior === undefined ? text : backward ? text + prior : prior + text);
+    this.#splice(from, to);
+    this.#last = "kill";
+  }
+  #type(text: string): void {
+    if (this.#last !== "type" || /\s/.test(text)) this.#save();
+    this.#splice(this.#cursor, this.#cursor, text);
+    this.#last = "type";
+  }
+  #yank(pop: boolean): void {
+    const prior = this.#kills.at(-1);
+    if (prior === undefined || (pop && (this.#last !== "yank" || this.#kills.length < 2))) return;
+    this.#save();
+    const from = pop ? this.#cursor - prior.length : this.#cursor;
+    if (pop) this.#kills.unshift(this.#kills.pop() ?? "");
+    this.#splice(from, this.#cursor, this.#kills.at(-1));
+    this.#last = "yank";
+  }
+  #restore(): void {
+    const snapshot = this.#undo.pop();
+    if (!snapshot) return;
+    this.#value = snapshot.value;
+    this.#cursor = snapshot.cursor;
+    this.#last = undefined;
   }
   handleInput(data: string): void {
     const keys = (keybinding: Keybinding) => matchesKey(this.#keys, data, keybinding);
     const before = graphemes(this.#value.slice(0, this.#cursor)).at(-1)?.length ?? 0;
     const after = graphemes(this.#value.slice(this.#cursor))[0]?.length ?? 0;
-    if (data.startsWith(PASTE_START) && data.endsWith(PASTE_END))
-      this.#insert(
+    if (data.startsWith(PASTE_START) && data.endsWith(PASTE_END)) {
+      this.#last = undefined;
+      this.#save();
+      this.#splice(
+        this.#cursor,
+        this.#cursor,
         data
           .slice(PASTE_START.length, -PASTE_END.length)
           .replace(/[\r\n]/g, "")
           .replace(/\t/g, "    "),
       );
-    else if (keys("tui.editor.cursorLeft")) this.#cursor -= before;
-    else if (keys("tui.editor.cursorRight")) this.#cursor += after;
-    else if (keys("tui.editor.cursorLineStart")) this.#cursor = 0;
-    else if (keys("tui.editor.cursorLineEnd")) this.#cursor = this.#value.length;
-    else if (keys("tui.editor.cursorWordLeft")) this.#cursor = this.#wordStart();
-    else if (keys("tui.editor.cursorWordRight")) this.#cursor = this.#wordEnd();
+    } else if (keys("tui.editor.undo")) this.#restore();
+    else if (keys("tui.editor.cursorLeft")) this.#move(this.#cursor - before);
+    else if (keys("tui.editor.cursorRight")) this.#move(this.#cursor + after);
+    else if (keys("tui.editor.cursorLineStart")) this.#move(0);
+    else if (keys("tui.editor.cursorLineEnd")) this.#move(this.#value.length);
+    else if (keys("tui.editor.cursorWordLeft")) this.#move(this.#wordStart());
+    else if (keys("tui.editor.cursorWordRight")) this.#move(this.#wordEnd());
     else if (keys("tui.editor.deleteCharBackward"))
       this.#delete(this.#cursor - before, this.#cursor);
     else if (keys("tui.editor.deleteCharForward")) this.#delete(this.#cursor, this.#cursor + after);
-    else if (keys("tui.editor.deleteWordBackward")) this.#delete(this.#wordStart(), this.#cursor);
-    else if (keys("tui.editor.deleteWordForward")) this.#delete(this.#cursor, this.#wordEnd());
-    else if (keys("tui.editor.deleteToLineStart")) this.#delete(0, this.#cursor);
-    else if (keys("tui.editor.deleteToLineEnd")) this.#delete(this.#cursor, this.#value.length);
-    else if (![...data].some(isControl)) this.#insert(data);
+    else if (keys("tui.editor.deleteWordBackward"))
+      this.#cut(this.#wordStart(), this.#cursor, true);
+    else if (keys("tui.editor.deleteWordForward")) this.#cut(this.#cursor, this.#wordEnd(), false);
+    else if (keys("tui.editor.deleteToLineStart")) this.#cut(0, this.#cursor, true);
+    else if (keys("tui.editor.deleteToLineEnd")) this.#cut(this.#cursor, this.#value.length, false);
+    else if (keys("tui.editor.yank")) this.#yank(false);
+    else if (keys("tui.editor.yankPop")) this.#yank(true);
+    else {
+      const text = typed(data) ?? data;
+      if (![...text].some(isControl)) this.#type(text);
+    }
   }
   render(width: number): string[] {
     const room = width - PROMPT.length;
@@ -291,7 +388,7 @@ export class Input implements Rows {
     while (used > room && span(before) > Math.floor(room / 2)) used -= cells(before.shift() ?? "");
     while (used > room && after.length > 0) used -= cells(after.pop() ?? "");
     while (used > room && before.length > 0) used -= cells(before.shift() ?? "");
-    const cursor = this.focused ? `\x1b[7m${at}\x1b[27m` : at;
+    const cursor = this.focused ? `${CURSOR_MARKER}\x1b[7m${at}\x1b[27m` : at;
     return [
       PROMPT + before.join("") + cursor + after.join("") + " ".repeat(Math.max(0, room - used)),
     ];
