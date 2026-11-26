@@ -101,6 +101,16 @@ test("Input inserts a bracketed paste as one line at the cursor", () => {
   assert.equal(input("", "\x1b[200~a\tb\x1b[201~").getValue(), "a    b");
 });
 
+test("Rows count double-width characters without overflowing", () => {
+  assert.equal(visibleWidth("✅"), 2);
+  assert.equal(visibleWidth("ab✅"), 4);
+  for (const width of [8, 12, 40]) {
+    const [row] = input("50000✅").render(width);
+    assert.equal(visibleWidth(row), width);
+  }
+  for (const row of new Text("a ✅ b").render(4)) assert.ok(visibleWidth(row) <= 4);
+});
+
 test("Input keeps its cursor across setValue, starting at the beginning", () => {
   assert.equal(input("12", "9").getValue(), "912");
   const field = input("", "a", "b", "c", "d", "\x1b[D");

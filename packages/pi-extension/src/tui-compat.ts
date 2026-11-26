@@ -18,8 +18,6 @@ interface Rows {
 const ESC = "\x1b";
 const SGR = new RegExp(`(${ESC}\\[[0-9;:]*m)`);
 const RESETS = ["\x1b[0m", "\x1b[m"];
-const WIDE =
-  /[\u1100-\u115f\u2e80-\ua4cf\uac00-\ud7a3\uf900-\ufaff\ufe30-\ufe4f\uff00-\uff60\uffe0-\uffe6\u{1f300}-\u{1faff}\u{20000}-\u{3fffd}]/u;
 const segmenter = new Intl.Segmenter();
 
 function graphemes(text: string): string[] {
@@ -31,8 +29,13 @@ function isControl(ch: string): boolean {
   return code < 32 || (code >= 0x7f && code <= 0x9f);
 }
 
+/**
+ * Columns a grapheme may occupy. Anything at or above U+1100 is counted as wide: that
+ * overcounts a few narrow scripts, but never undercounts a double-width character, so a
+ * padded row can never exceed the width the host gave us.
+ */
 function cells(grapheme: string): number {
-  return WIDE.test(grapheme) ? 2 : 1;
+  return (grapheme.codePointAt(0) ?? 0) >= 0x1100 ? 2 : 1;
 }
 
 /** Terminal columns `text` occupies, ignoring SGR colour codes. */
