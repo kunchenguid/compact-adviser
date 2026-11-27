@@ -89,6 +89,8 @@ const BEFORE_COMPACT_STATUS = "running the before-compact prompt…";
 /** A before-compact turn that outlives this does not compact. */
 export const BEFORE_COMPACT_TIMEOUT_MS = 300_000;
 const BEFORE_COMPACT_RETRY_MS = 60_000;
+/** How long a cleanly ended before-compact turn stands in for running the prompt again. */
+const BEFORE_COMPACT_FRESH_MS = 600_000;
 const SLASH_COMMAND = /^\/([A-Za-z0-9_:-]{1,64})(?:\s+([\s\S]*))?$/;
 const PENDING_NOTICE_KEY = "pendingNotice";
 const LOOPBACK_ENDPOINT = /^http:\/\/127\.0\.0\.1:\d{1,5}\/[\x21-\x7e]*$/;
@@ -116,7 +118,11 @@ let beforeCompact:
   | undefined;
 let beforeCompactSeq = 0;
 // The running turn of a handoff abandoned after it started; its end is not a checkpoint.
-let abandonedTurn: { turnId: string; key: string } | undefined;
+// `claimed` when the handoff saw that turn start, not when it is only the likely one.
+let abandonedTurn: { turnId: string; key: string; claimed?: boolean } | undefined;
+// The before-compact turn ended cleanly and no compaction has followed it yet. While it
+// is fresh, a qualifying checkpoint compacts without running the prompt again.
+let ranBeforeCompact: { key: string; at: number } | undefined;
 // Dispatched, then abandoned before its turn started. turn.start carries no origin, so
 // the next turn is that submission unless a later prompt or command claimed it.
 let abandonedDispatch: { key: string } | undefined;
@@ -334,7 +340,7 @@ async function abandonBeforeCompact($: EngineInterface, message?: string): Promi
   if (!handoff) return;
   beforeCompact = undefined;
   if (handoff.turnId !== undefined) {
-    abandonedTurn = { turnId: handoff.turnId, key: handoff.key };
+    abandonedTurn = { turnId: handoff.turnId, key: handoff.key, claimed: true };
   } else if (handoff.dispatched) {
     abandonedDispatch = { key: handoff.key };
   }
@@ -415,6 +421,7 @@ async function compactNow($: EngineInterface, key: string): Promise<void> {
     return;
   }
   generation++;
+  ranBeforeCompact = undefined;
   await $.store.set(key, initialState(true, after));
   const completed =
     tokens.before !== undefined && tokens.after !== undefined
@@ -531,8 +538,13 @@ async function judgeCheckpoint($: EngineInterface, epoch: number): Promise<void>
     // turn's end, not from here.
     if (epoch !== generation || compacting || beforeCompact) return;
     if (latest.beforeCompactPrompt.trim()) {
-      await armBeforeCompact($, key, latest.beforeCompactPrompt, epoch);
-      return;
+      const ran = ranBeforeCompact;
+      if (ran?.key !== key || now - ran.at >= BEFORE_COMPACT_FRESH_MS) {
+        await armBeforeCompact($, key, latest.beforeCompactPrompt, epoch);
+        return;
+      }
+      // As armBeforeCompact: a submission waiting for its turn is not compacted under.
+      if (foreignSubmitted) return;
     }
     await compactNow($, key);
   } finally {
@@ -860,6 +872,7 @@ export const register: Register = (on, options) => {
     beforeCompact = undefined;
     abandonedTurn = undefined;
     abandonedDispatch = undefined;
+    ranBeforeCompact = undefined;
     foreignSubmitted = false;
     await $.command.register({
       name: COMMAND,
@@ -927,17 +940,22 @@ export const register: Register = (on, options) => {
     const result = await next(e);
     if (!(await isActivated($)) || !interactive) return result;
     const abandoned = abandonedTurn;
+    const clean = e.reason === "answer" && !e.isAborted && e.answer.trim() !== "";
     if (abandoned && e.agentId === undefined && abandoned.turnId === e.turnId) {
       abandonedTurn = undefined;
+      if (abandoned.claimed && clean) {
+        ranBeforeCompact = { key: abandoned.key, at: await $.clock.now() };
+      }
       await deferRetry($, abandoned.key);
       return result;
     }
     const handoff = beforeCompact;
     if (handoff && e.agentId === undefined && handoff.turnId === e.turnId) {
       beforeCompact = undefined;
-      if (e.reason === "answer" && !e.isAborted && e.answer.trim()) {
+      if (clean) {
         const key = handoff.key;
         const epoch = generation;
+        ranBeforeCompact = { key, at: await $.clock.now() };
         $.clock.after(0, () => {
           if (epoch !== generation || foreignSubmitted) {
             clearStatus($);
@@ -957,9 +975,7 @@ export const register: Register = (on, options) => {
       notice($, "The before-compact turn did not finish cleanly. Context left unchanged.");
       return result;
     }
-    if (e.agentId !== undefined || e.reason !== "answer" || e.isAborted || !e.answer.trim()) {
-      return result;
-    }
+    if (e.agentId !== undefined || !clean) return result;
     try {
       await settle($);
     } catch {
@@ -979,6 +995,7 @@ export const register: Register = (on, options) => {
     try {
       await abandonBeforeCompact($);
       await invalidate($);
+      ranBeforeCompact = undefined;
       const key = sessionKey(await $.session.id());
       await $.store.set(key, initialState(true, await $.clock.now()));
     } catch {
