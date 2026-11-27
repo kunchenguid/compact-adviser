@@ -1219,6 +1219,16 @@ describe("before-compact prompt", () => {
     await turnEnd($, w, { ...answered(), turnId: "next-1" });
   }
 
+  /** Three settled turns that clear the post-compaction wait of 20k new tokens and 3 exchanges. */
+  async function checkpointsAfterCompaction($: Engine, w: World) {
+    for (const [i, tokens] of [60_000, 70_000, 80_000].entries()) {
+      w.usage.tokens = tokens;
+      w.messages = [...w.messages, { role: "user", text: `more ${i}`, toolUses: [] }];
+      await $.turn.start({ turnId: `next-${i}`, text: "" } as never);
+      await turnEnd($, w, { ...answered(), turnId: `next-${i}` });
+    }
+  }
+
   const lostCompactions: [string, ($: Engine, w: World) => Promise<void>][] = [
     [
       "a notification is delivered into the before-compact turn",
@@ -1286,15 +1296,22 @@ describe("before-compact prompt", () => {
     await drain(w);
     expect(w.journal.compactions).toHaveLength(0);
     await w.clock.advance(60_000);
-    for (const [i, tokens] of [60_000, 70_000, 80_000].entries()) {
-      w.usage.tokens = tokens;
-      w.messages = [...w.messages, { role: "user", text: `more ${i}`, toolUses: [] }];
-      await $.turn.start({ turnId: `next-${i}`, text: "" } as never);
-      await turnEnd($, w, { ...answered(), turnId: `next-${i}` });
-    }
+    await checkpointsAfterCompaction($, w);
     expect(w.journal.requests).toHaveLength(2);
     expect(w.journal.ranCommands).toEqual([{ command: "stow" }, { command: "stow" }]);
     expect(w.journal.compactions).toHaveLength(0);
+  });
+
+  test("runs the prompt again at the first checkpoint after the compaction it led to", async ($, on) => {
+    const w = autoWorld(on, "/stow");
+    await $.session.start(interactiveStart);
+    await turnEnd($, w);
+    await finishSubmittedTurn($, w);
+    expect(w.journal.compactions).toHaveLength(1);
+    await checkpointsAfterCompaction($, w);
+    expect(w.journal.requests).toHaveLength(2);
+    expect(w.journal.ranCommands).toEqual([{ command: "stow" }, { command: "stow" }]);
+    expect(w.journal.compactions).toHaveLength(1);
   });
 
   const staleBeforeCompactTurns: [string, "answer" | "aborted", number][] = [

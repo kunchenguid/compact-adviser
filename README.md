@@ -174,9 +174,9 @@ mentions in a prompt a plugin submits, and it rejects a plugin prompt that start
 value that starts with `/` is run as a command instead of being sent to the model as text. If you
 send your own prompt or run a command in between, or that turn is interrupted, errors, or does not
 finish within 5 minutes, nothing is compacted. If the turn itself still ended cleanly, the setting
-is not run again for 10 minutes: the next checkpoint that qualifies in that time compacts
-directly. Hint mode, off, and an empty setting are unchanged. Pi, Codex, and Grok do not have
-this setting.
+is not run again for 10 minutes or until a compaction, whichever comes first: the next checkpoint
+that qualifies in that time compacts directly. Hint mode, off, and an empty setting are unchanged.
+Pi, Codex, and Grok do not have this setting.
 
 ## Usage
 
