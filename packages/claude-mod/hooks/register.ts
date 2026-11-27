@@ -996,6 +996,7 @@ export const register: Register = (on, options) => {
       await abandonBeforeCompact($);
       await invalidate($);
       ranBeforeCompact = undefined;
+      if (abandonedTurn) abandonedTurn.claimed = false;
       const key = sessionKey(await $.session.id());
       await $.store.set(key, initialState(true, await $.clock.now()));
     } catch {

@@ -1270,6 +1270,33 @@ describe("before-compact prompt", () => {
     expect(w.journal.compactions).toHaveLength(0);
   });
 
+  test("runs the prompt again when context was compacted during the before-compact turn", async ($, on) => {
+    const w = autoWorld(on, "/stow");
+    await $.session.start(interactiveStart);
+    await turnEnd($, w);
+    await $.turn.start({ turnId: "before-1", text: "stow" } as never);
+    await $.session.compact({ trigger: "auto", messages: MESSAGES });
+    await $.turn.complete({
+      answer: "Notes saved.",
+      durationMs: 1000,
+      isAborted: false,
+      turnId: "before-1",
+      reason: "answer",
+    });
+    await drain(w);
+    expect(w.journal.compactions).toHaveLength(0);
+    await w.clock.advance(60_000);
+    for (const [i, tokens] of [60_000, 70_000, 80_000].entries()) {
+      w.usage.tokens = tokens;
+      w.messages = [...w.messages, { role: "user", text: `more ${i}`, toolUses: [] }];
+      await $.turn.start({ turnId: `next-${i}`, text: "" } as never);
+      await turnEnd($, w, { ...answered(), turnId: `next-${i}` });
+    }
+    expect(w.journal.requests).toHaveLength(2);
+    expect(w.journal.ranCommands).toEqual([{ command: "stow" }, { command: "stow" }]);
+    expect(w.journal.compactions).toHaveLength(0);
+  });
+
   const staleBeforeCompactTurns: [string, "answer" | "aborted", number][] = [
     ["ended more than ten minutes earlier", "answer", 600_001],
     ["was interrupted", "aborted", 60_000],
