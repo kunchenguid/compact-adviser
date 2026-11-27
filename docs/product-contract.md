@@ -43,6 +43,7 @@ The Claude Code mod uses its own `userConfig` options (`mode`, `minContextTokens
 A non-empty value, and only in confirmed auto mode, runs as one turn before compaction; compaction follows only if that turn ends in a settled answer.
 A leading `/` is a slash command, because a plugin prompt does not expand slash commands or `@file` mentions.
 An intervening prompt or command, an interruption, an error, or a 5-minute timeout leaves context alone.
+If that turn itself still ended cleanly, it stands in for the prompt for 10 minutes or until a compaction: the next qualifying checkpoint in that window compacts without running the prompt again, unless a submission is waiting.
 Pi does not share this setting: host parity is the judge questions, the score, and the floor, not each host's configuration.
 Codex and Grok stay hint-only.
 `typesafeApiKey` is hidden from `/config` so the host menu never draws the secret.

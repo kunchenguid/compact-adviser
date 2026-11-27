@@ -56,7 +56,7 @@
     "beforeCompactPrompt": {
       "type": "string",
       "title": "Before-compact prompt",
-      "description": "Optional. Empty keeps automatic compaction immediate. In confirmed auto mode, a non-empty value runs as one turn, then compaction runs if that turn ends in a settled answer. A value that starts with / is a slash command (for example /stow); Claude Code does not expand slash commands or @file mentions in a plugin prompt, and it rejects a plugin prompt that starts with /. If you send your own prompt or run a command in between, or that turn is interrupted, errors, or does not finish within 5 minutes, nothing is compacted.",
+      "description": "Optional. Empty keeps automatic compaction immediate. In confirmed auto mode, a non-empty value runs as one turn, then compaction runs if that turn ends in a settled answer. A value that starts with / is a slash command (for example /stow); Claude Code does not expand slash commands or @file mentions in a plugin prompt, and it rejects a plugin prompt that starts with /. If you send your own prompt or run a command in between, or that turn is interrupted, errors, or does not finish within 5 minutes, nothing is compacted. If that turn still ended cleanly, a checkpoint that qualifies within the next 10 minutes compacts without running this prompt again.",
       "default": ""
     },
     "typesafeApiKey": {
