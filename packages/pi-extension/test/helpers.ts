@@ -162,7 +162,12 @@ export function harness(
             { fg: (_color: string, text: string) => text } as Parameters<typeof factory>[1],
             {
               matches: (data: string, binding: string) =>
-                binding === "tui.select.confirm" ? data === "\r" : data === "\u001b",
+                ({
+                  "tui.select.confirm": "\r",
+                  "tui.select.cancel": "\u001b",
+                  "tui.editor.cursorLineStart": "\u0001",
+                  "tui.editor.deleteToLineEnd": "\u000b",
+                })[binding] === data,
             } as Parameters<typeof factory>[2],
             done,
           );

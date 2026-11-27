@@ -1,9 +1,5 @@
-import {
-  DynamicBorder,
-  type ExtensionCommandContext,
-  keyHint,
-} from "@earendil-works/pi-coding-agent";
-import { Container, Input, Text } from "@earendil-works/pi-tui";
+import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
+import { Container, DynamicBorder, Input, keyHint, matchesKey, Text } from "./tui-compat.ts";
 
 export function maskSecret(value: string): string {
   return "*".repeat(value.length);
@@ -12,10 +8,10 @@ export function maskSecret(value: string): string {
 /** Empty prompt; typed characters are masked. Escape cancels. Never prefills a saved key. */
 export function promptSecret(ctx: ExtensionCommandContext): Promise<string | undefined> {
   return ctx.ui.custom<string | undefined>((tui, theme, keybindings, done) => {
-    const input = new Input();
+    const input = new Input(keybindings);
     const box = new Container();
-    const heading = new Text("", 1, 0);
-    const help = new Text("", 1, 0);
+    const heading = new Text("", 1);
+    const help = new Text("", 1);
     box.addChild(new DynamicBorder((text: string) => theme.fg("accent", text)));
     box.addChild(heading);
     box.addChild(input);
@@ -35,7 +31,7 @@ export function promptSecret(ctx: ExtensionCommandContext): Promise<string | und
         help.setText(
           theme.fg(
             "dim",
-            `${keyHint("tui.select.confirm", "save")}  ${keyHint("tui.select.cancel", "cancel")}`,
+            `${keyHint(theme, "tui.select.confirm", "save")}  ${keyHint(theme, "tui.select.cancel", "cancel")}`,
           ),
         );
         const real = input.getValue();
@@ -51,9 +47,9 @@ export function promptSecret(ctx: ExtensionCommandContext): Promise<string | und
         box.invalidate();
       },
       handleInput(data: string) {
-        if (keybindings.matches(data, "tui.select.confirm") || data === "\n")
+        if (matchesKey(keybindings, data, "tui.select.confirm") || data === "\n")
           done(input.getValue());
-        else if (keybindings.matches(data, "tui.select.cancel")) done(undefined);
+        else if (matchesKey(keybindings, data, "tui.select.cancel")) done(undefined);
         else {
           input.handleInput(data);
           tui.requestRender();
