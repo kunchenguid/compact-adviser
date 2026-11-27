@@ -995,6 +995,8 @@ export const register: Register = (on, options) => {
     try {
       await abandonBeforeCompact($);
       await invalidate($);
+      // A compaction ends the stand-in. A claimed turn still running now ends after this
+      // compaction, so its clean end must not start a new one.
       ranBeforeCompact = undefined;
       if (abandonedTurn) abandonedTurn.claimed = false;
       const key = sessionKey(await $.session.id());
