@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.15](https://github.com/kunchenguid/compact-adviser/compare/compact-adviser-v0.1.14...compact-adviser-v0.1.15) (2026-11-28)
+
+
+### Bug Fixes
+
+* **claude-mod:** do not run the before-compact prompt twice for one compaction ([#79](https://github.com/kunchenguid/compact-adviser/issues/79)) ([fa2cbac](https://github.com/kunchenguid/compact-adviser/commit/fa2cbac15e6f3b1e52ed0ebcedae34fd8dbdeca8))
+* **pi-extension:** render rows objects instead of retired pi-tui components ([#76](https://github.com/kunchenguid/compact-adviser/issues/76)) ([7fe852a](https://github.com/kunchenguid/compact-adviser/commit/7fe852aff30c5f6d6b2e4e644db6fa8d0af5d0db))
+
 ## [0.1.14](https://github.com/kunchenguid/compact-adviser/compare/compact-adviser-v0.1.13...compact-adviser-v0.1.14) (2026-10-25)
 
 
