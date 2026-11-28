@@ -1191,6 +1191,144 @@ describe("before-compact prompt", () => {
     expect(w.journal.compactions).toHaveLength(0);
     expect(stored(w).retryAfter).toBe(START + 450_000);
   });
+
+  /** Runs the before-compact turn to `reason` with a notification delivered into it. */
+  async function notifiedBeforeCompactTurn($: Engine, w: World, reason: "answer" | "aborted") {
+    await $.turn.start({ turnId: "before-1", text: "stow" } as never);
+    await $.prompt.submit({
+      text: "background task finished",
+      origin: { kind: "task-notification" },
+      turnId: "before-1",
+      wait: false,
+    } as never);
+    await $.turn.complete({
+      answer: reason === "answer" ? "Notes saved." : "",
+      durationMs: 1000,
+      isAborted: reason === "aborted",
+      turnId: "before-1",
+      reason,
+    });
+    await drain(w);
+  }
+
+  /** The next settled turn, `afterMs` after the before-compact turn ended. */
+  async function nextCheckpoint($: Engine, w: World, afterMs: number) {
+    await w.clock.advance(afterMs);
+    w.messages = [...w.messages, { role: "user", text: "more", toolUses: [] }];
+    await $.turn.start({ turnId: "next-1", text: "" } as never);
+    await turnEnd($, w, { ...answered(), turnId: "next-1" });
+  }
+
+  /** Three settled turns that clear the post-compaction wait of 20k new tokens and 3 exchanges. */
+  async function checkpointsAfterCompaction($: Engine, w: World) {
+    for (const [i, tokens] of [60_000, 70_000, 80_000].entries()) {
+      w.usage.tokens = tokens;
+      w.messages = [...w.messages, { role: "user", text: `more ${i}`, toolUses: [] }];
+      await $.turn.start({ turnId: `next-${i}`, text: "" } as never);
+      await turnEnd($, w, { ...answered(), turnId: `next-${i}` });
+    }
+  }
+
+  const lostCompactions: [string, ($: Engine, w: World) => Promise<void>][] = [
+    [
+      "a notification is delivered into the before-compact turn",
+      ($, w) => notifiedBeforeCompactTurn($, w, "answer"),
+    ],
+    [
+      "the host skips the compaction",
+      async ($, w) => {
+        const compact = w.compact;
+        w.compact = async () => ({ skip: "cancelled" });
+        await finishSubmittedTurn($, w);
+        w.compact = compact;
+      },
+    ],
+  ];
+  for (const [name, lose] of lostCompactions) {
+    test(`compacts at the next checkpoint without running the prompt again when ${name}`, async ($, on) => {
+      const w = autoWorld(on, "/stow");
+      await $.session.start(interactiveStart);
+      await turnEnd($, w);
+      await lose($, w);
+      expect(w.journal.ranCommands).toEqual([{ command: "stow" }]);
+      expect(stored(w).compacted).toBe(false);
+      await nextCheckpoint($, w, 60_000);
+      expect(w.journal.requests).toHaveLength(2);
+      expect(w.journal.ranCommands).toEqual([{ command: "stow" }]);
+      expect(stored(w).compacted).toBe(true);
+      expect(w.journal.statuses.at(-1)).toBeUndefined();
+    });
+  }
+
+  test("a person prompt queued at that next checkpoint keeps it from compacting", async ($, on) => {
+    const w = autoWorld(on, "/stow");
+    await $.session.start(interactiveStart);
+    await turnEnd($, w);
+    await notifiedBeforeCompactTurn($, w, "answer");
+    await w.clock.advance(60_000);
+    w.messages = [...w.messages, { role: "user", text: "more", toolUses: [] }];
+    await $.turn.start({ turnId: "next-1", text: "" } as never);
+    await $.prompt.submit({
+      text: "and then this",
+      origin: { kind: "composer" },
+      turnId: "next-1",
+      wait: false,
+    } as never);
+    await turnEnd($, w, { ...answered(), turnId: "next-1" });
+    expect(w.journal.requests).toHaveLength(2);
+    expect(w.journal.ranCommands).toEqual([{ command: "stow" }]);
+    expect(w.journal.compactions).toHaveLength(0);
+  });
+
+  test("runs the prompt again when context was compacted during the before-compact turn", async ($, on) => {
+    const w = autoWorld(on, "/stow");
+    await $.session.start(interactiveStart);
+    await turnEnd($, w);
+    await $.turn.start({ turnId: "before-1", text: "stow" } as never);
+    await $.session.compact({ trigger: "auto", messages: MESSAGES });
+    await $.turn.complete({
+      answer: "Notes saved.",
+      durationMs: 1000,
+      isAborted: false,
+      turnId: "before-1",
+      reason: "answer",
+    });
+    await drain(w);
+    expect(w.journal.compactions).toHaveLength(0);
+    await w.clock.advance(60_000);
+    await checkpointsAfterCompaction($, w);
+    expect(w.journal.requests).toHaveLength(2);
+    expect(w.journal.ranCommands).toEqual([{ command: "stow" }, { command: "stow" }]);
+    expect(w.journal.compactions).toHaveLength(0);
+  });
+
+  test("runs the prompt again at the first checkpoint after the compaction it led to", async ($, on) => {
+    const w = autoWorld(on, "/stow");
+    await $.session.start(interactiveStart);
+    await turnEnd($, w);
+    await finishSubmittedTurn($, w);
+    expect(w.journal.compactions).toHaveLength(1);
+    await checkpointsAfterCompaction($, w);
+    expect(w.journal.requests).toHaveLength(2);
+    expect(w.journal.ranCommands).toEqual([{ command: "stow" }, { command: "stow" }]);
+    expect(w.journal.compactions).toHaveLength(1);
+  });
+
+  const staleBeforeCompactTurns: [string, "answer" | "aborted", number][] = [
+    ["ended more than ten minutes earlier", "answer", 600_001],
+    ["was interrupted", "aborted", 60_000],
+  ];
+  for (const [name, reason, afterMs] of staleBeforeCompactTurns) {
+    test(`runs the prompt again when the before-compact turn ${name}`, async ($, on) => {
+      const w = autoWorld(on, "/stow");
+      await $.session.start(interactiveStart);
+      await turnEnd($, w);
+      await notifiedBeforeCompactTurn($, w, reason);
+      await nextCheckpoint($, w, afterMs);
+      expect(w.journal.ranCommands).toEqual([{ command: "stow" }, { command: "stow" }]);
+      expect(stored(w).compacted).toBe(false);
+    });
+  }
 });
 
 describe("commands", () => {
